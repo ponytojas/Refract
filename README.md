@@ -122,13 +122,10 @@ Try Refract on your own computer in a few minutes. You need [Docker](https://doc
 > **Using an AI coding agent?** Ask it to follow [AGENTS.md](AGENTS.md): a step-by-step guide for agents to get Refract running for you, whether you want to try it, work on the code or put it on a server.
 
 ```sh
-git clone https://github.com/ponytojas/Refract.git
-cd Refract
-docker build -t refract .
 docker run -d --name refract -p 127.0.0.1:8080:8080 -v refract-data:/data \
   -e REFRACT_SECRET_KEY="$(openssl rand -base64 32)" \
   -e REFRACT_AUTH=none \
-  refract
+  ghcr.io/ponytojas/refract
 ```
 
 Open <http://localhost:8080>, create a project or drop a Prism .zip on the page, and press <kbd>⌘↵</kbd> to compile. The first compile downloads the LaTeX packages it needs, so it takes longer than the next ones.
@@ -142,15 +139,14 @@ To use the assistant, connect an AI in **Settings → Assistant** (see [AI model
 Refract is a single container: the Go server with the web app built in, Tectonic, SyncTeX and git. It listens on port 8080 and keeps everything under `/data`.
 
 ```sh
-docker build -t refract .
 docker run -d --name refract --restart unless-stopped \
   -p 127.0.0.1:8080:8080 -v refract-data:/data \
   -e REFRACT_SECRET_KEY="<the output of: openssl rand -base64 32>" \
   -e REFRACT_AUTH=password \
-  refract
+  ghcr.io/ponytojas/refract:0.1
 ```
 
-No prebuilt image is published yet: build it from this repository (`make docker` builds and tests it for both amd64 and arm64).
+Each release publishes the image for amd64 and arm64 as `latest`, as `0.1` (the newest 0.1.x, which only gets fixes) and as the exact version, such as `0.1.0`. To build it yourself instead, run `docker build -t refract .` in this repository, or `make docker`, which also tests it for both architectures.
 
 **Keep `REFRACT_SECRET_KEY` safe and stable.** It encrypts the stored ChatGPT credentials, API keys and git tokens. With a different key, those can't be read back and users have to connect again.
 
@@ -227,7 +223,7 @@ Everything lives in the `/data` volume:
 
 To back up, stop the container, copy the volume, and keep `REFRACT_SECRET_KEY` with the copy.
 
-To upgrade, pull the repository, rebuild the image and start a new container on the same volume. Database changes are applied automatically at startup.
+To upgrade, pull the new image (`docker pull ghcr.io/ponytojas/refract:0.1`, or a newer version's tag) and start a new container on the same volume. Database changes are applied automatically at startup.
 
 ### Moving from `REFRACT_AUTH=none` to a sign-in mode
 
