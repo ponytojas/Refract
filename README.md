@@ -8,7 +8,12 @@ Edit, compile and read the PDF side by side, cite real papers, and keep every ve
 </p>
 
 <p align="center">
+<a href="https://github.com/ponytojas/Refract/releases/latest"><img src="https://img.shields.io/github/v/release/ponytojas/Refract" alt="Latest release"></a>
+<a href="https://github.com/ponytojas/Refract/pkgs/container/refract"><img src="https://img.shields.io/badge/docker-ghcr.io%2Fponytojas%2Frefract-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
 <a href="https://github.com/ponytojas/Refract/actions/workflows/ci.yml"><img src="https://github.com/ponytojas/Refract/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://github.com/ponytojas/Refract/actions/workflows/security.yml"><img src="https://github.com/ponytojas/Refract/actions/workflows/security.yml/badge.svg" alt="Security"></a>
+<a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/ponytojas/Refract" alt="Go version"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/ponytojas/Refract" alt="MIT License"></a>
 </p>
 
 <p align="center">
