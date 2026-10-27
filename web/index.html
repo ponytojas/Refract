@@ -9,13 +9,8 @@
     <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
-    <script>
-      // Apply the theme before first paint (no light flash in dark mode).
-      try {
-        var t = localStorage.getItem('refract-theme')
-        if (t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.classList.add('dark')
-      } catch (e) {}
-    </script>
+    <!-- Applies the theme before first paint (no light flash in dark mode). A file, not inline: the CSP allows no inline scripts. -->
+    <script src="/theme.js"></script>
   </head>
   <body>
     <div id="root"></div>

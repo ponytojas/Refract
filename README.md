@@ -169,6 +169,8 @@ docker exec refract refract users add ana@example.com
 docker exec refract refract users list
 ```
 
+To end all of someone's sessions (a lost laptop, say), run `refract users signout <email>`. To delete an account with its projects, chats and connections, run `refract users remove <email>`: it lists what would go, and deletes only when run again with `--yes`. With Cloudflare Access, also remove the person from your Access policy, or they get a new, empty account on their next visit.
+
 ### Sign in with OpenID Connect
 
 With `REFRACT_AUTH=password`, an OpenID Connect provider (Google, Microsoft Entra, Keycloak, Authentik, Authelia…) can add a **Continue with …** button next to the password form.
@@ -183,10 +185,10 @@ The provider must report the email as verified. The sign-in uses the authorizati
 
 Put Refract behind a proxy that terminates https. Two things matter:
 
-- **Send `X-Forwarded-Proto`.** Refract marks its session cookie `Secure` when the request came over https.
+- **Send `X-Forwarded-Proto` and `X-Forwarded-For`.** Refract marks its session cookie `Secure` when the request came over https, and limits sign-in attempts per client address. It reads that address from `X-Forwarded-For` only when the request comes from the same machine or a private network, where your proxy is; otherwise anyone could forge it.
 - **Don't buffer responses.** The assistant streams its answer (server-sent events); a buffering proxy holds it back until the end.
 
-[Caddy](https://caddyserver.com) does both by default:
+[Caddy](https://caddyserver.com) does all of this by default:
 
 ```caddy
 refract.example.com {
@@ -201,6 +203,7 @@ location / {
     proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_buffering off;          # stream the assistant's answers
     proxy_read_timeout 15m;       # long assistant turns
     client_max_body_size 200m;    # project imports
@@ -309,6 +312,8 @@ refract login                   sign in with ChatGPT on this computer and write 
                                 file to upload in Settings → Assistant (refract login -h)
 refract users add <email>       create an account or reset its password (REFRACT_AUTH=password)
 refract users rename <a> <b>    change an account's email, keeping its data
+refract users signout <email>   end all of an account's sessions
+refract users remove <email>    delete an account and everything it owns (asks for --yes)
 refract users list              list accounts
 refract version                 print the version
 ```
@@ -331,8 +336,9 @@ On Windows and Linux, read <kbd>Ctrl</kbd> for <kbd>⌘</kbd>. Hold <kbd>⌘</kb
 
 ## Security
 
-- **Sign-in:** Cloudflare Access tokens are verified on every request. Passwords are hashed with PBKDF2-SHA256 (600,000 iterations), and repeated failures for an account are refused for a while. Sessions are random tokens stored only as hashes, in `HttpOnly`, `SameSite=Lax` cookies that last 30 days.
+- **Sign-in:** Cloudflare Access tokens are verified on every request. Passwords are hashed with PBKDF2-SHA256 (600,000 iterations). Repeated failures for an account, or from one address, are refused for a while. Sessions are random tokens stored only as hashes, in `HttpOnly`, `SameSite=Lax` cookies that last 30 days.
 - **Requests:** every API call must carry a custom header that browsers can't add cross-site, which blocks cross-site request forgery.
+- **Browser:** a strict Content-Security-Policy lets the app run only its own scripts and connect only to its own server. Refract can't be embedded in other sites, and over https it sends `Strict-Transport-Security`.
 - **Secrets at rest:** ChatGPT credentials, API keys and git tokens are encrypted with AES-GCM under `REFRACT_SECRET_KEY`, each bound to its owner.
 - **Isolation between users:** projects, chats and connections are checked against their owner on every access.
 - **Compilation:** Tectonic runs with shell escape disabled (`--untrusted`) and a time limit. Imports are size-limited and can't write outside the project.

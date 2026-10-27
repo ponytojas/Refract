@@ -48,6 +48,10 @@ Usage:
   refract users rename <email> <new email>
                      change an account's email, keeping its data ("local" is the
                      account used with REFRACT_AUTH=none)
+  refract users signout <email>
+                     end all of an account's sessions
+  refract users remove <email> [--yes]
+                     delete an account with its projects, chats and connections
   refract users list list accounts
   refract version    print the version
 `
@@ -64,7 +68,7 @@ func main() {
 		}
 	}
 	if len(os.Args) > 1 && os.Args[1] == "users" {
-		if err := runUsers(os.Args[2:]); err != nil {
+		if err := runUsers(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -206,7 +210,7 @@ func run() error {
 	}
 	mux.Handle("/", guard(people.Middleware(auth.RequireCSRFHeader(app))))
 
-	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: addr, Handler: securityHeaders(mux), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
