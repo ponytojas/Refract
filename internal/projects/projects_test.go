@@ -156,7 +156,7 @@ func TestImportCreatesRepoAndDetectsMain(t *testing.T) {
 	if p.MainFile != "thesis.tex" || res.Candidates != nil {
 		t.Fatalf("main = %q, candidates = %v", p.MainFile, res.Candidates)
 	}
-	if len(res.Warnings) != 1 || res.Warnings[0].Kind != "system-font" || res.Warnings[0].Line != 5 {
+	if len(res.Warnings) != 0 {
 		t.Fatalf("warnings = %+v", res.Warnings)
 	}
 	dir := s.Path(p.ID)
@@ -304,10 +304,10 @@ func TestCheckSource(t *testing.T) {
 		name, src string
 		want      []string // kinds
 	}{
-		{"font exists", `\IfFontExistsTF{Open Sans}{a}{b}`, []string{"font-exists"}},
-		{"system font", `\setmainfont{Open Sans}`, []string{"system-font"}},
-		{"system font with opts", `\setsansfont[Scale=0.9]{Open Sans}`, []string{"system-font"}},
-		{"newfontfamily", `\newfontfamily\headfont{Inter}[Scale=1]`, []string{"system-font"}},
+		{"font exists", `\IfFontExistsTF{Open Sans}{a}{b}`, nil},
+		{"system font", `\setmainfont{Open Sans}`, nil},
+		{"system font with opts", `\setsansfont[Scale=0.9]{Open Sans}`, nil},
+		{"newfontfamily", `\newfontfamily\headfont{Inter}[Scale=1]`, nil},
 		{"path ok", "\\setmainfont{OpenSans}[\n  Path = fonts/,\n  Extension = .ttf,\n  UprightFont = *-Regular]", nil},
 		{"path folder missing", "\\setmainfont{Inter}[Path = typefaces/, Extension = .otf]", []string{"missing-font"}},
 		{"path font file missing", "\\setmainfont{OpenSans}[Path = fonts/, Extension = .ttf, UprightFont = *-Light]", []string{"missing-font"}},
@@ -319,7 +319,7 @@ func TestCheckSource(t *testing.T) {
 		{"minted", `\usepackage{amsmath, minted}`, []string{"shell-escape"}},
 		{"svg", `\RequirePackage{svg}`, []string{"shell-escape"}},
 		{"commented out", `% \setmainfont{Open Sans}`, nil},
-		{"escaped percent is not a comment", `50\% \setmainfont{Open Sans}`, []string{"system-font"}},
+		{"escaped percent is not a comment", `50\% \setmainfont{Open Sans}`, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ponytojas/Refract/internal/fonts"
 )
 
 // BuildDir is where output goes, inside the project (git-excluded).
@@ -40,6 +42,7 @@ type Tectonic struct {
 	Bundle   string // pinned bundle URL; empty = Tectonic's default
 	CacheDir string // TECTONIC_CACHE_DIR; empty = Tectonic's default
 	Timeout  time.Duration
+	Fonts    *fonts.Resolver // optional automatic family resolution; shared across builds
 }
 
 const maxOutput = 1 << 20
@@ -56,6 +59,29 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 	}
 	base := path.Base(mainFile)
 	stem := strings.TrimSuffix(base, path.Ext(base))
+	runCtx, cancel := context.WithTimeout(ctx, t.Timeout)
+	defer cancel()
+	setup := ""
+	sourceDir := projectDir
+	if t.Fonts != nil {
+		setup, err = t.Fonts.Prepare(runCtx, projectDir, mainFile)
+		if err != nil {
+			if ctx.Err() != nil {
+				return &Result{Superseded: true}, nil
+			}
+			if runCtx.Err() != nil {
+				return &Result{TimedOut: true, Problems: []Problem{{Severity: "error", Kind: "error", Message: "Font preparation timed out."}}}, nil
+			}
+			return nil, err
+		}
+		if setup != "" {
+			sourceDir, err = fontSource(projectDir, mainFile, setup)
+			if err != nil {
+				return nil, err
+			}
+			defer os.RemoveAll(sourceDir)
+		}
+	}
 	// A log left by the previous build would report stale problems if this one dies early.
 	os.Remove(filepath.Join(outDir, stem+".log"))
 	// continue-on-errors: like Prism and Overleaf, produce a PDF despite errors;
@@ -65,10 +91,8 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 		args = append(args, "--bundle", t.Bundle)
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, t.Timeout)
-	defer cancel()
 	cmd := exec.CommandContext(runCtx, cmpOr(t.Bin, "tectonic"), args...)
-	cmd.Dir = filepath.Join(projectDir, filepath.FromSlash(path.Dir(mainFile)))
+	cmd.Dir = filepath.Join(sourceDir, filepath.FromSlash(path.Dir(mainFile)))
 	// A minimal environment: the document must not be able to \input
 	// /proc/self/environ and read secrets like REFRACT_SECRET_KEY.
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
@@ -82,6 +106,11 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 
 	start := time.Now()
 	runErr := cmd.Run()
+	if setup != "" {
+		if err := restoreSyncPaths(filepath.Join(outDir, stem+".synctex.gz"), sourceDir, projectDir); err != nil {
+			return nil, err
+		}
+	}
 	res := &Result{DurationMS: time.Since(start).Milliseconds(), Output: stderr.String()}
 	switch {
 	case ctx.Err() != nil:

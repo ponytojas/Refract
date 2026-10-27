@@ -23,6 +23,7 @@ import (
 	"github.com/ponytojas/Refract/internal/auth"
 	"github.com/ponytojas/Refract/internal/cite"
 	"github.com/ponytojas/Refract/internal/compile"
+	"github.com/ponytojas/Refract/internal/fonts"
 	"github.com/ponytojas/Refract/internal/github"
 	"github.com/ponytojas/Refract/internal/openalex"
 	"github.com/ponytojas/Refract/internal/projects"
@@ -149,10 +150,13 @@ func run() error {
 		}
 		timeout = time.Duration(secs) * time.Second
 	}
+	fontResolver := fonts.NewResolver(filepath.Join(dataDir, "font-cache"))
+	fontResolver.Offline = os.Getenv("REFRACT_FONT_DOWNLOADS") == "0"
 	ca := &compileAPI{svc: pa.svc, synctex: &compile.SyncTeX{}, runner: &compile.Runner{Compiler: &compile.Tectonic{
 		Bundle:   os.Getenv("REFRACT_TECTONIC_BUNDLE"),
 		CacheDir: os.Getenv("TECTONIC_CACHE_DIR"),
 		Timeout:  timeout,
+		Fonts:    fontResolver,
 	}}}
 
 	outbound := &http.Client{Timeout: 30 * time.Second}

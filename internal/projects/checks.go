@@ -20,7 +20,6 @@ type Warning struct {
 
 var (
 	reDocumentclass = regexp.MustCompile(`\\documentclass\b`)
-	reIfFontExists  = regexp.MustCompile(`\\IfFontExists(TF|T|F)?\b`)
 	// \setmainfont[opts]{Name}[opts], \newfontfamily\cmd[opts]{Name}[opts] (also {\cmd}).
 	reFontCmd = regexp.MustCompile(`\\(setmainfont|setsansfont|setmonofont|newfontfamily)\b\s*(?:\\[A-Za-z@]+|\{\\[A-Za-z@]+\})?\s*(\[[^\]]*\])?\s*\{([^}]*)\}(\s*\[[^\]]*\])?`)
 	rePackage = regexp.MustCompile(`\\(?:usepackage|RequirePackage)\s*(\[[^\]]*\])?\s*\{([^}]*)\}`)
@@ -62,9 +61,8 @@ func checkSource(file, src string, exists func(rel string) bool) []Warning {
 	add := func(offset int, kind, msg string) {
 		out = append(out, Warning{File: file, Line: 1 + strings.Count(src[:offset], "\n"), Kind: kind, Message: msg})
 	}
-	for _, m := range reIfFontExists.FindAllStringIndex(src, -1) {
-		add(m[0], "font-exists", `\IfFontExistsTF makes the output depend on which fonts the machine has installed. `+fontFix)
-	}
+	// Named families and IfFontExists are resolved at compile time. They are
+	// not import problems; an actually missing font is reported by fontspec.
 	for _, m := range reFontCmd.FindAllStringSubmatchIndex(src, -1) {
 		opts := sub(src, m, 2) + sub(src, m, 4)
 		name := strings.TrimSpace(sub(src, m, 3))
@@ -77,7 +75,6 @@ func checkSource(file, src string, exists func(rel string) bool) []Warning {
 		if strings.Contains(opts, "Extension") || reFontExt.MatchString(name) {
 			continue
 		}
-		add(m[0], "system-font", `\`+sub(src, m, 1)+`{`+name+`} looks the font up by name on the system, so the project can compile on one machine and fail on another. `+fontFix)
 	}
 	for _, m := range rePackage.FindAllStringSubmatchIndex(src, -1) {
 		for pkg := range strings.SplitSeq(sub(src, m, 2), ",") {

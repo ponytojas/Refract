@@ -217,9 +217,8 @@ func TestRunnerNewCompileCancelsRunningOne(t *testing.T) {
 	}
 }
 
-// pdfPages counts pages from the /Count of the page tree root, looking inside
-// compressed object streams too (stdlib only; good enough for tests).
-func pdfPages(t *testing.T, file string) int {
+// pdfObjects includes compressed object streams (stdlib only; for tests).
+func pdfObjects(t *testing.T, file string) []byte {
 	t.Helper()
 	raw, err := os.ReadFile(file)
 	if err != nil {
@@ -232,8 +231,16 @@ func pdfPages(t *testing.T, file string) int {
 			if b, err := io.ReadAll(zr); err == nil || len(b) > 0 {
 				text = append(text, b...)
 			}
+			zr.Close()
 		}
 	}
+	return text
+}
+
+// pdfPages counts pages from the /Count of the page tree root.
+func pdfPages(t *testing.T, file string) int {
+	t.Helper()
+	text := pdfObjects(t, file)
 	pages := regexp.MustCompile(`(?s)/Type\s*/Pages\b(?:[^>]|>[^>])*?/Count\s+(\d+)|/Count\s+(\d+)(?:[^>]|>[^>])*?/Type\s*/Pages\b`)
 	max := 0
 	for _, m := range pages.FindAllSubmatch(text, -1) {

@@ -7,20 +7,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ponytojas/Refract/internal/fonts"
 	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/store"
 )
 
 // TestFixtures compiles every private Prism export in fixtures/ (gitignored).
 // fixtures/<name>.pdf, when present, is Prism's PDF: page counts must match.
-// fixtures/<name>-unfixed.zip is an original with system-font lookups: it is
-// not compiled, only checked for the portability warning.
+// Original exports using named fonts are resolved just like imported projects.
 func TestFixtures(t *testing.T) {
 	zips, _ := filepath.Glob("../../fixtures/*.zip")
 	if len(zips) == 0 {
 		t.Skip("no fixtures/*.zip")
 	}
 	tc := tectonic(t)
+	tc.Fonts = fonts.NewResolver(filepath.Join(t.TempDir(), "font-cache"))
 	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -34,14 +35,6 @@ func TestFixtures(t *testing.T) {
 			res, err := svc.ImportZip(context.Background(), name, z)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if strings.HasSuffix(name, "-unfixed") {
-				for _, w := range res.Warnings {
-					if w.Kind == "font-exists" {
-						return
-					}
-				}
-				t.Fatalf("no \\IfFontExistsTF warning; got %+v", res.Warnings)
 			}
 			if res.Project.MainFile == "" {
 				t.Fatalf("main file not detected; candidates %v", res.Candidates)

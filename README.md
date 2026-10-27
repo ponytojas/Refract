@@ -46,6 +46,14 @@ Refract started as a replacement for OpenAI Prism: it opens Prism's exports as t
 - Command palette (<kbd>⌘K</kbd>) and a shortcut overlay (hold <kbd>⌘</kbd> or press <kbd>?</kbd>).
 - English and Spanish interface, light and dark themes. Installable as an app from the browser.
 
+### Fonts
+
+Named `fontspec` families, such as `\setmainfont{Open Sans}`, are prepared automatically when you compile. Refract first looks for `.ttf` and `.otf` files included in the project, then uses the TeX bundle for standard Latin Modern and TeX Gyre text families, and otherwise downloads static faces from Google Fonts. Regular, bold, italic and bold italic are selected when the family supplies them. `\IfFontExistsTF` recognizes resolved families, and explicit font file selections keep their original options.
+
+Your `.tex` files are left unchanged. Generated assets live in the project's private `.refract/` directory; public Google Fonts downloads are cached under `REFRACT_DATA_DIR/font-cache` and reused across projects and restarts. Uploaded project fonts stay private to that project. Only the requested family name is sent to Google, never document text. Set `REFRACT_FONT_DOWNLOADS=0` to use project, TeX bundle and previously cached fonts without contacting Google Fonts. Tectonic's TeX bundle has its own first-use downloads as usual.
+
+For a font that Google Fonts does not supply, include its licensed font files in the project. Literal family names in fontspec commands are detected automatically; names assembled through TeX macros and custom file/face options remain under the document's control. A genuinely unavailable font is reported during compilation instead of producing repeated import warnings. Fonts are never silently replaced with a different family.
+
 ### Assistant
 
 - A chat per topic, docked beside the PDF or floating over the editor.
@@ -296,6 +304,7 @@ All settings are environment variables.
 | `REFRACT_MODEL_AGENT` | Default model for the assistant. |
 | `REFRACT_MODEL_QUICK` | Default model for quick actions and citations. |
 | `REFRACT_COMPILE_TIMEOUT` | Seconds per compile. Default 90. |
+| `REFRACT_FONT_DOWNLOADS` | `0` disables Google Fonts requests; project, TeX bundle and cached fonts still work. Default: downloads enabled. |
 | `REFRACT_GITHUB_CLIENT_ID` | Client ID of your GitHub OAuth App, to connect GitHub accounts (see below). |
 | `REFRACT_OPENALEX_API_KEY` | A free [OpenAlex key](https://openalex.org/settings/api). Without one, paper searches share a small daily budget per IP address. |
 | `REFRACT_TECTONIC_BUNDLE` | Pinned Tectonic bundle URL. Set in the image. |
