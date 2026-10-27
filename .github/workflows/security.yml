@@ -1,0 +1,29 @@
+# Known vulnerabilities in what Refract uses: Go modules whose vulnerable code
+# Refract actually calls (govulncheck), and the npm packages the web app ships.
+# Also weekly, since new advisories appear without any change here.
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  vulnerabilities:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Go modules and standard library
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: npm packages in the web app
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=moderate
