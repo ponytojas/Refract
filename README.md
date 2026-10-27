@@ -10,6 +10,7 @@ Edit, compile and read the PDF side by side, cite real papers, and keep every ve
 <p align="center">
 <a href="#quick-start">Quick start</a> ·
 <a href="#features">Features</a> ·
+<a href="#screenshots">Screenshots</a> ·
 <a href="#deploy">Deploy</a> ·
 <a href="#ai-models">AI models</a> ·
 <a href="#configuration">Configuration</a> ·
@@ -18,7 +19,7 @@ Edit, compile and read the PDF side by side, cite real papers, and keep every ve
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/hero-dark.webp">
-  <img src="assets/screenshots/hero-light.webp" alt="Refract: a LaTeX source with a proposed change shown as a diff, the compiled PDF, and the assistant's reasoning and reply">
+  <img src="assets/screenshots/hero-light.webp" alt="Refract: the assistant floating over the editor with its reasoning and reply, the proposed change as a diff above it, and the compiled PDF beside them">
 </picture>
 
 ## Why Refract
@@ -53,8 +54,6 @@ Refract started as a replacement for OpenAI Prism: it opens Prism's exports as t
 
 Select text and a toolbar offers **Improve**, **Shorten**, **Fix grammar**, **Table**, **Explain**, or a free instruction (<kbd>⌘K</kbd> with a selection). The result appears inline as a word diff: <kbd>Tab</kbd> accepts, <kbd>Esc</kbd> rejects.
 
-<img src="assets/screenshots/quick-action.webp" alt="A quick action on a selected sentence, shown as an inline word diff with Accept and Reject">
-
 ### References
 
 - **Find papers for a passage:** the assistant turns the passage into searches, looks in [OpenAlex](https://openalex.org) (published work) and [arXiv](https://arxiv.org) (preprints), and suggests the papers that support it, with a reason for each.
@@ -72,6 +71,45 @@ Select text and a toolbar offers **Improve**, **Shorten**, **Fix grammar**, **Ta
 
 - Several users, each with their own projects, chats, AI connections and GitHub account. Nothing is shared between users.
 - Sign-in through Cloudflare Access, Refract's own sign-in page (passwords and, optionally, OpenID Connect such as Google, Microsoft Entra, Keycloak or Authentik), or no sign-in on a private network.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/docked.webp" alt="The assistant docked as a side panel, next to a change under review and the PDF"></td>
+    <td width="50%"><img src="assets/screenshots/quick-action.webp" alt="A quick action on a selected sentence, shown as an inline word diff"></td>
+  </tr>
+  <tr>
+    <td><b>Docked assistant.</b> The chat as a side panel, with the change it proposes open for review.</td>
+    <td><b>Quick actions.</b> Improve a selected sentence and accept the word diff with <kbd>Tab</kbd>.</td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/models.webp" alt="The model picker with reasoning levels and models grouped by provider"></td>
+    <td><img src="assets/screenshots/history.webp" alt="The project history with the diff of an accepted AI change"></td>
+  </tr>
+  <tr>
+    <td><b>Model picker.</b> Reasoning levels for the current model, and every model grouped by provider.</td>
+    <td><b>History.</b> Every version with its diff; restore a file or the whole project.</td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/palette.webp" alt="The command palette in dark mode"></td>
+    <td><img src="assets/screenshots/projects.webp" alt="The project list in dark mode"></td>
+  </tr>
+  <tr>
+    <td><b>Command palette.</b> Every action and file, a keystroke away.</td>
+    <td><b>Projects.</b> All your projects; import Prism exports or folders.</td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/settings.webp" alt="Settings: ChatGPT account and API providers"></td>
+    <td><img src="assets/screenshots/login.webp" alt="The sign-in page with a password form and a Continue with Google button"></td>
+  </tr>
+  <tr>
+    <td><b>AI connections.</b> Your ChatGPT plan, API keys and local model servers.</td>
+    <td><b>Sign-in.</b> Passwords, with an optional OpenID Connect provider.</td>
+  </tr>
+</table>
+
+The paper in these screenshots is a made-up example, and the AI responses come from a scripted test model.
 
 ## Quick start
 
@@ -337,6 +375,10 @@ Development data lives in `./data`, with its own key in `data/dev.key`.
 ### Releases
 
 Pushing a tag such as `v0.1.0` builds `refract` for macOS, Linux and Windows (amd64 and arm64) and publishes the archives with checksums on GitHub Releases (`.github/workflows/release.yml`).
+
+## License
+
+Refract is released under the [MIT License](LICENSE).
 
 ## Acknowledgements
 
