@@ -51,6 +51,9 @@ jobs:
         run: npm ci
         working-directory: web
 
+      - name: Packaging
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+
       - name: Go
         run: |
           go vet ./...

@@ -47,15 +47,82 @@ jobs:
           mkdir -p "dist/$name"
           go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "dist/$name/$exe" ./cmd/refract
           cp README.md "dist/$name/"
+          cp LICENSE "dist/$name/"
           cd dist
           if [ "$GOOS" = windows ]; then zip -qr "$name.zip" "$name"; else tar -czf "$name.tar.gz" "$name"; fi
+      - name: Debian package
+        if: matrix.goos == 'linux'
+        run: sh scripts/package-deb.sh "$GITHUB_REF_NAME" '${{ matrix.goarch }}' 'dist/refract-${{ github.ref_name }}-linux-${{ matrix.goarch }}/refract' dist
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*.*z*
+          path: |
+            dist/*.*z*
+            dist/*.deb
+
+  metadata:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Homebrew and WinGet
+        run: |
+          python3 scripts/package-metadata.py "$GITHUB_REF_NAME" dist "$RUNNER_TEMP/packages"
+          cp "$RUNNER_TEMP/packages/homebrew/refract.rb" dist/refract.rb
+          tar -czf dist/refract-winget-manifests.tar.gz -C "$RUNNER_TEMP/packages/winget" manifests
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package-metadata
+          path: |
+            dist/refract.rb
+            dist/refract-winget-manifests.tar.gz
+
+  # Exercise the CLI without any server configuration or LaTeX tools. OAuth
+  # itself is interactive; --help checks the login entry point without signing in.
+  cli-smoke:
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - { runner: macos-15, goos: darwin, goarch: arm64 }
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { runner: windows-latest, goos: windows, goarch: amd64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist
+      - name: CLI commands
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          cd dist
+          name="refract-${GITHUB_REF_NAME}-${GOOS}-${GOARCH}"
+          exe=refract
+          if [ "$GOOS" = windows ]; then
+            unzip -q "$name.zip"
+            exe=refract.exe
+          else
+            tar -xzf "$name.tar.gz"
+          fi
+          test "$("./$name/$exe" version)" = "refract $GITHUB_REF_NAME"
+          "./$name/$exe" --help
+          "./$name/$exe" login --help
+          if [ "$GOOS" = linux ]; then
+            sudo dpkg -i ./*.deb
+            test "$(refract version)" = "refract $GITHUB_REF_NAME"
+            refract login --help
+          fi
 
   release:
-    needs: build
+    needs: [build, metadata, cli-smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7 # for CHANGELOG.md
@@ -76,6 +143,34 @@ jobs:
           cd dist
           sha256sum * > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" "$notes"
+
+  # The default token cannot write to a different repository. Opt in after
+  # adding a fine-grained HOMEBREW_TAP_TOKEN for ponytojas/homebrew-tap.
+  homebrew:
+    needs: release
+    if: vars.HOMEBREW_TAP_ENABLED == 'true' && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: package-metadata
+          path: metadata
+      - uses: actions/checkout@v7
+        with:
+          repository: ponytojas/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Update tap
+        working-directory: tap
+        run: |
+          mkdir -p Formula
+          cp ../metadata/refract.rb Formula/refract.rb
+          if git diff --quiet -- Formula/refract.rb && [ -z "$(git ls-files --others --exclude-standard Formula/refract.rb)" ]; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Formula/refract.rb
+          git commit -m "Refract $GITHUB_REF_NAME"
+          git push
 
   image:
     runs-on: ubuntu-latest

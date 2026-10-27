@@ -4,6 +4,16 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-27
+
+### Added
+
+- Install the CLI on macOS with `brew install ponytojas/tap/refract`.
+- Debian/Ubuntu CLI packages for amd64 and arm64, with no server service or LaTeX dependencies.
+- Homebrew formula and WinGet manifests generated from each release's archives and checksums.
+- CLI smoke tests on macOS, Linux and Windows before publishing release assets, plus packaging tests in CI.
+- Optional automatic Homebrew tap updates for stable releases.
+
 ## [0.1.1] - 2026-10-27
 
 ### Fixed
@@ -59,6 +69,7 @@ The first release: a self-hosted LaTeX workspace with an AI assistant.
 - `refract` binaries for macOS, Linux and Windows (amd64 and arm64).
 - A Docker image for amd64 and arm64 on GitHub Container Registry, with Tectonic and SyncTeX included.
 
-[Unreleased]: https://github.com/ponytojas/Refract/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ponytojas/Refract/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/ponytojas/Refract/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ponytojas/Refract/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ponytojas/Refract/releases/tag/v0.1.0

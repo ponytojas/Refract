@@ -46,6 +46,7 @@ test:
 	go vet ./...
 	go test ./...
 	node --test web/src/*.test.ts web/src/lib/*.test.ts
+	python3 -m unittest discover -s scripts -p 'test_*.py'
 
 # Builds and smoke-tests the image for each platform (the foreign one runs emulated).
 # Extra buildx flags: make docker BUILDX_FLAGS="--builder mybuilder"

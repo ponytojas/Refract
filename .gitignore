@@ -9,6 +9,7 @@ web/dist/*
 /refract
 web/test-results/
 web/playwright-report/
+__pycache__/
 
 # Private planning notes (kept out of the repo)
 PLAN.md

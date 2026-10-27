@@ -257,13 +257,39 @@ Each user connects their own AI in **Settings → Assistant**. Every connected m
 
 Refract can use a ChatGPT subscription through "Sign in with ChatGPT", so requests count against your plan instead of an API bill. The sign-in runs on your own computer, because ChatGPT only accepts it from a local address:
 
-1. Download `refract` for your system from [Releases](https://github.com/ponytojas/Refract/releases), or run `make login` from a clone.
+1. [Install the CLI](#install-the-cli) on your own computer, or run `make login` from a clone.
 2. Run `refract login` and choose **Continue with ChatGPT** in the browser that opens.
 3. Upload the credential file it writes in **Settings → Assistant**.
 
-On macOS, a binary downloaded with a browser is quarantined because it isn't signed. Run `xattr -d com.apple.quarantine refract` once.
+For a macOS binary downloaded manually with a browser, run `xattr -d com.apple.quarantine refract` once if macOS quarantines it because it isn't signed.
 
 To restrict a server to one ChatGPT account, set `REFRACT_ALLOWED_SUBJECT` to the subject `refract login` prints.
+
+### Install the CLI
+
+The CLI lets you run `refract login` on your computer and upload the resulting credential file to an existing Refract instance. Login does not need Docker, Go, Node.js, git or LaTeX tools. Installing a package does not start a server or create a background service. The same executable also includes the server and its administration commands; those need the server configuration described in [Deploy](#deploy).
+
+**macOS (Apple Silicon or Intel):**
+
+```sh
+brew install ponytojas/tap/refract
+refract login
+```
+
+Update with `brew update` followed by `brew upgrade ponytojas/tap/refract`.
+
+**Debian / Ubuntu:** download the `.deb` for your architecture (`amd64` or `arm64`) from [Releases](https://github.com/ponytojas/Refract/releases). Packages are available starting with v0.1.2. For example, from the download directory:
+
+```sh
+sudo apt install ./refract_0.1.2_amd64.deb
+refract login
+```
+
+Replace the version and architecture with those of your download. Install a newer `.deb` the same way to update; there is no Refract APT repository. On Linux, login opens a browser with `xdg-open` if available. Use `refract login --no-browser` to open the printed URL yourself on the same computer.
+
+**Windows and other Linux distributions:** download the `.zip` or `.tar.gz` for your system from [Releases](https://github.com/ponytojas/Refract/releases), extract it and run `refract.exe login` (Windows) or `./refract login` (Linux) from the extracted directory. You can also place the executable in a directory on your `PATH`.
+
+Each new release includes WinGet manifests for the Windows zip archives. These are prepared for submission to Microsoft's community repository; `winget install --id ponytojas.Refract --exact` becomes available after Microsoft accepts a submission. See [packaging maintenance](packaging/README.md) for validation and publication.
 
 ### API keys and local models
 
@@ -363,7 +389,7 @@ Found a vulnerability? Please report it privately through the repository's **Sec
 
 ## Development
 
-You need Go, Node.js, git, ripgrep, Tectonic and `synctex` (and Google Chrome for the browser test). The image bundles all of them. [AGENTS.md](AGENTS.md) lists how to check and install each one, and the conventions to follow when changing the code.
+You need Go, Node.js, git, ripgrep, Tectonic and `synctex` (and Google Chrome for the browser test). The image bundles all of them. Packaging tests also use Python 3.11+; `dpkg-deb` is optional locally and required in Linux CI to verify Debian packages. [AGENTS.md](AGENTS.md) lists how to check and install the development tools, and the conventions to follow when changing the code.
 
 ```sh
 make dev                                  # API on :8080 and Vite on :5173; open http://localhost:5173
@@ -400,6 +426,8 @@ Development data lives in `./data`, with its own key in `data/dev.key`. To contr
 Every push to `main` and every pull request runs the Go tests (with the race detector), the web tests and the browser tests (`.github/workflows/ci.yml`).
 
 Pushing a tag such as `v0.1.0` builds `refract` for macOS, Linux and Windows (amd64 and arm64) and publishes the archives with checksums on GitHub Releases. It also tests and publishes the Docker image for amd64 and arm64 to GitHub Container Registry (`.github/workflows/release.yml`).
+
+Releases also include Debian packages for amd64 and arm64, a Homebrew formula (`refract.rb`) and WinGet manifests (`refract-winget-manifests.tar.gz`). CLI smoke tests run on macOS, Linux and Windows before the release is published. Stable releases can update the Homebrew tap automatically once its repository token is configured. [Packaging maintenance](packaging/README.md) describes the setup and manual publication steps.
 
 ## License
 
