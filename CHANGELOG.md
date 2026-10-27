@@ -4,6 +4,12 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-27
+
+### Fixed
+
+- The Docker image is published. The release check for 0.1.0 asked SyncTeX for a relative file name, failed, and stopped that version's image before it reached the registry. The application is the same as in 0.1.0.
+
 ## [0.1.0] - 2026-10-27
 
 The first release: a self-hosted LaTeX workspace with an AI assistant.
@@ -53,5 +59,6 @@ The first release: a self-hosted LaTeX workspace with an AI assistant.
 - `refract` binaries for macOS, Linux and Windows (amd64 and arm64).
 - A Docker image for amd64 and arm64 on GitHub Container Registry, with Tectonic and SyncTeX included.
 
-[Unreleased]: https://github.com/ponytojas/Refract/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ponytojas/Refract/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ponytojas/Refract/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ponytojas/Refract/releases/tag/v0.1.0
