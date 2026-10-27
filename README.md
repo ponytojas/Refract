@@ -8,6 +8,10 @@ Edit, compile and read the PDF side by side, cite real papers, and keep every ve
 </p>
 
 <p align="center">
+<a href="https://github.com/ponytojas/Refract/actions/workflows/ci.yml"><img src="https://github.com/ponytojas/Refract/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
+<p align="center">
 <a href="#quick-start">Quick start</a> ·
 <a href="#features">Features</a> ·
 <a href="#screenshots">Screenshots</a> ·
@@ -361,7 +365,7 @@ make e2e                                  # build, then a Playwright smoke test
 make docker                               # images for amd64 and arm64, each smoke-tested
 ```
 
-Development data lives in `./data`, with its own key in `data/dev.key`.
+Development data lives in `./data`, with its own key in `data/dev.key`. To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### How it's built
 
@@ -381,9 +385,11 @@ Development data lives in `./data`, with its own key in `data/dev.key`.
 | `internal/store` | SQLite, migrations and encrypted settings |
 | `web/` | The web app |
 
-### Releases
+### CI and releases
 
-Pushing a tag such as `v0.1.0` builds `refract` for macOS, Linux and Windows (amd64 and arm64) and publishes the archives with checksums on GitHub Releases (`.github/workflows/release.yml`).
+Every push to `main` and every pull request runs the Go tests (with the race detector), the web tests and the browser tests (`.github/workflows/ci.yml`).
+
+Pushing a tag such as `v0.1.0` builds `refract` for macOS, Linux and Windows (amd64 and arm64) and publishes the archives with checksums on GitHub Releases. It also tests and publishes the Docker image for amd64 and arm64 to GitHub Container Registry (`.github/workflows/release.yml`).
 
 ## License
 

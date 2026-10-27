@@ -1,0 +1,76 @@
+# Tests every push to main and every pull request: Go (with the race
+# detector), the web app, and the browser tests against the real binary.
+# Pull requests from forks run with a read-only token and no secrets.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The TeX bundle pinned in the image, and where Tectonic caches what it downloads from it.
+  REFRACT_TECTONIC_BUNDLE: https://data1b.fullyjustified.net/tlextras-2022.0r0.tar
+  TECTONIC_CACHE_DIR: ${{ github.workspace }}/.tectonic-cache
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Without them the compile and SyncTeX tests skip themselves; install the image's versions.
+      - name: Tectonic and synctex
+        run: |
+          sudo apt-get install -yq zlib1g-dev
+          scripts/install-tex-tools.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.TECTONIC_CACHE_DIR }}
+          key: tectonic-tlextras-2022.0r0-${{ github.run_id }}
+          restore-keys: tectonic-tlextras-2022.0r0-
+
+      - name: Web dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Go
+        run: |
+          go vet ./...
+          unformatted=$(gofmt -l cmd internal)
+          if [ -n "$unformatted" ]; then echo "Run gofmt on:"; echo "$unformatted"; exit 1; fi
+          go test -race ./...
+
+      - name: Web
+        working-directory: web
+        run: |
+          npx tsc --noEmit
+          node --test src/*.test.ts src/lib/*.test.ts
+
+      - name: Browser tests
+        run: make e2e
+
+      - name: Browser test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report
+          if-no-files-found: ignore

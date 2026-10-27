@@ -12,6 +12,8 @@ RUN npm run build
 # --- Go binary (cross-compiled, no CGO) ---
 FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24 AS go
 ARG TARGETOS TARGETARCH
+# Shown by `refract version`; the release workflow passes the tag.
+ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -19,7 +21,7 @@ COPY cmd cmd
 COPY internal internal
 COPY web/embed.go web/
 COPY --from=web /src/web/dist web/dist
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/refract ./cmd/refract
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/refract ./cmd/refract
 
 # --- synctex CLI from the official parser sources (Tectonic ships none) ---
 FROM alpine:3.24.3 AS synctex
