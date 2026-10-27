@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/assistant"
@@ -60,7 +59,7 @@ func (a *api) forUser(ctx context.Context) *userAI {
 // by model.
 func (a *api) providerFor(ctx context.Context) ai.Provider { return a.forUser(ctx).router }
 
-func (a *api) routes(mux *http.ServeMux, dev bool) {
+func (a *api) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/me", func(w http.ResponseWriter, r *http.Request) {
 		u, _ := auth.UserFrom(r.Context())
 		writeJSON(w, map[string]any{"id": u.ID, "email": u.Email, "can_sign_out": a.canSignOut})
@@ -75,10 +74,6 @@ func (a *api) routes(mux *http.ServeMux, dev bool) {
 	mux.HandleFunc("DELETE /api/providers/{id}", a.deleteProvider)
 	mux.HandleFunc("POST /api/providers/{id}/test", a.testProvider)
 	mux.HandleFunc("POST /api/quick", a.quickAction)
-	if dev {
-		mux.HandleFunc("POST /api/dev/expire", a.devExpire)
-		mux.HandleFunc("POST /api/dev/chat", a.devChat)
-	}
 }
 
 func (a *api) status(w http.ResponseWriter, r *http.Request) {
@@ -210,88 +205,6 @@ func (a *api) quickAction(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadGateway)
 	json.NewEncoder(w).Encode(map[string]any{"error": ae})
-}
-
-func (a *api) devExpire(w http.ResponseWriter, r *http.Request) {
-	if err := a.forUser(r.Context()).session.ExpireNow(r.Context()); err != nil {
-		httpError(w, err, http.StatusBadRequest)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-var devTimeTool = ai.Tool{
-	Type:        "function",
-	Name:        "get_server_time",
-	Description: "Returns the current time on the Refract server.",
-	Parameters:  json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
-}
-
-// devChat streams one prompt, optionally with a function tool, running the
-// tool round-trip the agent loop (M6) will need: replay output items plus
-// function_call_output in the next stateless call.
-func (a *api) devChat(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Model  string `json:"model"`
-		Prompt string `json:"prompt"`
-		Tools  bool   `json:"tools"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil || in.Prompt == "" {
-		httpError(w, errors.New("prompt required"), http.StatusBadRequest)
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-store")
-	rc := http.NewResponseController(w)
-	send := func(v any) {
-		b, _ := json.Marshal(v)
-		fmt.Fprintf(w, "data: %s\n\n", b)
-		rc.Flush()
-	}
-
-	req := ai.Request{
-		Model:        in.Model,
-		Instructions: "You are testing Refract's connection. Answer briefly.",
-		Input:        []json.RawMessage{ai.UserMessage(in.Prompt)},
-	}
-	if req.Model == "" {
-		req.Model = a.model
-	}
-	if in.Tools {
-		req.Tools = []ai.Tool{devTimeTool}
-	}
-
-	for range 5 {
-		ch, err := a.providerFor(r.Context()).Stream(r.Context(), req)
-		if err != nil {
-			send(map[string]any{"type": "error", "error": err})
-			return
-		}
-		called := false
-		for ev := range ch {
-			switch ev.Type {
-			case ai.EventText:
-				send(map[string]any{"type": "text", "text": ev.Text})
-			case ai.EventItem:
-				req.Input = append(req.Input, ev.Item)
-				if ev.Call != nil {
-					called = true
-					result := time.Now().Format(time.RFC3339)
-					req.Input = append(req.Input, ai.FunctionOutput(ev.Call.CallID, result))
-					send(map[string]any{"type": "tool", "name": ev.Call.Name, "arguments": ev.Call.Arguments, "result": result})
-				}
-			case ai.EventCompleted:
-				if !called {
-					send(map[string]any{"type": "done", "usage": ev.Usage})
-					return
-				}
-			case ai.EventError:
-				send(map[string]any{"type": "error", "error": ev.Err})
-				return
-			}
-		}
-	}
-	send(map[string]any{"type": "error", "error": ai.Error{Kind: ai.ErrOther, Message: "too many tool rounds"}})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

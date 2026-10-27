@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils'
 import { t } from '@/lib/i18n'
 import { useCommands } from '@/lib/commands'
 import { DropdownItems, WithContextMenu, type MenuEntry } from '@/components/Menu'
+import { Link, navigate, pageReady, previousPath } from '@/lib/router'
 
 type Sort = { key: 'name' | 'updated'; desc: boolean }
 
@@ -41,7 +42,7 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
   const folderInput = useRef<HTMLInputElement>(null)
 
   const rowMenu = (p: Project): MenuEntry[] => [
-    { label: t('Open'), icon: FolderOpen, onSelect: () => (window.location.href = `/p/${p.id}`) },
+    { label: t('Open'), icon: FolderOpen, onSelect: () => navigate(`/p/${p.id}`) },
     {
       label: t('Rename'),
       icon: Pencil,
@@ -78,7 +79,7 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
       label: p.name,
       hint: p.main_file || undefined,
       icon: FolderOpen,
-      run: () => (window.location.href = `/p/${p.id}`),
+      run: () => navigate(`/p/${p.id}`),
     })),
   ])
 
@@ -87,8 +88,26 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
       .then(setProjects)
       .catch((e) => toast.error(errorText(e)))
   useEffect(() => {
+    document.title = 'Refract'
     load()
   }, [])
+  useEffect(() => {
+    if (projects) pageReady()
+  }, [projects])
+
+  // Coming back from a project, its title glides from the workspace header into
+  // its row; opening one, the clicked row's title glides into the header.
+  // (view-transition-name must be unique on the page, hence one row at a time.)
+  const [cameFrom, setCameFrom] = useState(() => previousPath().match(/^\/p\/([^/]+)/)?.[1] ?? '')
+  useEffect(() => {
+    const timer = setTimeout(() => setCameFrom(''), 600)
+    return () => clearTimeout(timer)
+  }, [])
+  const morphInto = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    document.querySelectorAll<HTMLElement>('[data-vt-title]').forEach((el) => (el.style.viewTransitionName = ''))
+    const title = e.currentTarget.querySelector<HTMLElement>('[data-vt-title]')
+    if (title) title.style.viewTransitionName = 'project-title'
+  }
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -147,7 +166,8 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
     try {
       if (naming.mode === 'new') {
         const p = await api<Project>('/api/projects', { method: 'POST', body: { name: n } })
-        window.location.href = `/p/${p.id}`
+        setNaming(null)
+        navigate(`/p/${p.id}`)
         return
       }
       await api(`/api/projects/${naming.project.id}`, { method: 'PATCH', body: { name: n } })
@@ -191,7 +211,7 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
       <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs">
         <header className="flex flex-wrap items-center gap-2 px-5 py-4">
           <h1 className="mr-auto flex items-center gap-2.5 text-lg font-semibold tracking-tight">
-            <img src="/logo.svg" alt="Refract" className="size-7" />
+            <img src="/logo.svg" alt="Refract" className="size-7" style={{ viewTransitionName: 'logo' }} />
             {t('All projects')}
           </h1>
           <div className="relative w-full max-w-72 sm:w-72">
@@ -255,13 +275,15 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
             <li key={p.id} className="enter group border-b last:border-b-0" style={{ transitionDelay: `${Math.min(i, 8) * 30}ms` }}>
               <WithContextMenu items={() => rowMenu(p)}>
                 <div className="flex items-center gap-4 px-5 py-2.5 transition-colors duration-150 hover:bg-accent/50">
-                  <a href={`/p/${p.id}`} className="flex min-w-0 flex-1 items-center gap-4 outline-none focus-visible:underline">
+                  <Link to={`/p/${p.id}`} onClick={morphInto} className="flex min-w-0 flex-1 items-center gap-4 outline-none focus-visible:underline">
                     <PaperIcon />
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">{p.name}</span>
+                      <span data-vt-title className="block w-fit max-w-full truncate text-sm font-medium" style={p.id === cameFrom ? { viewTransitionName: 'project-title' } : undefined}>
+                        {p.name}
+                      </span>
                       <span className="block truncate text-xs text-muted-foreground">{p.main_file || t('Main file not set')}</span>
                     </span>
-                  </a>
+                  </Link>
                   <span className="w-12 text-right text-xs text-muted-foreground tabular-nums" title={new Date(p.updated_at).toLocaleString()}>
                     {ago(p.updated_at)}
                   </span>

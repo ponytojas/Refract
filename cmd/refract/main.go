@@ -178,7 +178,7 @@ func run() error {
 	}
 
 	app := http.NewServeMux()
-	a.routes(app, os.Getenv("REFRACT_DEV") == "1")
+	a.routes(app)
 	pa.routes(app)
 	ca.routes(app)
 	asa.routes(app)

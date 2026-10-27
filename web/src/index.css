@@ -852,3 +852,49 @@
   --chatcn-primary: var(--primary);
   --chatcn-primary-fg: var(--primary-foreground);
 }
+
+/* Page changes (lib/router.tsx). The old page fades quickly; the new one
+   settles in from a hair smaller going into a project, a hair larger coming
+   back. Shared elements (the logo, the project's title) glide between pages. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-group(*) {
+    animation-duration: 280ms;
+    animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  ::view-transition-old(root) {
+    animation: 110ms ease-out both vt-out;
+  }
+  ::view-transition-new(root) {
+    animation: 280ms cubic-bezier(0.23, 1, 0.32, 1) both vt-in;
+  }
+  html[data-nav='back']::view-transition-new(root) {
+    animation-name: vt-in-back;
+  }
+  /* Text of different widths: crossfade at natural size, don't stretch it. */
+  ::view-transition-old(project-title),
+  ::view-transition-new(project-title) {
+    width: auto;
+    height: 100%;
+    object-fit: none;
+    object-position: left center;
+  }
+}
+/* A slight blur hides the moment both pages overlap. */
+@keyframes vt-out {
+  to {
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+@keyframes vt-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@keyframes vt-in-back {
+  from {
+    opacity: 0;
+    transform: scale(1.015);
+  }
+}

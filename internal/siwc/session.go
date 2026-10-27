@@ -143,7 +143,7 @@ func (s *Session) AccessToken(ctx context.Context, force bool) (string, error) {
 	return next.AccessToken, nil
 }
 
-// ExpireNow marks the access token expired so the next call refreshes. Dev/testing only.
+// ExpireNow marks the access token expired so the next call refreshes. For tests.
 func (s *Session) ExpireNow(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

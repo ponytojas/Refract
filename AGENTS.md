@@ -86,6 +86,7 @@ Use `npx tsc --noEmit`, not `npx tsc -b`: the latter writes `.js` files next to 
 
 - **Read the surrounding code first** and follow its patterns. The server uses the Go standard library where it can; add a dependency only when it clearly earns its place.
 - **Every user-facing string goes through `t()`** (`web/src/lib/i18n.ts`) and needs a Spanish translation in `web/src/locales/es/`. A test fails when one is missing.
+- **Moving between pages goes through `web/src/lib/router.tsx`** (`navigate`, `<Link>`), never `window.location`: it waits for pending saves and animates the change. A page that holds unsaved work registers it with `useBeforeLeave`.
 - **Database changes are new migrations** appended to the list in `internal/store/store.go`. Never edit an existing one: installations have already applied it.
 - **New behaviour gets tests**; changed configuration or commands get a README update.
 - **Commit messages** describe the change in one line, in English.

@@ -48,6 +48,7 @@ import History from './History'
 import GitDialog, { pulledMessage, type PullResult } from './GitDialog'
 import CiteDialog, { type Citation, type CiteTarget } from './CiteDialog'
 import { Autosaver, type SaveStatus } from './autosave'
+import { Link, navigate, pageReady, useBeforeLeave } from '@/lib/router'
 import CompileStatus, { type CompileResult, type Problem } from './CompileStatus'
 import Editor from './Editor'
 import FileTree from './FileTree'
@@ -144,6 +145,8 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     })
   }
   const autosave = saver.current
+  // Leaving for another page: everything typed is on the server first.
+  useBeforeLeave(useCallback(() => autosave.flushAll(), [autosave]))
 
   const loadFiles = useCallback(() => api<FileEntry[]>(`/api/projects/${id}/files`).then(setFiles), [id])
   const loadChats = useCallback(
@@ -157,8 +160,14 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     [id],
   )
 
+  // The navigation's transition waits for these, so it ends on the project.
+  const [shown, setShown] = useState(false)
   useEffect(() => {
-    api<Project>(`/api/projects/${id}`)
+    if (shown) pageReady()
+  }, [shown])
+
+  useEffect(() => {
+    const p1 = api<Project>(`/api/projects/${id}`)
       .then((p) => {
         setProject(p)
         document.title = `${p.name} · Refract`
@@ -167,7 +176,8 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     api<Project[]>('/api/projects')
       .then(setProjects)
       .catch(() => {})
-    loadFiles().catch((e) => toast.error(errorText(e)))
+    const p2 = loadFiles().catch((e) => toast.error(errorText(e)))
+    Promise.all([p1, p2]).then(() => setShown(true))
     loadChats()
   }, [id, loadFiles, loadChats])
 
@@ -585,7 +595,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     })),
     ...projects
       .filter((p) => p.id !== id)
-      .map((p) => ({ id: `project:${p.id}`, group: 'Projects', label: p.name, icon: FolderOpen, run: () => (window.location.href = `/p/${p.id}`) })),
+      .map((p) => ({ id: `project:${p.id}`, group: 'Projects', label: p.name, icon: FolderOpen, run: () => navigate(`/p/${p.id}`) })),
   ])
 
   const aiReady = !!status?.ai_ready
@@ -637,24 +647,26 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <a
-                      href="/"
+                    <Link
+                      to="/"
                       aria-label={t('All projects')}
                       className="shrink-0 rounded-md p-1 transition-transform duration-150 ease-out active:scale-[0.94]"
                     />
                   }
                 >
-                  <img src="/logo.svg" alt="" className="size-6" />
+                  <img src="/logo.svg" alt="" className="size-6" style={{ viewTransitionName: 'logo' }} />
                 </TooltipTrigger>
                 <TooltipContent>{t('All projects')}</TooltipContent>
               </Tooltip>
               <DropdownMenu>
                 <DropdownMenuTrigger render={<Button variant="ghost" size="sm" className="min-w-0 flex-1 justify-start gap-1.5 px-2" />}>
-                  <span className="truncate font-semibold">{project?.name ?? '…'}</span>
+                  <span className="truncate font-semibold" style={{ viewTransitionName: 'project-title' }}>
+                    {project?.name ?? '…'}
+                  </span>
                   <ChevronDown className="opacity-50" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-64">
-                  <DropdownMenuItem render={<a href="/" />}>
+                  <DropdownMenuItem render={<Link to="/" />}>
                     <ChevronLeft /> {t('All projects')}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setGitOpen(true)}>
@@ -670,7 +682,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                   <DropdownMenuGroup>
                     <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{t('Recent')}</DropdownMenuLabel>
                     {projects.slice(0, 8).map((p) => (
-                      <DropdownMenuItem key={p.id} render={<a href={`/p/${p.id}`} />}>
+                      <DropdownMenuItem key={p.id} render={<Link to={`/p/${p.id}`} />}>
                         <span className="truncate">{p.name}</span>
                         {p.id === id && <Check className="ml-auto" />}
                       </DropdownMenuItem>

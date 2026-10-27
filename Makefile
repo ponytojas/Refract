@@ -9,7 +9,7 @@ dev:
 AUTH ?= none
 DEV_ENV = REFRACT_DATA_DIR=./data REFRACT_SECRET_KEY=$$(cat data/dev.key)
 dev-api: data/dev.key
-	REFRACT_AUTH=$(AUTH) REFRACT_DEV=1 $(DEV_ENV) go run ./cmd/refract
+	REFRACT_AUTH=$(AUTH) $(DEV_ENV) go run ./cmd/refract
 
 # Accounts in the dev data: make users ARGS="list" | ARGS="add you@example.com" | ARGS="rename local you@example.com"
 users: data/dev.key

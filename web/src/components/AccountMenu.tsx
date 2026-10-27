@@ -40,7 +40,7 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
   const email = me && me.email !== 'local' ? me.email : status?.status.signed_in ? status.status.email : undefined
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left outline-none transition-colors duration-150 hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring/50">
+      <DropdownMenuTrigger style={{ viewTransitionName: 'account' }} className="flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left outline-none transition-colors duration-150 hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring/50">
         <span className="flex size-7 shrink-0 items-center justify-center rounded-full border bg-card text-xs font-semibold uppercase shadow-xs">
           {email?.[0] ?? 'R'}
         </span>

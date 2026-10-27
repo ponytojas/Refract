@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, type ChatGPTStatus } from './api'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import Dev from './Dev'
 import Projects from './Projects'
 import SettingsDialog from './Settings'
 import { openSettings } from '@/lib/prefs'
@@ -14,6 +13,7 @@ import { setTheme } from '@/lib/theme'
 import { t } from '@/lib/i18n'
 import { FolderOpen, Keyboard, Monitor, Moon, Settings, Sun } from 'lucide-react'
 import Workspace from './Workspace'
+import { navigate, usePath } from '@/lib/router'
 
 export default function App() {
   const [status, setStatus] = useState<ChatGPTStatus | null>(null)
@@ -26,7 +26,7 @@ export default function App() {
   // Old /settings links open the dialog over the project list.
   useEffect(() => {
     if (window.location.pathname === '/settings') {
-      history.replaceState(null, '', '/')
+      navigate('/', { replace: true })
       openSettings('assistant')
     }
   }, [])
@@ -43,9 +43,9 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
-  const path = window.location.pathname
+  const path = usePath()
   useCommands(() => [
-    ...(path !== '/' ? [{ id: 'nav:projects', group: 'Navigate', label: t('All projects'), icon: FolderOpen, run: () => (window.location.href = '/') }] : []),
+    ...(path !== '/' ? [{ id: 'nav:projects', group: 'Navigate', label: t('All projects'), icon: FolderOpen, run: () => navigate('/') }] : []),
     { id: 'app:settings', group: 'General', label: t('Settings'), icon: Settings, keywords: 'preferences account chatgpt', run: () => openSettings() },
     { id: 'app:shortcuts', group: 'General', label: t('Keyboard shortcuts'), icon: Keyboard, shortcut: '?', run: () => setOverlay('shortcuts') },
     { id: 'theme:light', group: 'General', label: t('Light theme'), icon: Sun, keywords: 'appearance', run: () => setTheme('light') },
@@ -57,10 +57,9 @@ export default function App() {
   return (
     // After the first tooltip opens, neighbours open instantly (within the provider's 400 ms timeout).
     <TooltipProvider delay={500}>
-      {path === '/dev' ? (
-        <Dev status={status} refresh={refresh} />
-      ) : path.startsWith('/p/') ? (
-        <Workspace id={path.slice(3)} status={status} />
+      {path.startsWith('/p/') ? (
+        // Keyed: each project gets a fresh workspace (its autosave writes to its own id).
+        <Workspace key={path} id={path.slice(3)} status={status} />
       ) : (
         <Projects status={status} />
       )}
