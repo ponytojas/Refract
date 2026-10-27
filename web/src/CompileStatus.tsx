@@ -51,7 +51,8 @@ export default function CompileStatus({ projectId, compiling, result, error, onJ
   const problems = result?.problems ?? []
   const errors = problems.filter((x) => x.severity === 'error').length
   const warnings = problems.length - errors + checks.length
-  const main = problems.filter((x) => !groups.some((g) => g.kinds.includes(x.kind)))
+  // Errors first: they stop the build; warnings keep the log's order.
+  const main = problems.filter((x) => !groups.some((g) => g.kinds.includes(x.kind))).sort((a, b) => Number(b.severity === 'error') - Number(a.severity === 'error'))
   const portability: Problem[] = checks.map((w) => ({ severity: 'warning', kind: 'portability', file: w.file, line: w.line, message: w.message }))
   const fixable = [...main, ...portability] // the noisy groups (box warnings) are left out of "fix all"
   const fix = onFix
@@ -124,9 +125,7 @@ export default function CompileStatus({ projectId, compiling, result, error, onJ
           </div>
           {error && <p className="px-3 py-2 text-sm text-destructive">{error}</p>}
           <ul className="divide-y">
-            {main.map((x, i) => (
-              <ProblemRow key={i} problem={x} onJump={(f, l) => (setOpen(false), onJump(f, l))} onFix={fix} />
-            ))}
+            <ProblemRows problems={main} onJump={(f, l) => (setOpen(false), onJump(f, l))} onFix={fix} />
             {groups.map((g, gi) => {
               const items = problems.filter((x) => g.kinds.includes(x.kind))
               if (!items.length) return null
@@ -141,17 +140,13 @@ export default function CompileStatus({ projectId, compiling, result, error, onJ
                   </button>
                   {isOpen && (
                     <ul className="divide-y border-t">
-                      {items.map((x, i) => (
-                        <ProblemRow key={i} problem={x} onJump={(f, l) => (setOpen(false), onJump(f, l))} onFix={fix} />
-                      ))}
+                      <ProblemRows problems={items} onJump={(f, l) => (setOpen(false), onJump(f, l))} onFix={fix} />
                     </ul>
                   )}
                 </li>
               )
             })}
-            {portability.map((x, i) => (
-              <ProblemRow key={'c' + i} problem={x} onJump={(f, l) => (setOpen(false), onJump(f, l))} onFix={fix} />
-            ))}
+            <ProblemRows problems={portability} onJump={(f, l) => (setOpen(false), onJump(f, l))} onFix={fix} />
           </ul>
           {!error && problems.length === 0 && checks.length === 0 && (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">{result ? t('No problems.') : t('Compile to check the document.')}</p>
@@ -167,6 +162,35 @@ export default function CompileStatus({ projectId, compiling, result, error, onJ
           <pre className="min-h-0 flex-1 overflow-auto rounded-md bg-muted p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">{log}</pre>
         </DialogContent>
       </Dialog>
+    </>
+  )
+}
+
+// Rows render in pages: a log with hundreds of problems would otherwise build
+// them all at once and freeze the page when the list opens.
+const PAGE = 50
+
+type RowsProps = { problems: Problem[]; onJump: (file: string, line: number) => void; onFix?: (ps: Problem[]) => void }
+
+function ProblemRows({ problems, onJump, onFix }: RowsProps) {
+  const [shown, setShown] = useState(PAGE)
+  const rest = problems.length - shown
+  const next = Math.min(rest, 2 * PAGE)
+  return (
+    <>
+      {problems.slice(0, shown).map((x, i) => (
+        <ProblemRow key={i} problem={x} onJump={onJump} onFix={onFix} />
+      ))}
+      {rest > 0 && (
+        <li>
+          <button
+            className="w-full px-3 py-2 text-left text-xs text-muted-foreground transition-colors duration-100 hover:text-foreground"
+            onClick={() => setShown(shown + next)}
+          >
+            {tn(next, 'Show {n} more', 'Show {n} more')} · {tn(rest, '{n} left', '{n} left')}
+          </button>
+        </li>
+      )}
     </>
   )
 }
@@ -198,14 +222,13 @@ function ProblemRow({ problem: x, onJump, onFix }: { problem: Problem; onJump: (
         <div className="flex min-w-0 flex-1 gap-2.5 py-2.5 pl-3">{body}</div>
       )}
       {onFix && (
-        <Button
-          variant="ghost"
-          size="xs"
-          className="m-2 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/problem:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+        // A plain button: rows are many, and this one only shows on hover.
+        <button
+          className="m-2 flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/problem:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&_svg]:size-3"
           onClick={() => onFix([x])}
         >
           <Sparkles /> {t('Fix')}
-        </Button>
+        </button>
       )}
     </li>
   )

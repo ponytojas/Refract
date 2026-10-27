@@ -154,6 +154,8 @@ export default {
   '{n} warnings': '{n} avisos',
   Problems: 'Problemas',
   'Fix all with AI': 'Arreglar todo con IA',
+  'Show {n} more': 'Mostrar {n} más',
+  '{n} left': 'quedan {n}',
   'Full log': 'Registro completo',
   'No problems.': 'Sin problemas.',
   'Compile to check the document.': 'Compila para revisar el documento.',
