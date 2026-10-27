@@ -24,13 +24,13 @@ jobs:
           - { goos: windows, goarch: amd64 }
           - { goos: windows, goarch: arm64 }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       # The web UI is embedded in the binary, so the same file runs the server.
@@ -49,7 +49,7 @@ jobs:
           cp README.md "dist/$name/"
           cd dist
           if [ "$GOOS" = windows ]; then zip -qr "$name.zip" "$name"; else tar -czf "$name.tar.gz" "$name"; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.*z*
@@ -58,7 +58,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -76,12 +76,12 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
       # Test the image before anyone can pull it: tools, a compile, SyncTeX, the server.
       - name: Build for the smoke test
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -92,13 +92,13 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Smoke test
         run: scripts/smoke-docker.sh refract:smoke linux/amd64
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/ponytojas/refract
           # v1.2.3 → 1.2.3 and 1.2; "latest" only for releases, not pre-releases (v1.2.3-rc1).
@@ -106,7 +106,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
