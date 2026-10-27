@@ -25,8 +25,11 @@ import (
 
 // Passwords and sessions, for REFRACT_AUTH=password.
 
+// pbkdf2Iter is OWASP's figure for PBKDF2-HMAC-SHA256. A variable only so tests
+// can hash quickly; stored hashes carry their own count.
+var pbkdf2Iter = 600_000
+
 const (
-	pbkdf2Iter  = 600_000 // OWASP's figure for PBKDF2-HMAC-SHA256
 	MinPassword = 8
 	maxPassword = 1024
 

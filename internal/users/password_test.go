@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,6 +14,11 @@ import (
 	"github.com/ponytojas/Refract/internal/auth"
 	"github.com/ponytojas/Refract/internal/store"
 )
+
+func TestMain(m *testing.M) {
+	pbkdf2Iter = 1000 // the real count makes every login in these tests take ~0.3 s
+	os.Exit(m.Run())
+}
 
 func newService(t *testing.T) *Service {
 	db, err := store.Open(filepath.Join(t.TempDir(), "u.db"))
