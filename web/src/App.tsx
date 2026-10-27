@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { api, type ChatGPTStatus } from './api'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -12,7 +12,10 @@ import { getOverlay, setOverlay, useCommands } from '@/lib/commands'
 import { setTheme } from '@/lib/theme'
 import { t } from '@/lib/i18n'
 import { FolderOpen, Keyboard, Monitor, Moon, Settings, Sun } from 'lucide-react'
-import Workspace from './Workspace'
+// The project view carries the editor, the PDF viewer and the assistant: loaded
+// on its own, so the project list (and sign-in) open quickly.
+const loadWorkspace = () => import('./Workspace')
+const Workspace = lazy(loadWorkspace)
 import { navigate, usePath } from '@/lib/router'
 
 export default function App() {
@@ -23,6 +26,11 @@ export default function App() {
       .catch(() => {})
   }, [])
   useEffect(refresh, [refresh])
+  // Fetch the project view in the background once the page is idle, so opening a project doesn't wait for it.
+  useEffect(() => {
+    const timer = setTimeout(loadWorkspace, 1500)
+    return () => clearTimeout(timer)
+  }, [])
   // Old /settings links open the dialog over the project list.
   useEffect(() => {
     if (window.location.pathname === '/settings') {
@@ -59,7 +67,9 @@ export default function App() {
     <TooltipProvider delay={500}>
       {path.startsWith('/p/') ? (
         // Keyed: each project gets a fresh workspace (its autosave writes to its own id).
-        <Workspace key={path} id={path.slice(3)} status={status} />
+        <Suspense fallback={null}>
+          <Workspace key={path} id={path.slice(3)} status={status} />
+        </Suspense>
       ) : (
         <Projects status={status} />
       )}
