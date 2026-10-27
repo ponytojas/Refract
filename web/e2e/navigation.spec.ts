@@ -12,13 +12,17 @@ test('move between projects without reloading or losing edits', async ({ page, r
     await request.put(`/api/projects/${p.id}/file?path=main.tex`, { headers: api, data: doc(name) })
     return p.id as string
   }
-  const a = await make('Nav Alpha')
-  const b = await make('Nav Beta')
+  // Unique names: other tests (and repeated runs) share the server.
+  const run = Math.random().toString(36).slice(2, 8)
+  const alpha = `Nav Alpha ${run}`
+  const beta = `Nav Beta ${run}`
+  const a = await make(alpha)
+  const b = await make(beta)
   const read = async (id: string) => (await request.get(`/api/projects/${id}/file?path=main.tex`, { headers: api })).text()
 
   await page.goto('/')
   await page.evaluate(() => ((window as any).__samePage = true))
-  await page.getByRole('link', { name: /Nav Alpha/ }).click()
+  await page.getByRole('link', { name: alpha }).click()
   await expect(page).toHaveURL(`/p/${a}`)
   await page.getByRole('button', { name: 'main.tex' }).first().click()
 
@@ -27,21 +31,23 @@ test('move between projects without reloading or losing edits', async ({ page, r
   await page.keyboard.press('ControlOrMeta+End')
   await page.keyboard.type('\n% left right away')
   await page.getByRole('link', { name: 'All projects' }).click()
-  await expect(page).toHaveURL('/')
+  // The list shows once the edits are saved (the address changes first).
+  await expect(page.getByRole('link', { name: alpha })).toBeVisible()
   expect(await read(a)).toContain('% left right away')
 
   // Into the other project through the project menu, right after typing.
-  await page.getByRole('link', { name: /Nav Alpha/ }).click()
+  await page.getByRole('link', { name: alpha }).click()
   await page.getByRole('button', { name: 'main.tex' }).first().click()
   await expect(page.locator('.cm-content')).toContainText('% left right away')
   await page.locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+End')
   await page.keyboard.type(' and more')
-  await page.getByRole('button', { name: /Nav Alpha/ }).click()
-  await page.getByRole('menuitem', { name: 'Nav Beta' }).click()
+  await page.getByRole('button', { name: alpha }).click()
+  await page.getByRole('menuitem', { name: beta }).click()
+  await expect(page.getByRole('button', { name: beta })).toBeVisible()
   await expect(page).toHaveURL(`/p/${b}`)
   expect(await read(a)).toContain('and more')
-  expect(await read(b)).toBe(doc('Nav Beta'))
+  expect(await read(b)).toBe(doc(beta))
 
   // The browser's back button works, and the page was never reloaded.
   await page.goBack()

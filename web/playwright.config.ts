@@ -13,6 +13,8 @@ const dataDir = mkdtempSync(join(tmpdir(), 'refract-e2e-'))
 export default defineConfig({
   testDir: 'e2e',
   timeout: 120_000,
+  // On GitHub, failures also show as annotations on the run and the pull request.
+  reporter: process.env.GITHUB_ACTIONS ? [['github'], ['list']] : 'list',
   use: { baseURL: `http://127.0.0.1:${port}`, channel: 'chrome', viewport: { width: 1500, height: 850 } },
   webServer: [
     { command: 'node e2e/fake-model.mjs', url: 'http://127.0.0.1:18091/api/v1/models' },
