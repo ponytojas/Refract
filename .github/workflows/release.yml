@@ -68,6 +68,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: '!*.dockerbuild'
           merge-multiple: true
       - name: Homebrew and WinGet
         run: |
@@ -129,6 +130,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: '!*.dockerbuild'
           merge-multiple: true
       # The notes are the version's section of CHANGELOG.md ("## [0.1.0] - …"),
       # minus the link definitions at the end of the file. Without that
