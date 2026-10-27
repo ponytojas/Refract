@@ -58,17 +58,23 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7 # for CHANGELOG.md
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
+      # The notes are the version's section of CHANGELOG.md ("## [0.1.0] - …");
+      # without one, GitHub lists the commits instead.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          notes_file="$RUNNER_TEMP/notes.md"
+          awk -v head="## [${GITHUB_REF_NAME#v}]" 'index($0, head) == 1 { on = 1; next } on && /^## \[/ { exit } on' CHANGELOG.md > "$notes_file"
+          if [ -s "$notes_file" ]; then notes="--notes-file=$notes_file"; else notes="--generate-notes"; fi
           cd dist
           sha256sum * > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" "$notes"
 
   image:
     runs-on: ubuntu-latest
