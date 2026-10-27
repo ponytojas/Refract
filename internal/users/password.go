@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/ponytojas/Refract/internal/auth"
+	"github.com/ponytojas/Refract/internal/store"
 )
 
 // Passwords and sessions, for REFRACT_AUTH=password.
@@ -31,8 +33,10 @@ const (
 	SessionCookie = "refract_session"
 	SessionTTL    = 30 * 24 * time.Hour
 
-	maxFailures = 10
-	failWindow  = 15 * time.Minute
+	maxFailures      = 10 // per account
+	maxFailuresPerIP = 30 // per address: allows a few people behind one network
+	failWindow       = 15 * time.Minute
+	maxTracked       = 100_000
 )
 
 var (
@@ -97,10 +101,16 @@ func (s *Service) SetPassword(ctx context.Context, email, pw string) (auth.User,
 	return u, err
 }
 
-// Login checks an email and password. Failures are counted per email, in memory.
-func (s *Service) Login(ctx context.Context, email, pw string) (auth.User, error) {
+// Login checks an email and password. ip is the client's address (ClientIP).
+// Failures are counted in memory, per account and per address: guessing one
+// account's password, or many accounts from one place, is refused for a while.
+func (s *Service) Login(ctx context.Context, email, pw, ip string) (auth.User, error) {
 	email = normEmail(email)
-	if !s.allowAttempt(email) {
+	keys := []string{"email:" + email}
+	if ip != "" {
+		keys = append(keys, "ip:"+ip)
+	}
+	if !s.allowAttempt(keys) {
 		return auth.User{}, ErrTooMany
 	}
 	u := auth.User{Email: email}
@@ -111,15 +121,15 @@ func (s *Service) Login(ctx context.Context, email, pw string) (auth.User, error
 	}
 	if stored == "" {
 		checkPassword(dummyHash(), pw)
-		s.fail(email)
+		s.fail(keys)
 		return auth.User{}, ErrBadLogin
 	}
 	if !checkPassword(stored, pw) {
-		s.fail(email)
+		s.fail(keys)
 		return auth.User{}, ErrBadLogin
 	}
 	s.mu.Lock()
-	delete(s.failures, email)
+	delete(s.failures, keys[0]) // the address keeps its count: it may be trying several accounts
 	s.mu.Unlock()
 	return u, nil
 }
@@ -129,29 +139,118 @@ type failures struct {
 	since time.Time
 }
 
-func (s *Service) allowAttempt(email string) bool {
+// limits: failures allowed per window, by kind of key.
+var limits = map[string]int{"email": maxFailures, "ip": maxFailuresPerIP}
+
+func (s *Service) allowAttempt(keys []string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f, ok := s.failures[email]
-	if ok && time.Since(f.since) > failWindow {
-		delete(s.failures, email)
-		return true
+	for _, k := range keys {
+		f, ok := s.failures[k]
+		if !ok {
+			continue
+		}
+		if time.Since(f.since) > failWindow {
+			delete(s.failures, k)
+			continue
+		}
+		kind, _, _ := strings.Cut(k, ":")
+		if f.n >= limits[kind] {
+			return false
+		}
 	}
-	return !ok || f.n < maxFailures
+	return true
 }
 
-func (s *Service) fail(email string) {
+func (s *Service) fail(keys []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.failures == nil {
 		s.failures = map[string]failures{}
 	}
-	f := s.failures[email]
-	if f.n == 0 {
-		f.since = time.Now()
+	// Made-up emails and addresses each add an entry: drop the expired ones
+	// before the table can grow without bound.
+	if len(s.failures) >= maxTracked {
+		for k, f := range s.failures {
+			if time.Since(f.since) > failWindow {
+				delete(s.failures, k)
+			}
+		}
 	}
-	f.n++
-	s.failures[email] = f
+	for _, k := range keys {
+		f, ok := s.failures[k]
+		if !ok && len(s.failures) >= maxTracked {
+			continue // still full of recent failures: keep what is already counted
+		}
+		if f.n == 0 {
+			f.since = time.Now()
+		}
+		f.n++
+		s.failures[k] = f
+	}
+}
+
+// ClientIP is the address a request came from. Behind a reverse proxy on the
+// same machine or private network, that is the last address the proxy added
+// to X-Forwarded-For; from anywhere else the header is ignored, since a
+// client could forge it.
+func ClientIP(r *http.Request) string {
+	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		peer = r.RemoteAddr
+	}
+	ip := net.ParseIP(peer)
+	if ip == nil || !(ip.IsLoopback() || ip.IsPrivate()) {
+		return peer
+	}
+	hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	if last := net.ParseIP(strings.TrimSpace(hops[len(hops)-1])); last != nil {
+		return last.String()
+	}
+	return peer
+}
+
+// SignOut ends every session of a user.
+func (s *Service) SignOut(ctx context.Context, email string) (int64, error) {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE email = ?)`, normEmail(email))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// Delete removes an account: its sessions, its settings (AI connections,
+// GitHub) and the user. Projects must be deleted first (see refract users remove).
+func (s *Service) Delete(ctx context.Context, email string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var id string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE email = ?`, normEmail(email)).Scan(&id); errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("there is no account %q", email)
+	} else if err != nil {
+		return err
+	}
+	var owned int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM projects WHERE owner = ?`, id).Scan(&owned); err != nil {
+		return err
+	}
+	if owned > 0 {
+		return fmt.Errorf("%s still owns %d projects", email, owned)
+	}
+	prefix := store.UserKey(id, "") // all of the user's settings start with it
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE substr(key, 1, length(?)) = ?`, prefix, prefix); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // HasPassword reports whether the user can sign in with a password.
@@ -178,7 +277,6 @@ func (s *Service) Rename(ctx context.Context, from, to string) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("there is no account %q", from)
 	}
-	s.cache.Delete(from)
 	return nil
 }
 

@@ -61,7 +61,7 @@ func (a *loginAPI) login(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	u, err := a.users.Login(r.Context(), in.Email, in.Password)
+	u, err := a.users.Login(r.Context(), in.Email, in.Password, users.ClientIP(r))
 	switch {
 	case errors.Is(err, users.ErrTooMany):
 		kindError(w, http.StatusTooManyRequests, "too_many_attempts", err)
@@ -182,7 +182,7 @@ func (a *loginAPI) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, _ := auth.UserFrom(r.Context())
-	if _, err := a.users.Login(r.Context(), u.Email, in.Current); err != nil {
+	if _, err := a.users.Login(r.Context(), u.Email, in.Current, users.ClientIP(r)); err != nil {
 		kindError(w, http.StatusForbidden, "wrong_password", errors.New("the current password is wrong"))
 		return
 	}

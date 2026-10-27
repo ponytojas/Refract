@@ -22,10 +22,8 @@ type Service struct {
 	DB  *sql.DB
 	Key []byte // to re-seal adopted credentials
 
-	cache sync.Map // email → auth.User
-
 	mu       sync.Mutex
-	failures map[string]failures // email → recent failed sign-ins
+	failures map[string]failures // "email:…" or "ip:…" → recent failed sign-ins
 }
 
 // legacy settings of the single-user version, now per user: key → sealed?
@@ -37,15 +35,21 @@ func (s *Service) Resolve(ctx context.Context, email string) (auth.User, error) 
 	if email == "" {
 		return auth.User{}, errors.New("no identity")
 	}
-	if u, ok := s.cache.Load(email); ok {
-		return u.(auth.User), nil
+	// Looked up on every request (no cache), so removing or renaming an
+	// account takes effect at once, also in the running server.
+	u := auth.User{Email: email}
+	err := s.DB.QueryRowContext(ctx, `SELECT id FROM users WHERE email = ?`, email).Scan(&u.ID)
+	if err == nil {
+		return u, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return auth.User{}, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil) // immediate: two first requests can't both create
 	if err != nil {
 		return auth.User{}, err
 	}
 	defer tx.Rollback()
-	u := auth.User{Email: email}
 	err = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE email = ?`, email).Scan(&u.ID)
 	if errors.Is(err, sql.ErrNoRows) {
 		var n int
@@ -67,7 +71,6 @@ func (s *Service) Resolve(ctx context.Context, email string) (auth.User, error) 
 	if err := tx.Commit(); err != nil {
 		return auth.User{}, err
 	}
-	s.cache.Store(email, u)
 	return u, nil
 }
 

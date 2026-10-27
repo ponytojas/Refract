@@ -3,10 +3,12 @@ package users
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ponytojas/Refract/internal/auth"
 	"github.com/ponytojas/Refract/internal/store"
@@ -37,11 +39,11 @@ func TestPasswordLogin(t *testing.T) {
 	if stored == "" || stored == "correct horse" {
 		t.Fatalf("stored %q", stored)
 	}
-	if got, err := s.Login(ctx, "ANA@example.com", "correct horse"); err != nil || got.ID != u.ID {
+	if got, err := s.Login(ctx, "ANA@example.com", "correct horse", ""); err != nil || got.ID != u.ID {
 		t.Fatalf("login: %v %+v", err, got)
 	}
 	for _, c := range [][2]string{{"ana@example.com", "wrong"}, {"nobody@example.com", "correct horse"}} {
-		if _, err := s.Login(ctx, c[0], c[1]); !errors.Is(err, ErrBadLogin) {
+		if _, err := s.Login(ctx, c[0], c[1], ""); !errors.Is(err, ErrBadLogin) {
 			t.Fatalf("%v: got %v", c, err)
 		}
 	}
@@ -54,12 +56,12 @@ func TestLoginLimit(t *testing.T) {
 	s, ctx := newService(t), context.Background()
 	s.SetPassword(ctx, "ana@example.com", "correct horse")
 	for range maxFailures {
-		s.Login(ctx, "ana@example.com", "wrong")
+		s.Login(ctx, "ana@example.com", "wrong", "")
 	}
-	if _, err := s.Login(ctx, "ana@example.com", "correct horse"); !errors.Is(err, ErrTooMany) {
+	if _, err := s.Login(ctx, "ana@example.com", "correct horse", ""); !errors.Is(err, ErrTooMany) {
 		t.Fatalf("got %v", err)
 	}
-	if _, err := s.Login(ctx, "bob@example.com", "x"); !errors.Is(err, ErrBadLogin) {
+	if _, err := s.Login(ctx, "bob@example.com", "x", ""); !errors.Is(err, ErrBadLogin) {
 		t.Fatalf("other accounts are not limited: %v", err)
 	}
 }
@@ -143,5 +145,97 @@ func TestRenameKeepsData(t *testing.T) {
 	}
 	if u, _ := s.Resolve(ctx, "ana@example.com"); u.ID != local.ID {
 		t.Fatalf("got %+v, want id %s", u, local.ID)
+	}
+}
+
+func TestLoginLimitPerAddress(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	s.SetPassword(ctx, "ana@example.com", "correct horse")
+	// One address trying many accounts gets stopped, even below each account's limit.
+	for i := range maxFailuresPerIP {
+		s.Login(ctx, fmt.Sprintf("user%d@example.com", i), "guess", "203.0.113.7")
+	}
+	if _, err := s.Login(ctx, "ana@example.com", "correct horse", "203.0.113.7"); !errors.Is(err, ErrTooMany) {
+		t.Fatalf("same address: %v", err)
+	}
+	if _, err := s.Login(ctx, "ana@example.com", "correct horse", "198.51.100.1"); err != nil {
+		t.Fatalf("other address: %v", err)
+	}
+}
+
+func TestFailureTableIsBounded(t *testing.T) {
+	s := newService(t)
+	s.failures = map[string]failures{}
+	old := time.Now().Add(-2 * failWindow)
+	for i := range maxTracked {
+		s.failures[fmt.Sprintf("email:%d", i)] = failures{n: 1, since: old}
+	}
+	s.fail([]string{"email:new"})
+	if len(s.failures) != 1 || s.failures["email:new"].n != 1 {
+		t.Fatalf("expired entries kept: %d", len(s.failures))
+	}
+}
+
+func TestClientIP(t *testing.T) {
+	for _, c := range []struct{ remote, xff, want string }{
+		{"203.0.113.7:5000", "", "203.0.113.7"},
+		{"203.0.113.7:5000", "198.51.100.1", "203.0.113.7"},        // a client can't pick its address
+		{"127.0.0.1:5000", "198.51.100.1", "198.51.100.1"},         // local proxy
+		{"10.0.0.2:5000", "1.2.3.4, 198.51.100.1", "198.51.100.1"}, // the proxy's own hop, not the forged one
+		{"127.0.0.1:5000", "", "127.0.0.1"},
+		{"[::1]:5000", "2001:db8::1", "2001:db8::1"},
+		{"127.0.0.1:5000", "not-an-ip", "127.0.0.1"},
+	} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = c.remote
+		if c.xff != "" {
+			r.Header.Set("X-Forwarded-For", c.xff)
+		}
+		if got := ClientIP(r); got != c.want {
+			t.Errorf("%s %q: got %s, want %s", c.remote, c.xff, got, c.want)
+		}
+	}
+}
+
+func TestSignOutAndDelete(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	u, _ := s.SetPassword(ctx, "ana@example.com", "correct horse")
+	other, _ := s.SetPassword(ctx, "bob@example.com", "correct horse")
+	a1, _ := s.NewSession(ctx, u.ID)
+	a2, _ := s.NewSession(ctx, u.ID)
+	b, _ := s.NewSession(ctx, other.ID)
+	if n, err := s.SignOut(ctx, "Ana@example.com"); err != nil || n != 2 {
+		t.Fatalf("signed out %d, %v", n, err)
+	}
+	for _, tok := range []string{a1, a2} {
+		if _, err := s.Session(ctx, tok); err == nil {
+			t.Fatal("session survived")
+		}
+	}
+	if _, err := s.Session(ctx, b); err != nil {
+		t.Fatal("another user's session ended")
+	}
+
+	s.DB.Exec(`INSERT INTO settings (key, value) VALUES (?, 'x'), (?, 'y')`, "user/"+u.ID+"/providers", "user/"+other.ID+"/providers")
+	s.DB.Exec(`INSERT INTO projects (id, name, created_at, updated_at, owner) VALUES ('p1', 'Paper', 0, 0, ?)`, u.ID)
+	if err := s.Delete(ctx, "ana@example.com"); err == nil {
+		t.Fatal("deleted an account that still owns projects")
+	}
+	s.DB.Exec(`DELETE FROM projects`)
+	if err := s.Delete(ctx, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	var settings int
+	s.DB.QueryRow(`SELECT count(*) FROM settings WHERE key LIKE 'user/%'`).Scan(&settings)
+	if exists, _ := s.Exists(ctx, "ana@example.com"); exists || settings != 1 {
+		t.Fatalf("exists=%v, settings left=%d", exists, settings)
+	}
+	if err := s.Delete(ctx, "ana@example.com"); err == nil {
+		t.Fatal("deleted a missing account")
+	}
+	// A deleted account doesn't linger: the same email is a new, empty user.
+	again, _ := s.Resolve(ctx, "ana@example.com")
+	if again.ID == u.ID {
+		t.Fatal("old account came back")
 	}
 }
