@@ -63,14 +63,15 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      # The notes are the version's section of CHANGELOG.md ("## [0.1.0] - …");
-      # without one, GitHub lists the commits instead.
+      # The notes are the version's section of CHANGELOG.md ("## [0.1.0] - …"),
+      # minus the link definitions at the end of the file. Without that
+      # section, GitHub lists the commits instead.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes_file="$RUNNER_TEMP/notes.md"
-          awk -v head="## [${GITHUB_REF_NAME#v}]" 'index($0, head) == 1 { on = 1; next } on && /^## \[/ { exit } on' CHANGELOG.md > "$notes_file"
+          awk -v head="## [${GITHUB_REF_NAME#v}]" 'index($0, head) == 1 { on = 1; next } on && /^## \[/ { exit } on && !/^\[[^]]*\]: / { print }' CHANGELOG.md > "$notes_file"
           if [ -s "$notes_file" ]; then notes="--notes-file=$notes_file"; else notes="--generate-notes"; fi
           cd dist
           sha256sum * > SHA256SUMS

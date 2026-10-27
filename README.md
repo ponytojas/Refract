@@ -356,7 +356,7 @@ On Windows and Linux, read <kbd>Ctrl</kbd> for <kbd>⌘</kbd>. Hold <kbd>⌘</kb
 - **Secrets at rest:** ChatGPT credentials, API keys and git tokens are encrypted with AES-GCM under `REFRACT_SECRET_KEY`, each bound to its owner.
 - **Isolation between users:** projects, chats and connections are checked against their owner on every access.
 - **Compilation:** Tectonic runs with shell escape disabled (`--untrusted`) and a time limit. Imports are size-limited and can't write outside the project.
-- **Outbound requests:** user-supplied AI provider URLs can't reach link-local addresses such as cloud metadata services.
+- **Outbound requests:** user-supplied AI provider URLs can't reach link-local addresses such as cloud metadata services. Compiling a document that names a font found neither in the project nor in the TeX bundle downloads it from Google Fonts, sending only the family name; `REFRACT_FONT_DOWNLOADS=0` turns that off.
 
 Found a vulnerability? Please report it privately through the repository's **Security** tab (*Report a vulnerability*) rather than in a public issue.
 

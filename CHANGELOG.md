@@ -4,12 +4,15 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-27
+
 The first release: a self-hosted LaTeX workspace with an AI assistant.
 
 ### Editor and PDF
 
 - LaTeX editor with tabs, autosave and syntax highlighting.
 - Compilation with Tectonic, which fetches the packages a document needs; errors and warnings listed with file and line, each with **Fix with AI**.
+- Named `fontspec` families (`\setmainfont{Open Sans}`) work without changing the document: Refract uses the project's own font files, the TeX bundle's Latin Modern and TeX Gyre, or downloads the family from Google Fonts (`REFRACT_FONT_DOWNLOADS=0` turns downloads off). By [Lorena Jimenez](https://github.com/Lorena-J) in [#1](https://github.com/ponytojas/Refract/pull/1).
 - PDF preview with SyncTeX in both directions (<kbd>⌘J</kbd>, and <kbd>⌘</kbd>-click in the PDF), and a right-click menu in the PDF.
 - Command palette (<kbd>⌘K</kbd>) and a shortcut overlay.
 - English and Spanish interface, light and dark themes, installable as an app from the browser.
@@ -49,3 +52,6 @@ The first release: a self-hosted LaTeX workspace with an AI assistant.
 
 - `refract` binaries for macOS, Linux and Windows (amd64 and arm64).
 - A Docker image for amd64 and arm64 on GitHub Container Registry, with Tectonic and SyncTeX included.
+
+[Unreleased]: https://github.com/ponytojas/Refract/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ponytojas/Refract/releases/tag/v0.1.0
