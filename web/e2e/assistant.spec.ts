@@ -20,7 +20,10 @@ test('the assistant proposes a change that is reviewed and accepted', async ({ p
   await page.getByPlaceholder('Ask anything').fill('Make the greeting friendlier.')
   await page.keyboard.press('Enter')
 
-  await expect(page.getByRole('button', { name: 'Reasoning' })).toBeVisible({ timeout: 30_000 })
+  // The turn ends in a review; the floating chat then folds into its bar.
+  await expect(page.getByRole('button', { name: 'Accept all' })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Open chat' }).click()
+  await expect(page.getByRole('button', { name: 'Reasoning', exact: true })).toBeVisible()
   await expect(page.getByText('I changed the greeting.')).toBeVisible()
   // Nothing is written before the review is accepted.
   expect(await (await request.get(`/api/projects/${project.id}/file?path=main.tex`, { headers: api })).text()).toBe(doc)
