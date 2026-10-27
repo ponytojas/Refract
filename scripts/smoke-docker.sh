@@ -32,8 +32,9 @@ echo "== synctex forward and inverse"
 run '
 set -e
 cd /data/smoke
-# Round trip: line 3 -> PDF position -> back to hello.tex line 3.
-fwd=$(synctex view -i 3:1:hello.tex -o out/hello.pdf)
+# Round trip: line 3 -> PDF position -> back to hello.tex line 3. SyncTeX
+# records absolute paths, so it is asked with one, as the server does.
+fwd=$(synctex view -i "3:1:$PWD/hello.tex" -o out/hello.pdf)
 echo "$fwd" | grep -q "^Page:1"
 x=$(echo "$fwd" | sed -n "s/^x://p" | head -1)
 y=$(echo "$fwd" | sed -n "s/^y://p" | head -1)
