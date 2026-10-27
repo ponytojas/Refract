@@ -115,6 +115,8 @@ The paper in these screenshots is a made-up example, and the AI responses come f
 
 Try Refract on your own computer in a few minutes. You need [Docker](https://docs.docker.com/get-docker/).
 
+> **Using an AI coding agent?** Ask it to follow [AGENTS.md](AGENTS.md): a step-by-step guide for agents to get Refract running for you, whether you want to try it, work on the code or put it on a server.
+
 ```sh
 git clone https://github.com/ponytojas/Refract.git
 cd Refract
@@ -340,7 +342,7 @@ Found a vulnerability? Please report it privately through the repository's **Sec
 
 ## Development
 
-You need Go, Node.js, Tectonic and `synctex` (and Google Chrome for the browser test). The image bundles all of them.
+You need Go, Node.js, git, ripgrep, Tectonic and `synctex` (and Google Chrome for the browser test). The image bundles all of them. [AGENTS.md](AGENTS.md) lists how to check and install each one, and the conventions to follow when changing the code.
 
 ```sh
 make dev                                  # API on :8080 and Vite on :5173; open http://localhost:5173
