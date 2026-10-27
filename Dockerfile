@@ -2,7 +2,7 @@
 # Build for one platform with `docker build .`, or both with `make docker`.
 
 # --- frontend (platform-independent output, built natively) ---
-FROM --platform=$BUILDPLATFORM node:24.22.1-alpine3.24 AS web
+FROM --platform=$BUILDPLATFORM node:26.12.1-alpine3.24 AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
