@@ -9,7 +9,10 @@ import { join } from 'node:path'
 const src = new URL('..', import.meta.url).pathname
 const str = String.raw`'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|` + '`((?:[^`\\\\$]|\\\\.)*)`'
 const tCall = new RegExp(String.raw`\bt\(\s*(?:${str})`, 'g')
-const tnCall = new RegExp(String.raw`\btn\(\s*[^,]+,\s*(?:${str})\s*,\s*(?:${str})`, 'g')
+// tn's first argument is the count: any expression, commas allowed inside
+// (nested) parentheses, as in tn(Math.min(a, b), …).
+const arg = String.raw`(?:[^,()]|\((?:[^()]|\([^()]*\))*\))+`
+const tnCall = new RegExp(String.raw`\btn\(\s*${arg},\s*(?:${str})\s*,\s*(?:${str})`, 'g')
 const unescape = (s: string) => s.replace(/\\(.)/g, (_, c: string) => ({ n: '\n', t: '\t' })[c] ?? c)
 
 function files(dir: string): string[] {
