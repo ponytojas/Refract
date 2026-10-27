@@ -102,16 +102,18 @@ func (s *Service) SetPassword(ctx context.Context, email, pw string) (auth.User,
 }
 
 // Login checks an email and password. ip is the client's address (ClientIP).
-// Failures are counted in memory, per account and per address: guessing one
-// account's password, or many accounts from one place, is refused for a while.
+// Failures are counted per account and per address: guessing one account's
+// password, or many accounts from one place, is refused for a while. The
+// counts live in the database, so a restart doesn't reset them and
+// `refract users unlock` (another process) can.
 func (s *Service) Login(ctx context.Context, email, pw, ip string) (auth.User, error) {
 	email = normEmail(email)
 	keys := []string{"email:" + email}
 	if ip != "" {
 		keys = append(keys, "ip:"+ip)
 	}
-	if !s.allowAttempt(keys) {
-		return auth.User{}, ErrTooMany
+	if ok, err := s.allowAttempt(ctx, keys); err != nil || !ok {
+		return auth.User{}, cmp.Or(err, ErrTooMany)
 	}
 	u := auth.User{Email: email}
 	var stored string
@@ -121,73 +123,82 @@ func (s *Service) Login(ctx context.Context, email, pw, ip string) (auth.User, e
 	}
 	if stored == "" {
 		checkPassword(dummyHash(), pw)
-		s.fail(keys)
-		return auth.User{}, ErrBadLogin
+		return auth.User{}, cmp.Or(s.fail(ctx, keys), ErrBadLogin)
 	}
 	if !checkPassword(stored, pw) {
-		s.fail(keys)
-		return auth.User{}, ErrBadLogin
+		return auth.User{}, cmp.Or(s.fail(ctx, keys), ErrBadLogin)
 	}
-	s.mu.Lock()
-	delete(s.failures, keys[0]) // the address keeps its count: it may be trying several accounts
-	s.mu.Unlock()
-	return u, nil
-}
-
-type failures struct {
-	n     int
-	since time.Time
+	// The address keeps its count: it may be trying several accounts.
+	_, err = s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE key = ?`, keys[0])
+	return u, err
 }
 
 // limits: failures allowed per window, by kind of key.
 var limits = map[string]int{"email": maxFailures, "ip": maxFailuresPerIP}
 
-func (s *Service) allowAttempt(keys []string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Service) allowAttempt(ctx context.Context, keys []string) (bool, error) {
+	expired := time.Now().Add(-failWindow).Unix()
 	for _, k := range keys {
-		f, ok := s.failures[k]
-		if !ok {
+		var n int
+		err := s.DB.QueryRowContext(ctx, `SELECT count FROM login_failures WHERE key = ? AND since > ?`, k, expired).Scan(&n)
+		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
-		if time.Since(f.since) > failWindow {
-			delete(s.failures, k)
-			continue
+		if err != nil {
+			return false, err
 		}
 		kind, _, _ := strings.Cut(k, ":")
-		if f.n >= limits[kind] {
-			return false
+		if n >= limits[kind] {
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
-func (s *Service) fail(keys []string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.failures == nil {
-		s.failures = map[string]failures{}
+func (s *Service) fail(ctx context.Context, keys []string) error {
+	now := time.Now()
+	// Made-up emails and addresses each add a row: expired rows go first, and
+	// while the table is full of recent ones, only existing keys are counted.
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE since <= ?`, now.Add(-failWindow).Unix()); err != nil {
+		return err
 	}
-	// Made-up emails and addresses each add an entry: drop the expired ones
-	// before the table can grow without bound.
-	if len(s.failures) >= maxTracked {
-		for k, f := range s.failures {
-			if time.Since(f.since) > failWindow {
-				delete(s.failures, k)
-			}
-		}
+	var rows int
+	if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM login_failures`).Scan(&rows); err != nil {
+		return err
 	}
 	for _, k := range keys {
-		f, ok := s.failures[k]
-		if !ok && len(s.failures) >= maxTracked {
-			continue // still full of recent failures: keep what is already counted
+		var err error
+		if rows < maxTracked {
+			_, err = s.DB.ExecContext(ctx, `INSERT INTO login_failures (key, count, since) VALUES (?, 1, ?)
+				ON CONFLICT (key) DO UPDATE SET count = count + 1`, k, now.Unix())
+		} else {
+			_, err = s.DB.ExecContext(ctx, `UPDATE login_failures SET count = count + 1 WHERE key = ?`, k)
 		}
-		if f.n == 0 {
-			f.since = time.Now()
+		if err != nil {
+			return err
 		}
-		f.n++
-		s.failures[k] = f
 	}
+	return nil
+}
+
+// Unlock clears an account's failed sign-ins, so it can try again at once.
+// An address that failed too often still waits out its window.
+func (s *Service) Unlock(ctx context.Context, email string) (bool, error) {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE key = ?`, "email:"+normEmail(email))
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// UnlockAll clears every failed sign-in, of accounts and addresses.
+func (s *Service) UnlockAll(ctx context.Context) (int64, error) {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM login_failures`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // ClientIP is the address a request came from. Behind a reverse proxy on the

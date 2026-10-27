@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/ponytojas/Refract/internal/auth"
@@ -21,9 +20,6 @@ import (
 type Service struct {
 	DB  *sql.DB
 	Key []byte // to re-seal adopted credentials
-
-	mu       sync.Mutex
-	failures map[string]failures // "email:…" or "ip:…" → recent failed sign-ins
 }
 
 // legacy settings of the single-user version, now per user: key → sealed?

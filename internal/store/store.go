@@ -62,6 +62,13 @@ var migrations = []string{
 	`ALTER TABLE chats ADD COLUMN model TEXT NOT NULL DEFAULT '';
 	ALTER TABLE chats ADD COLUMN effort TEXT NOT NULL DEFAULT '';
 	ALTER TABLE turns ADD COLUMN reasoning TEXT NOT NULL DEFAULT ''`,
+	// Failed sign-ins, per "email:…" or "ip:…", within the current window.
+	`CREATE TABLE login_failures (
+		key   TEXT PRIMARY KEY,
+		count INTEGER NOT NULL,
+		since INTEGER NOT NULL -- first failure of the window
+	);
+	CREATE INDEX login_failures_since ON login_failures(since)`,
 }
 
 // Open opens (creating if needed) the database at path and applies pending migrations.

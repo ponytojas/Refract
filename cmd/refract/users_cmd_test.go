@@ -85,3 +85,32 @@ func TestUsersRemove(t *testing.T) {
 		t.Fatal("accepted an unknown flag")
 	}
 }
+
+func TestUsersUnlock(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("REFRACT_DATA_DIR", dir)
+	t.Setenv("REFRACT_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	run := func(args ...string) string {
+		var out bytes.Buffer
+		if err := runUsers(args, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	run("add", "ana@example.com")
+	db, _ := store.Open(filepath.Join(dir, "refract.db"))
+	defer db.Close()
+	people := &users.Service{DB: db}
+	for range 10 {
+		people.Login(context.Background(), "ana@example.com", "wrong", "")
+	}
+	if out := run("unlock", "ana@example.com"); !strings.Contains(out, "can sign in again") {
+		t.Fatalf("unlock: %q", out)
+	}
+	if out := run("unlock", "ana@example.com"); !strings.Contains(out, "wasn't locked out") {
+		t.Fatalf("second unlock: %q", out)
+	}
+	if out := run("unlock", "--all"); !strings.Contains(out, "Cleared 0") {
+		t.Fatalf("unlock --all: %q", out)
+	}
+}

@@ -164,15 +164,60 @@ func TestLoginLimitPerAddress(t *testing.T) {
 }
 
 func TestFailureTableIsBounded(t *testing.T) {
-	s := newService(t)
-	s.failures = map[string]failures{}
-	old := time.Now().Add(-2 * failWindow)
-	for i := range maxTracked {
-		s.failures[fmt.Sprintf("email:%d", i)] = failures{n: 1, since: old}
+	s, ctx := newService(t), context.Background()
+	fill := func(since int64) {
+		s.DB.Exec(`DELETE FROM login_failures`)
+		_, err := s.DB.Exec(`INSERT INTO login_failures (key, count, since)
+			SELECT 'email:' || i, 1, ? FROM (WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) SELECT i FROM n)`, since, maxTracked)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
-	s.fail([]string{"email:new"})
-	if len(s.failures) != 1 || s.failures["email:new"].n != 1 {
-		t.Fatalf("expired entries kept: %d", len(s.failures))
+	count := func(key string) (n int) {
+		s.DB.QueryRow(`SELECT count FROM login_failures WHERE key = ?`, key).Scan(&n)
+		return
+	}
+	// Full of expired rows: they're dropped, and the new key counts.
+	fill(time.Now().Add(-2 * failWindow).Unix())
+	s.fail(ctx, []string{"email:new"})
+	var rows int
+	s.DB.QueryRow(`SELECT count(*) FROM login_failures`).Scan(&rows)
+	if rows != 1 || count("email:new") != 1 {
+		t.Fatalf("rows %d, new %d", rows, count("email:new"))
+	}
+	// Full of recent rows: existing keys still count, new ones aren't added.
+	fill(time.Now().Unix())
+	s.fail(ctx, []string{"email:1", "email:another"})
+	if count("email:1") != 2 || count("email:another") != 0 {
+		t.Fatalf("existing %d, new %d", count("email:1"), count("email:another"))
+	}
+}
+
+// The counts outlive the server process, and an operator can clear them.
+func TestLockoutSurvivesRestartAndUnlocks(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	s.SetPassword(ctx, "ana@example.com", "correct horse")
+	for range maxFailures {
+		s.Login(ctx, "ana@example.com", "wrong", "")
+	}
+	restarted := &Service{DB: s.DB}
+	if _, err := restarted.Login(ctx, "ana@example.com", "correct horse", ""); !errors.Is(err, ErrTooMany) {
+		t.Fatalf("after restart: %v", err)
+	}
+	if ok, err := restarted.Unlock(ctx, "ANA@example.com"); !ok || err != nil {
+		t.Fatalf("unlock: %v %v", ok, err)
+	}
+	if _, err := restarted.Login(ctx, "ana@example.com", "correct horse", ""); err != nil {
+		t.Fatalf("after unlock: %v", err)
+	}
+	if ok, _ := restarted.Unlock(ctx, "ana@example.com"); ok {
+		t.Fatal("unlocked an account with no failures")
+	}
+	for range maxFailuresPerIP {
+		s.Login(ctx, "x@example.com", "wrong", "203.0.113.9")
+	}
+	if n, err := s.UnlockAll(ctx); err != nil || n != 2 { // the account and the address
+		t.Fatalf("unlock all: %d %v", n, err)
 	}
 }
 

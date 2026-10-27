@@ -50,6 +50,8 @@ Usage:
                      account used with REFRACT_AUTH=none)
   refract users signout <email>
                      end all of an account's sessions
+  refract users unlock <email> | --all
+                     let an account (or everyone) sign in again after too many failed attempts
   refract users remove <email> [--yes]
                      delete an account with its projects, chats and connections
   refract users list list accounts

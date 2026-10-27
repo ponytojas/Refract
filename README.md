@@ -169,7 +169,7 @@ docker exec refract refract users add ana@example.com
 docker exec refract refract users list
 ```
 
-To end all of someone's sessions (a lost laptop, say), run `refract users signout <email>`. To delete an account with its projects, chats and connections, run `refract users remove <email>`: it lists what would go, and deletes only when run again with `--yes`. With Cloudflare Access, also remove the person from your Access policy, or they get a new, empty account on their next visit.
+To end all of someone's sessions (a lost laptop, say), run `refract users signout <email>`. After too many failed sign-ins an account waits 15 minutes; `refract users unlock <email>` lets it in at once. To delete an account with its projects, chats and connections, run `refract users remove <email>`: it lists what would go, and deletes only when run again with `--yes`. With Cloudflare Access, also remove the person from your Access policy, or they get a new, empty account on their next visit.
 
 ### Sign in with OpenID Connect
 
@@ -313,6 +313,7 @@ refract login                   sign in with ChatGPT on this computer and write 
 refract users add <email>       create an account or reset its password (REFRACT_AUTH=password)
 refract users rename <a> <b>    change an account's email, keeping its data
 refract users signout <email>   end all of an account's sessions
+refract users unlock <email>    clear an account's failed sign-ins (--all: every account and address)
 refract users remove <email>    delete an account and everything it owns (asks for --yes)
 refract users list              list accounts
 refract version                 print the version
@@ -336,7 +337,7 @@ On Windows and Linux, read <kbd>Ctrl</kbd> for <kbd>⌘</kbd>. Hold <kbd>⌘</kb
 
 ## Security
 
-- **Sign-in:** Cloudflare Access tokens are verified on every request. Passwords are hashed with PBKDF2-SHA256 (600,000 iterations). Repeated failures for an account, or from one address, are refused for a while. Sessions are random tokens stored only as hashes, in `HttpOnly`, `SameSite=Lax` cookies that last 30 days.
+- **Sign-in:** Cloudflare Access tokens are verified on every request. Passwords are hashed with PBKDF2-SHA256 (600,000 iterations). Repeated failures for an account, or from one address, are refused for 15 minutes; the counts survive restarts. Sessions are random tokens stored only as hashes, in `HttpOnly`, `SameSite=Lax` cookies that last 30 days.
 - **Requests:** every API call must carry a custom header that browsers can't add cross-site, which blocks cross-site request forgery.
 - **Browser:** a strict Content-Security-Policy lets the app run only its own scripts and connect only to its own server. Refract can't be embedded in other sites, and over https it sends `Strict-Transport-Security`.
 - **Secrets at rest:** ChatGPT credentials, API keys and git tokens are encrypted with AES-GCM under `REFRACT_SECRET_KEY`, each bound to its owner.
