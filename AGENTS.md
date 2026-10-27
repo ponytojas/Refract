@@ -47,7 +47,7 @@ Check each tool and install what's missing. Versions are those the project build
 | Tool | Check | Notes |
 |---|---|---|
 | Go 1.27 | `go version` | <https://go.dev/dl/> |
-| Node.js 22 | `node --version` | <https://nodejs.org> |
+| Node.js 24 | `node --version` | <https://nodejs.org> |
 | git | `git --version` | Projects are git repositories. |
 | ripgrep | `rg --version` | The assistant's search tool. macOS: `brew install ripgrep`; Debian/Ubuntu: `apt install ripgrep`. |
 | Tectonic | `tectonic --version` | Compiles LaTeX. macOS: `brew install tectonic`; elsewhere see <https://tectonic-typesetting.github.io/book/latest/installation/>. |
