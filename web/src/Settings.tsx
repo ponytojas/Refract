@@ -151,6 +151,16 @@ function EditorPane() {
         <SettingsRow label={t('Word wrap')} description={t('Wrap long lines instead of scrolling sideways.')}>
           <SettingsSwitch checked={prefs.wrap} onCheckedChange={(v) => setPref('wrap', v)} />
         </SettingsRow>
+        <SettingsRow label={t('Word count')}>
+          <SettingsSwitch checked={prefs.wordCount} onCheckedChange={(v) => setPref('wordCount', v)} />
+        </SettingsRow>
+        <SettingsRow
+          label={<span className="font-normal">{t('Include titles')}</span>}
+          disabled={!prefs.wordCount}
+          className="pl-5"
+        >
+          <SettingsSwitch checked={prefs.wordCountTitles} onCheckedChange={(v) => setPref('wordCountTitles', v)} />
+        </SettingsRow>
       </SettingsGroup>
     </SettingsPane>
   )

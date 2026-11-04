@@ -4,6 +4,8 @@ import { useSyncExternalStore } from 'react'
 export type Prefs = {
   fontSize: 'small' | 'normal' | 'large'
   wrap: boolean
+  wordCountTitles: boolean
+  wordCount: boolean
   chatBubble: boolean // collapsed assistant: a bubble instead of the input bar
   chatHeight: number // px of the open chat sheet; 0 = default
   chatDocked: boolean // the assistant as a side panel instead of floating over the editor
@@ -16,6 +18,8 @@ const KEY = 'refract-prefs'
 const defaults: Prefs = {
   fontSize: 'normal',
   wrap: true,
+  wordCount: false,
+  wordCountTitles: true,
   chatBubble: false,
   chatHeight: 0,
   chatDocked: false,

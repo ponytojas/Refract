@@ -921,3 +921,49 @@
     transform: scale(1.015);
   }
 }
+
+/* Word budgets keep prose readable in both themes. */
+.cm-word-excess {
+  background: rgb(239 68 68 / 0.2);
+  border-radius: 2px;
+}
+
+/* PDF.js TextLayer positioning, scoped to our continuous viewer. */
+.refract-pdf-text {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.refract-pdf-text :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+.refract-pdf-text > :not(.markedContent),
+.refract-pdf-text .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.refract-pdf-text .markedContent {
+  display: contents;
+}
+.refract-pdf-text ::selection {
+  background: rgb(59 130 246 / 0.3);
+}

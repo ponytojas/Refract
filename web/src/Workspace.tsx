@@ -51,6 +51,7 @@ import { Autosaver, type SaveStatus } from './autosave'
 import { Link, navigate, pageReady, useBeforeLeave } from '@/lib/router'
 import CompileStatus, { type CompileResult, type Problem } from './CompileStatus'
 import Editor from './Editor'
+import { moveLimits } from '@/lib/wordlimits'
 import FileTree from './FileTree'
 import PdfViewer, { type Highlight } from './PdfViewer'
 import AccountMenu from '@/components/AccountMenu'
@@ -88,10 +89,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ago } from '@/lib/time'
 import { WithContextMenu, type MenuEntry } from '@/components/Menu'
 import { useCommands } from '@/lib/commands'
-import { usePrefs } from '@/lib/prefs'
+import { setPref, usePrefs } from '@/lib/prefs'
 import { editorShortcuts, mod } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
-import { t } from '@/lib/i18n'
+import { t, tn } from '@/lib/i18n'
 
 const under = (p: string, prefix: string) => p === prefix || p.startsWith(prefix + '/')
 const moved = (p: string, from: string, to: string) => (under(p, from) ? to + p.slice(from.length) : p)
@@ -113,6 +114,17 @@ type Ask = {
 type Confirm = { title: string; description: string; action: string; onConfirm: () => Promise<void> }
 
 export default function Workspace({ id, status }: { id: string; status: ChatGPTStatus | null }) {
+  const [wordSelection, setWordSelection] = useState<{ owner: 'editor' | 'pdf'; count: number } | null>(null)
+  const onEditorWordCount = useCallback((count: number | null) => {
+    setWordSelection((current) =>
+      count !== null ? { owner: 'editor', count } : current?.owner === 'editor' ? null : current,
+    )
+  }, [])
+  const onPdfWordCount = useCallback((count: number | null) => {
+    setWordSelection((current) =>
+      count !== null ? { owner: 'pdf', count } : current?.owner === 'pdf' ? null : current,
+    )
+  }, [])
   const [project, setProject] = useState<Project | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [files, setFiles] = useState<FileEntry[]>([])
@@ -130,6 +142,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   const [historyOpen, setHistoryOpen] = useState(false)
   const [gitOpen, setGitOpen] = useState(false)
   const prefs = usePrefs()
+  const countEnabled = prefs.wordCount
   const [citing, setCiting] = useState<{ target: CiteTarget | null; suggest: boolean } | null>(null)
   const [proposal, setProposal] = useState<
     { path: string; from: number; to: number; original: string; text: string } | undefined
@@ -505,6 +518,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
         const affected = tabs.filter((p) => under(p, from))
         await Promise.all(affected.map((p) => autosave.flush(p))) // save under the old name first
         await move(id, from, to)
+        moveLimits(id, from, to)
         for (const p of affected) {
           const q = moved(p, from, to)
           autosave.rename(p, q)
@@ -985,6 +999,11 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                   </div>
                 )}
               </div>
+              {countEnabled && wordSelection && (
+                <span role="status" className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                  {tn(wordSelection.count, 'Counter: {n} word', 'Counter: {n} words')}
+                </span>
+              )}
               <div className="flex shrink-0 items-center">
                 <Tooltip>
                   <TooltipTrigger
@@ -1042,6 +1061,10 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
               )}
               {!review && active && current?.text && (
                 <Editor
+                  projectId={id}
+                  countEnabled={countEnabled}
+                  onWordCount={onEditorWordCount}
+                  onEnableCount={() => setPref('wordCount', true)}
                   key={editorKey}
                   path={active}
                   states={states.current}
@@ -1089,6 +1112,8 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
         <ResizablePanel id="right" defaultSize="42%" minSize="320px">
           <section className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-xs">
             <PdfViewer
+              countEnabled={countEnabled}
+              onWordCount={onPdfWordCount}
               projectId={id}
               version={pdfVersion}
               highlight={highlight}
@@ -1243,7 +1268,7 @@ function Segmented({
 }
 
 function EmptyEditor() {
-  const rows = editorShortcuts.slice(0, 4)
+  const rows = editorShortcuts.slice(0, 5)
   return (
     <div className="flex h-full enter flex-col items-center justify-center gap-5 pb-16 text-center">
       <div>

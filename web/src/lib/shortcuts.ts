@@ -20,6 +20,7 @@ export const shortcutGroups: { title: string; items: [string, string][] }[] = [
       [`${mod}J`, t('Show the cursor position in the PDF')],
       [t('{mod}+click', { mod }), t('In the PDF: jump to the source')],
       [`${mod}S`, t('Save now (it also saves on its own)')],
+      [`${mod}⇧M`, t('Toggle word count')],
       [`${mod}W`, t('Close the file (when installed as an app)')],
     ],
   },

@@ -41,6 +41,8 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        aria-label={t('Account menu')}
+        onMouseDown={(e) => e.preventDefault()}
         style={{ viewTransitionName: 'account' }}
         className="flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 outline-none hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring/50"
       >

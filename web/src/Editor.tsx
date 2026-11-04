@@ -21,12 +21,20 @@ import {
 } from 'lucide-react'
 import { WithContextMenu, type MenuEntry } from '@/components/Menu'
 import { mod } from '@/lib/shortcuts'
+import WordCounter, { type LimitTarget } from './WordCounter'
+import { sectionAt } from '@/lib/wordcount'
+import { wordLimits, wordCountEnabled, excessWords, loadLimits, saveLimits, setLimits } from '@/lib/wordlimits'
 import { t } from '@/lib/i18n'
 
 const wrapping = new Compartment()
+const counter = new Compartment()
 const wrapExt = (on: boolean) => (on ? EditorView.lineWrapping : [])
 
 type Props = {
+  projectId: string
+  countEnabled: boolean
+  onWordCount: (count: number | null) => void
+  onEnableCount: () => void
   path: string
   // Owned by the parent (it removes entries for closed/deleted files and moves them on rename).
   // Kept outside React so switching tabs keeps undo history and selection.
@@ -48,6 +56,10 @@ type Props = {
 
 // One EditorView; each open file keeps its own EditorState, swapped on tab switch.
 export default function Editor({
+  projectId,
+  countEnabled,
+  onWordCount,
+  onEnableCount,
   path,
   states,
   initial,
@@ -71,6 +83,8 @@ export default function Editor({
   cb.current = { onChange, onSave, onCompile, onSync, onSelect }
 
   const [mounted, setMounted] = useState<EditorView | null>(null)
+  const [limitTarget, setLimitTarget] = useState<LimitTarget | null>(null)
+  const contextPos = useRef<number | null>(null)
   const [dragging, setDragging] = useState(false) // no toolbar while a mouse selection is being made
   const [, bump] = useReducer((n: number) => n + 1, 0) // re-render the toolbar (it reads the view)
   const quickRef = useRef<QuickHandle>(null)
@@ -78,9 +92,18 @@ export default function Editor({
   // ⌘K with text selected: the quick actions, and the query as a free instruction.
   useCommands((query) => {
     const v = view.current
-    if (!quick || !v || v.state.selection.main.empty) return []
+    if (!v || v.state.selection.main.empty) return []
+    const counter = {
+      id: 'sel:count',
+      group: 'Selection',
+      label: t('Count words'),
+      icon: TextSelect,
+      run: onEnableCount,
+    }
+    if (!quick) return [counter]
     const q = query.trim()
     return [
+      counter,
       ...(q
         ? [
             {
@@ -136,11 +159,14 @@ export default function Editor({
     )
   }
 
-  const { wrap } = usePrefs()
+  const { wrap, wordCountTitles } = usePrefs()
   const extensions = useRef([
     basicSetup,
     latex,
     proposalField,
+    wordLimits,
+    excessWords,
+    counter.of(wordCountEnabled.of(countEnabled)),
     wrapping.of(wrapExt(getPrefs().wrap)),
     // Highest precedence: basicSetup binds Mod-Enter to "insert blank line".
     Prec.highest(
@@ -175,6 +201,10 @@ export default function Editor({
     EditorView.updateListener.of((u) => {
       // Keep the map live, so tab switches and renames always see the latest state.
       if (states.has(current.current)) states.set(current.current, u.state)
+      if (u.docChanged || u.startState.field(wordLimits) !== u.state.field(wordLimits)) {
+        saveLimits(projectId, current.current, u.state.doc.toString(), u.state.field(wordLimits))
+        bump()
+      }
       if (u.docChanged) cb.current.onChange(current.current, u.state.doc.toString())
       if (
         u.selectionSet ||
@@ -196,7 +226,9 @@ export default function Editor({
   const stateFor = (p: string) => {
     let s = states.get(p)
     if (!s) {
-      s = EditorState.create({ doc: initial(p), extensions })
+      const doc = initial(p)
+      s = EditorState.create({ doc, extensions })
+      s = s.update({ effects: setLimits.of(loadLimits(projectId, p, doc)) }).state
       states.set(p, s)
     }
     return s
@@ -227,7 +259,9 @@ export default function Editor({
     const v = view.current!
     const next = stateFor(path)
     current.current = path
+    setLimitTarget(null)
     if (v.state !== next) v.setState(next)
+    bump()
     v.focus()
   }, [path])
 
@@ -235,6 +269,18 @@ export default function Editor({
   useEffect(() => {
     view.current!.dispatch({ effects: wrapping.reconfigure(wrapExt(wrap)) })
   }, [wrap, path])
+
+  useEffect(() => {
+    view.current!.dispatch({ effects: counter.reconfigure(wordCountEnabled.of(countEnabled)) })
+    setLimitTarget(null)
+  }, [countEnabled, path])
+
+  useEffect(() => {
+    const v = view.current!
+    const limits = v.state.field(wordLimits)
+    if (limits.rules.titles !== wordCountTitles)
+      v.dispatch({ effects: setLimits.of({ ...limits, rules: { ...limits.rules, titles: wordCountTitles } }) })
+  }, [wordCountTitles, path])
 
   useEffect(() => {
     const v = view.current!
@@ -270,6 +316,16 @@ export default function Editor({
     if (!v) return []
     const sel = v.state.selection.main
     const text = v.state.sliceDoc(sel.from, sel.to)
+    const pos = contextPos.current ?? sel.head
+    const section = sectionAt(v.state.doc.toString(), pos)
+    const saved = v.state.field(wordLimits).ranges.find((r) => !r.section && pos >= r.from && pos <= r.to)
+    const target: LimitTarget | null =
+      saved ??
+      (section
+        ? { name: section.name, from: section.from, to: section.to, section: section.id }
+        : !sel.empty
+          ? { name: t('Selected fragment'), from: sel.from, to: sel.to }
+          : null)
     const edit = (insert: string, userEvent: string) => {
       v.dispatch(v.state.replaceSelection(insert), { userEvent, scrollIntoView: true })
       v.focus()
@@ -305,6 +361,26 @@ export default function Editor({
         },
       },
       '-',
+      ...(countEnabled
+        ? [{ label: t('Word limit…'), disabled: !target, onSelect: () => target && setLimitTarget(target) }]
+        : []),
+      ...(countEnabled && !sel.empty && section
+        ? [
+            {
+              label: t('Word limit for selection…'),
+              onSelect: () =>
+                setLimitTarget(
+                  v.state
+                    .field(wordLimits)
+                    .ranges.find((r) => !r.section && r.from === sel.from && r.to === sel.to) ?? {
+                    name: t('Selected fragment'),
+                    from: sel.from,
+                    to: sel.to,
+                  },
+                ),
+            },
+          ]
+        : []),
       ...(quick && !sel.empty
         ? [
             ...actions.map((a) => ({ label: a.command, icon: a.icon, onSelect: () => quickRef.current?.run(a.id) })),
@@ -327,19 +403,38 @@ export default function Editor({
   }
 
   return (
-    <div className="relative h-full">
-      <WithContextMenu items={menu} className="h-full select-text">
-        <div className="h-full" ref={host} />
-      </WithContextMenu>
-      {quick && mounted && (
-        <QuickActions
-          view={mounted}
-          path={path}
-          dragging={dragging}
-          handle={quickRef}
-          onCite={onCite ? () => cite(true) : undefined}
-        />
-      )}
+    <div className="relative flex h-full min-h-0 flex-col">
+      <div
+        className="relative min-h-0 flex-1"
+        onContextMenuCapture={(e) => {
+          contextPos.current = view.current?.posAtCoords({ x: e.clientX, y: e.clientY }) ?? null
+        }}
+      >
+        <WithContextMenu items={menu} className="h-full select-text">
+          <div className="h-full" ref={host} />
+        </WithContextMenu>
+        {mounted && countEnabled && (
+          <WordCounter
+            key={path}
+            view={mounted}
+            path={path}
+            ai={!!quick}
+            enabled={countEnabled}
+            onCount={onWordCount}
+            target={limitTarget}
+            onClose={() => setLimitTarget(null)}
+          />
+        )}
+        {quick && mounted && (
+          <QuickActions
+            view={mounted}
+            path={path}
+            dragging={dragging}
+            handle={quickRef}
+            onCite={onCite ? () => cite(true) : undefined}
+          />
+        )}
+      </div>
     </div>
   )
 }

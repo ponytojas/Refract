@@ -436,3 +436,44 @@ Refract is released under the [MIT License](LICENSE).
 ## Acknowledgements
 
 Refract stands on [Tectonic](https://tectonic-typesetting.github.io), [SyncTeX](https://github.com/jlaurens/synctex), [CodeMirror](https://codemirror.net), [PDF.js](https://mozilla.github.io/pdf.js/), [OpenAlex](https://openalex.org), [arXiv](https://arxiv.org) and [GoAI](https://github.com/zendev-sh/goai). Thank you to their authors and maintainers.
+
+
+### Word counts and section budgets
+
+Open **Settings → Editor** and toggle **Word count** to see the
+number of readable words in your current source or PDF selection. The setting
+is remembered in this browser. Press **⌘⇧M** (**Ctrl+Shift+M** on Windows/Linux) to toggle it. With no selection,
+no count is shown. Turn it off to hide the count. Commands, comments, formulas,
+bibliography and citation keys are excluded from source counts; headings,
+footnotes, captions and table contents are included by default.
+**Include titles** stays visible underneath it in Settings → Editor and is disabled while Word count is off. Turn it off to exclude
+LaTeX titles and section headings from source counts, word limits and shortening checks.
+The choice is remembered when the counter is turned off or the page is reloaded.
+
+Right-click a section's heading or body and choose **Word limit…**. Enter the
+maximum and save. The same dialog lets you change or remove an existing limit.
+To limit arbitrary text, select it and choose **Word limit for selection…**.
+The Word count toggle also enables limit controls, excess highlighting and the
+shortening assistant. Turning it off keeps saved limits for next time. No running
+section counts are displayed while writing. Only words beyond the maximum are highlighted red.
+Within a nested limit, its own maximum controls highlighting, even when the parent
+section exceeds its limit.
+
+When a section exceeds its maximum, a floating **Suggest a shorter version**
+button identifies the innermost limited section or fragment containing the cursor or selection, including
+section headings. Outside a limited range, the button is hidden. It asks the connected AI to preserve the main ideas, facts,
+citations and valid LaTeX while fitting the limit. Without a connected AI, it
+opens Assistant settings. The suggestion must pass the same counter before it
+appears as an inline diff. Review and accept or reject it before replacing any
+text. Edits during a request invalidate its response.
+
+Limits follow edits and are saved per project and file in this browser. They survive
+file and folder renames, and undoing a heading deletion restores its limit. Manual
+ranges reset if the file changes outside this editor. Automatic sections are
+rediscovered when the file is opened again.
+
+PDF selections count extracted visible text directly, including any selected
+numbers and references. Line-wrap hyphenation and common ligatures are normalized.
+Source counting is a local prose parser, not a TeX engine: custom macros,
+conditional text, generated references and included files are not expanded.
+Counts cover the selected passage of the current file or PDF.

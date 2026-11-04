@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { plainWords } from '@/lib/wordcount'
 import { t } from '@/lib/i18n'
 import * as pdfjs from 'pdfjs-dist'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
@@ -37,6 +38,8 @@ export type Highlight = { page: number; x: number; y: number; w: number; h: numb
 
 type Props = {
   projectId: string
+  countEnabled: boolean
+  onWordCount: (count: number | null) => void
   version: number // bump to reload the PDF after a compile
   highlight?: Highlight
   onInverse: (page: number, x: number, y: number) => void
@@ -50,6 +53,8 @@ type Size = { w: number; h: number } // page size in PDF points
 // Continuous-scroll viewer. Pages are laid out at their final size up front
 // (so scroll position survives a reload) and rendered when they come into view.
 export default function PdfViewer({
+  countEnabled,
+  onWordCount,
   projectId,
   version,
   highlight,
@@ -62,11 +67,34 @@ export default function PdfViewer({
   const [sizes, setSizes] = useState<Size[]>([])
   const [scale, setScale] = useState<number | 'fit'>('fit')
   const [current, setCurrent] = useState(1)
+  const [selection, setSelection] = useState('')
   const [message, setMessage] = useState('')
   const scroller = useRef<HTMLDivElement>(null)
   const keep = useRef<{ top: number; left: number } | null>(null)
   const zoomAnchor = useRef<number | null>(null) // relative scroll to keep across zoom changes
   const task = useRef<PDFDocumentLoadingTask | null>(null) // owns the shown document
+
+  useEffect(() => {
+    const update = () => {
+      const selection = window.getSelection()
+      if (
+        selection &&
+        scroller.current?.contains(selection.anchorNode) &&
+        scroller.current.contains(selection.focusNode)
+      ) {
+        setSelection(selection.toString())
+      } else {
+        setSelection('')
+      }
+    }
+    document.addEventListener('selectionchange', update)
+    return () => document.removeEventListener('selectionchange', update)
+  }, [])
+
+  useEffect(() => {
+    onWordCount(countEnabled && selection.trim() ? plainWords(selection).length : null)
+    return () => onWordCount(null)
+  }, [countEnabled, selection, onWordCount])
 
   const fitScale = () => {
     const el = scroller.current
@@ -78,6 +106,7 @@ export default function PdfViewer({
   // Load (or reload) the PDF.
   useEffect(() => {
     let cancelled = false
+    setSelection('')
     ;(async () => {
       const res = await fetch(`/api/projects/${projectId}/pdf`, { headers: { 'X-Refract': '1' } })
       if (!res.ok) {
@@ -339,6 +368,7 @@ function Page({
 }) {
   const box = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
+  const textHost = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
   const [flash, setFlash] = useState<Highlight | undefined>()
 
@@ -376,6 +406,32 @@ function Page({
   }, [doc, n, scale, visible])
 
   useEffect(() => {
+    if (!visible) return
+    let cancelled = false
+    let layer: InstanceType<typeof pdfjs.TextLayer> | null = null
+    const host = textHost.current!
+    host.replaceChildren()
+    ;(async () => {
+      const page = await doc.getPage(n)
+      const content = await page.getTextContent()
+      if (cancelled) return
+      const container = document.createElement('div')
+      container.className = 'textLayer refract-pdf-text'
+      container.style.setProperty('--total-scale-factor', String(scale))
+      host.append(container)
+      layer = new pdfjs.TextLayer({ textContentSource: content, container, viewport: page.getViewport({ scale }) })
+      await layer.render()
+    })().catch((error) => {
+      if (!cancelled) console.error('PDF text layer:', error)
+    })
+    return () => {
+      cancelled = true
+      layer?.cancel()
+      host.replaceChildren()
+    }
+  }, [doc, n, scale, visible])
+
+  useEffect(() => {
     if (!highlight) return
     setFlash(highlight)
     const t = setTimeout(() => setFlash(undefined), 2000)
@@ -398,6 +454,7 @@ function Page({
       title={t('Cmd/Ctrl+click: go to source')}
     >
       <canvas ref={canvas} className="block size-full" />
+      <div ref={textHost} className="absolute inset-0 select-text" />
       {flash && (
         <div
           className="sync-highlight"

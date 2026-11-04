@@ -4,7 +4,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import Projects from './Projects'
 import SettingsDialog from './Settings'
-import { openSettings } from '@/lib/prefs'
+import { getPrefs, openSettings, setPref } from '@/lib/prefs'
 import Welcome from './Welcome'
 import CommandPalette from './CommandPalette'
 import ShortcutsOverlay from './ShortcutsOverlay'
@@ -39,9 +39,14 @@ export default function App() {
     }
   }, [])
 
-  // ⌘K anywhere, also from inputs and the editor.
+  // Global shortcuts, also from inputs and the editor.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault()
+        if (!e.repeat) setPref('wordCount', !getPrefs().wordCount)
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setOverlay(getOverlay() === 'palette' ? null : 'palette')
