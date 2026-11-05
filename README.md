@@ -45,6 +45,7 @@ Refract started as a replacement for OpenAI Prism: it opens Prism's exports as t
 ### Editor and PDF
 
 - LaTeX editor (CodeMirror) with tabs, autosave and syntax highlighting.
+- Completion as you type: common commands, environments (`\begin{…}` closes itself), `\ref` from the project's labels, `\cite` from its `.bib` files, and file paths in `\input`, `\include` and `\includegraphics`, relative to the main file. Each command shows its arguments and a short description, and keeps them in view while you fill them in; citations show the author, year and title of each work.
 - Compilation with [Tectonic](https://tectonic-typesetting.github.io): no TeX distribution to install, packages are fetched and cached on first use. Errors and warnings are listed with file and line, each with **Fix with AI**.
 - PDF preview with SyncTeX in both directions: <kbd>⌘J</kbd> shows the cursor's position in the PDF, <kbd>⌘</kbd>-click in the PDF jumps to the source.
 - A right-click menu in the PDF (go to source, zoom, download).
@@ -372,6 +373,7 @@ On Windows and Linux, read <kbd>Ctrl</kbd> for <kbd>⌘</kbd>. Hold <kbd>⌘</kb
 | <kbd>⌘J</kbd> | Show the cursor's position in the PDF |
 | <kbd>⌘</kbd>-click in the PDF | Jump to the source |
 | <kbd>⌘S</kbd> | Save now (it also saves on its own) |
+| <kbd>Ctrl</kbd> <kbd>Space</kbd> | Show completions (<kbd>Tab</kbd> or <kbd>↵</kbd> accepts one) |
 | <kbd>Tab</kbd> / <kbd>Esc</kbd> | Accept / reject a quick action's suggestion |
 | <kbd>↵</kbd> / <kbd>⇧↵</kbd> | Send / new line in the chat |
 

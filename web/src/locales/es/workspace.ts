@@ -13,6 +13,7 @@ export default {
   '{where} as {key}': '{where} como {key}',
   'No .tex file loads a bibliography yet: add \\bibliography{{base}} (or \\addbibresource{{path}}).':
     'Ningún archivo .tex carga aún una bibliografía: añade \\bibliography{{base}} (o \\addbibresource{{path}}).',
+  Completions: 'Sugerencias',
   Close: 'Cerrar',
   'Close others': 'Cerrar las demás',
   'Close all': 'Cerrar todas',
