@@ -48,6 +48,7 @@ import History from './History'
 import GitDialog, { pulledMessage, type PullResult } from './GitDialog'
 import CiteDialog, { type Citation, type CiteTarget } from './CiteDialog'
 import { Autosaver, type SaveStatus } from './autosave'
+import { noSymbols, type ProjectSymbols } from '@/lib/completion'
 import { Link, navigate, pageReady, useBeforeLeave } from '@/lib/router'
 import CompileStatus, { type CompileResult, type Problem } from './CompileStatus'
 import Editor from './Editor'
@@ -166,17 +167,37 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   // Outside React state: content loaded from the server and live editor states per open file.
   const loaded = useRef(new Map<string, OpenedFile>())
   const states = useRef(new Map<string, EditorState>())
+  // In a ref: the editor reads it when completing, so a refresh renders nothing.
+  const symbols = useRef(noSymbols)
+  const symbolsRequest = useRef(0)
+  const loadSymbols = useCallback(() => {
+    const request = ++symbolsRequest.current
+    api<ProjectSymbols>(`/api/projects/${id}/symbols`)
+      .then((s) => {
+        if (request === symbolsRequest.current) symbols.current = s
+      })
+      .catch(() => {}) // completion keeps the last symbols
+  }, [id])
   const saver = useRef<Autosaver | null>(null)
   if (!saver.current) {
-    saver.current = new Autosaver((p, c) => writeFile(id, p, c), {
-      onStatus: (p, s) => setStatuses((prev) => ({ ...prev, [p]: s })),
-    })
+    saver.current = new Autosaver(
+      async (p, c) => {
+        await writeFile(id, p, c)
+        loadSymbols()
+      },
+      {
+        onStatus: (p, s) => setStatuses((prev) => ({ ...prev, [p]: s })),
+      },
+    )
   }
   const autosave = saver.current
   // Leaving for another page: everything typed is on the server first.
   useBeforeLeave(useCallback(() => autosave.flushAll(), [autosave]))
 
-  const loadFiles = useCallback(() => api<FileEntry[]>(`/api/projects/${id}/files`).then(setFiles), [id])
+  const loadFiles = useCallback(() => {
+    loadSymbols()
+    return api<FileEntry[]>(`/api/projects/${id}/files`).then(setFiles)
+  }, [id, loadSymbols])
   const loadChats = useCallback(
     () =>
       api<Chat[]>(`/api/projects/${id}/chats`)
@@ -1061,6 +1082,8 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
               )}
               {!review && active && current?.text && (
                 <Editor
+                  symbols={symbols}
+                  mainFile={project?.main_file}
                   projectId={id}
                   countEnabled={countEnabled}
                   onWordCount={onEditorWordCount}

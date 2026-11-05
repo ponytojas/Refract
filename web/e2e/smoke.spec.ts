@@ -32,6 +32,58 @@ test('open project, edit, compile, see the PDF', async ({ page, request }) => {
   expect(saved).toContain('% edited in the browser')
 })
 
+test('autocomplete \\ref from the labels of the project, refreshed on save', async ({ page, request }) => {
+  const project = await (await request.post('/api/projects', { headers: api, data: { name: 'Autocomplete' } })).json()
+  const source = '\\documentclass{article}\n\\begin{document}\n\\section{Intro}\\label{sec:intro}\n'
+  expect(
+    (await request.put(`/api/projects/${project.id}/file?path=main.tex`, { headers: api, data: source })).ok(),
+  ).toBeTruthy()
+
+  const symbols = page.waitForResponse((r) => r.url().endsWith('/symbols'))
+  await page.goto(`/p/${project.id}`)
+  await page.getByRole('button', { name: 'main.tex' }).first().click()
+  await symbols
+  const editor = page.locator('.cm-content')
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+End')
+
+  await page.keyboard.type('\\ref{')
+  await page.getByRole('option', { name: 'sec:intro' }).click() // Enter is ignored for a moment after opening
+  await expect(editor).toContainText('\\ref{sec:intro}')
+  await expect(editor).not.toContainText('}}')
+
+  // A label reaches the list once it is saved.
+  const refreshed = page.waitForResponse((r) => r.url().endsWith('/symbols'))
+  await page.keyboard.type('\n\\label{sec:new}\n')
+  await refreshed
+  await page.keyboard.type('\\ref{')
+  await expect(page.getByRole('option', { name: 'sec:new' })).toBeVisible()
+
+  // Commands explain themselves: their arguments in the list, a description beside it.
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('\n\\fra')
+  await expect(page.getByRole('option', { name: /frac/ })).toContainText('{numerator}{denominator}')
+  await expect(page.locator('.cm-completionInfo')).toHaveText('A fraction.')
+
+  // And stay in view while their arguments are filled in.
+  await page.getByRole('option', { name: /frac/ }).click()
+  const argument = page.locator('.cm-signatureHint-active')
+  await expect(argument).toHaveText('{numerator}')
+  await page.keyboard.type('a')
+  await page.keyboard.press('Tab')
+  await expect(argument).toHaveText('{denominator}')
+
+  // A finished command keeps its help, and Enter still breaks the line.
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('\n\\begin')
+  await expect(page.locator('.cm-signatureHint')).toContainText('Opens an environment.')
+  await expect(page.locator('.cm-tooltip-autocomplete')).toBeHidden()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.cm-signatureHint')).toBeHidden()
+  await expect(page.locator('.cm-line').last()).toHaveText('')
+})
+
 test('import named fonts and bibliography, compile, and keep the source', async ({ page, request }) => {
   const source = `\\documentclass{article}
 \\usepackage{fontspec}

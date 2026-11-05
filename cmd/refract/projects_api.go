@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/ponytojas/Refract/internal/projects"
+	"github.com/ponytojas/Refract/internal/refs"
 )
 
 type projectsAPI struct {
@@ -32,6 +33,7 @@ func (a *projectsAPI) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{id}/export", a.export)
 	mux.HandleFunc("GET /api/projects/{id}/checks", a.checks)
 	mux.HandleFunc("GET /api/projects/{id}/files", a.listFiles)
+	mux.HandleFunc("GET /api/projects/{id}/symbols", a.symbols)
 	mux.HandleFunc("GET /api/projects/{id}/file", a.readFile)
 	mux.HandleFunc("PUT /api/projects/{id}/file", a.writeFile)
 	mux.HandleFunc("DELETE /api/projects/{id}/file", a.removeFile)
@@ -100,6 +102,22 @@ func (a *projectsAPI) listFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 // readFile returns raw bytes; X-Refract-Text tells the editor whether to open it as text.
+// symbols feeds the editor's completion: labels, citation keys and files.
+func (a *projectsAPI) symbols(w http.ResponseWriter, r *http.Request) {
+	p, err := a.svc.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		projectError(w, err)
+		return
+	}
+	root, err := os.OpenRoot(a.svc.Path(p.ID))
+	if err != nil {
+		projectError(w, err)
+		return
+	}
+	defer root.Close()
+	writeJSON(w, refs.ScanSymbols(root.FS()))
+}
+
 func (a *projectsAPI) readFile(w http.ResponseWriter, r *http.Request) {
 	b, text, err := a.svc.ReadFile(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"))
 	if err != nil {

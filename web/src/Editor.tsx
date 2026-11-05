@@ -1,7 +1,10 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { type RefObject, useEffect, useReducer, useRef, useState } from 'react'
+import { acceptCompletion, autocompletion } from '@codemirror/autocomplete'
 import { basicSetup } from 'codemirror'
 import { Compartment, EditorSelection, EditorState, Prec } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
+import { EditorView, keymap, tooltips } from '@codemirror/view'
+import { latexCompletion, opensArgument, type ProjectSymbols, signatureHint } from '@/lib/completion'
+import { completionHelp } from '@/lib/completion-help'
 import { latex } from '@/lib/editor'
 import { getPrefs, usePrefs } from '@/lib/prefs'
 import { accept, proposalField, propose, reject } from '@/lib/proposal'
@@ -52,6 +55,8 @@ type Props = {
   onCite?: (target: CiteTarget, suggest: boolean) => void // find/add a reference for the selection
   proposal?: { path: string; from: number; to: number; original: string; text: string } // show as an inline diff
   onProposed?: (ok: boolean) => void // false: the text there changed meanwhile
+  symbols: RefObject<ProjectSymbols> // what completion offers; a ref, so a refresh doesn't render
+  mainFile?: string
 }
 
 // One EditorView; each open file keeps its own EditorState, swapped on tab switch.
@@ -75,12 +80,14 @@ export default function Editor({
   onCite,
   proposal,
   onProposed,
+  symbols,
+  mainFile,
 }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const current = useRef(path)
-  const cb = useRef({ onChange, onSave, onCompile, onSync, onSelect })
-  cb.current = { onChange, onSave, onCompile, onSync, onSelect }
+  const cb = useRef({ onChange, onSave, onCompile, onSync, onSelect, mainFile })
+  cb.current = { onChange, onSave, onCompile, onSync, onSelect, mainFile }
 
   const [mounted, setMounted] = useState<EditorView | null>(null)
   const [limitTarget, setLimitTarget] = useState<LimitTarget | null>(null)
@@ -163,6 +170,24 @@ export default function Editor({
   const extensions = useRef([
     basicSetup,
     latex,
+    autocompletion({
+      override: [
+        latexCompletion(
+          () => ({
+            symbols: symbols.current,
+            path: current.current,
+            mainFile: cb.current.mainFile ?? '',
+          }),
+          completionHelp,
+        ),
+      ],
+      activateOnCompletion: opensArgument,
+      icons: false,
+    }),
+    signatureHint(completionHelp),
+    // The panels around the editor clip anything that leaves it, so tooltips place themselves inside.
+    tooltips({ tooltipSpace: (v) => v.dom.getBoundingClientRect() }),
+    EditorState.phrases.of({ Completions: t('Completions') }),
     proposalField,
     wordLimits,
     excessWords,
@@ -171,7 +196,7 @@ export default function Editor({
     // Highest precedence: basicSetup binds Mod-Enter to "insert blank line".
     Prec.highest(
       keymap.of([
-        { key: 'Tab', run: accept },
+        { key: 'Tab', run: (v) => accept(v) || acceptCompletion(v) },
         { key: 'Escape', run: (v) => reject(v) || (quickRef.current?.cancel() ?? false) },
         {
           key: 'Mod-s',
