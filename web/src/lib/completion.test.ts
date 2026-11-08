@@ -183,6 +183,15 @@ test('includegraphics offers images with their extension', () => {
   assert.equal(accept('\\includegraphics[width=2cm]{|}', 'fig/a.png'), '\\includegraphics[width=2cm]{fig/a.png}|')
 })
 
+test('paths with spaces are replaced whole', () => {
+  const spaced = { ...env, symbols: { ...noSymbols, files: ['main.tex', 'fig/new image.png'] } }
+  assert.equal(
+    accept('\\includegraphics{fig/ne| image.png}', 'fig/new image.png', spaced),
+    '\\includegraphics{fig/new image.png}|',
+  )
+  assert.equal(accept('\\includegraphics{ne|}', 'fig/new image.png', spaced), '\\includegraphics{fig/new image.png}|')
+})
+
 test('paths are relative to the main file, wherever the current file is', () => {
   const nested = { ...env, path: 'paper/sec/a.tex', mainFile: 'paper/main.tex' }
   const symbols = { ...noSymbols, files: ['paper/sec/a.tex', 'paper/sec/b.tex', 'assets/x.png', 'paper/fig/y.png'] }

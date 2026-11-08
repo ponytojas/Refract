@@ -55,6 +55,8 @@ const literalToken = /%[^\n]*|\\begin\{(verbatim\*?|Verbatim\*?|lstlisting|minte
 
 // closeBrackets adds the closing brace only before spaces and closing punctuation, so it may be missing.
 const closedArgument = /^[^\s{}\\]*\}/
+// File names may contain spaces, so a path argument runs to its closing brace.
+const closedPath = /^[^{}\\]*\}/
 const citeTail = /^[^\s{},\\]*(?=[,}])/
 
 function tailEnd(state: EditorState, to: number, tail: RegExp): number | null {
@@ -72,9 +74,9 @@ function insert(view: EditorView, completion: Completion, text: string, from: nu
 
 // Insert a whole argument and leave the cursor after its closing brace.
 const applyArgument =
-  (text: string): Apply =>
+  (text: string, tail: RegExp = closedArgument): Apply =>
   (view, completion, from, to) => {
-    const end = tailEnd(view.state, to, closedArgument)
+    const end = tailEnd(view.state, to, tail)
     insert(view, completion, `${text}}`, from, end ?? to)
   }
 
@@ -156,7 +158,7 @@ function argumentOptions(name: string, env: CompletionEnv, lists: Lists): Comple
     const relative = relativeTo(dir, f)
     // \include{a.tex} would look for a.tex.tex.
     const label = graphics ? relative : relative.replace(/\.tex$/i, '')
-    return { label, apply: applyArgument(label) }
+    return { label, apply: applyArgument(label, closedPath) }
   })
 }
 
