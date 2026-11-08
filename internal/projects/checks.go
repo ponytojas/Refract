@@ -138,6 +138,9 @@ func sub(s string, m []int, i int) string {
 	return s[m[2*i]:m[2*i+1]]
 }
 
+// StripComments blanks TeX comments; see stripComments.
+func StripComments(src string) string { return stripComments(src) }
+
 // stripComments blanks TeX comments (an unescaped % to end of line), keeping
 // line structure so offsets still map to line numbers.
 func stripComments(src string) string {

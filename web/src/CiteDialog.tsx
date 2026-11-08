@@ -24,6 +24,7 @@ export type Citation = {
   path: string
   added: boolean
   needs_setup: boolean
+  load: string // the .bib as \bibliography names it, relative to the main file's folder
   text?: string
   placed: boolean
 }
