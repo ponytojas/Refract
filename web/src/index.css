@@ -712,6 +712,42 @@
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+/* CodeMirror's base theme outranks .cm-tooltip and has no idea of the app's dark mode. */
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete,
+.cm-editor .cm-tooltip.cm-completionInfo,
+.cm-editor .cm-tooltip.cm-signatureHint {
+  background: var(--popover);
+  border-color: var(--border);
+}
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul {
+  border-radius: inherit;
+}
+.cm-editor .cm-tooltip.cm-completionInfo {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+.cm-signatureHint {
+  max-width: min(32rem, 90vw);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+.cm-signatureHint code {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+}
+.cm-signatureHint code .cm-signatureHint-active {
+  color: var(--popover-foreground);
+  font-weight: 600;
+}
+.cm-editor .cm-tooltip-autocomplete .cm-completionDetail {
+  color: var(--muted-foreground);
+  font-style: normal;
+}
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete ul li[aria-selected] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
 
 @utility chatcn-text-12 {
   font-size: 0.75rem;
