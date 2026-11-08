@@ -387,8 +387,8 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     await reloadFromDisk([c.path]) // the .bib may be open
     const setup = c.needs_setup
       ? t('No .tex file loads a bibliography yet: add \\bibliography{{base}} (or \\addbibresource{{path}}).', {
-          base: c.path.replace(/\.bib$/, ''),
-          path: c.path,
+          base: c.load.replace(/\.bib$/, ''),
+          path: c.load,
         })
       : undefined
     if (sel && c.text) {
@@ -414,8 +414,8 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
       {
         description: c.needs_setup
           ? t('No .tex file loads a bibliography yet: add \\bibliography{{base}} (or \\addbibresource{{path}}).', {
-              base: c.path.replace(/\.bib$/, ''),
-              path: c.path,
+              base: c.load.replace(/\.bib$/, ''),
+              path: c.load,
             })
           : undefined,
       },

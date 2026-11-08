@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -119,13 +120,16 @@ func AddEntry(bib string, p Ref) (content, key string, added bool) {
 	return bib + p.BibTeX(key), key, true
 }
 
-var bibCommand = regexp.MustCompile(`\\(?:addbibresource|bibliography)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}`)
+var bibCommand = regexp.MustCompile(`\\(addbibresource|bibliography)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}`)
 
 // BibTarget picks the .bib file citations go to: the first one a .tex file
-// names (\addbibresource or \bibliography), else the first .bib in the
-// project, else references.bib (and needsSetup reports that no .tex file
-// loads a bibliography yet).
+// names (\addbibresource or \bibliography), else a .bib in the folder of a
+// main file in a subfolder, else the first .bib in the project, else
+// references.bib next to the main file (and needsSetup reports that no .tex
+// file loads a bibliography yet). The result is relative to the project and
+// never leaves it.
 func BibTarget(fsys fs.FS, mainFile string) (target string, needsSetup bool) {
+	base := mainDir(mainFile)
 	var texs, bibs []string
 	fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -153,22 +157,67 @@ func BibTarget(fsys fs.FS, mainFile string) (target string, needsSetup bool) {
 		if err != nil {
 			continue
 		}
-		for _, m := range bibCommand.FindAllStringSubmatch(string(b), -1) {
-			name := strings.TrimSpace(strings.Split(m[1], ",")[0])
-			if name == "" {
-				continue
+		for _, m := range bibCommand.FindAllStringSubmatch(projects.StripComments(string(b)), -1) {
+			arg := m[2]
+			if m[1] == "bibliography" {
+				// LaTeX drops every space: \bibliography{my refs} loads myrefs.bib.
+				arg = strings.Join(strings.Fields(arg), "")
 			}
-			if !strings.HasSuffix(strings.ToLower(name), ".bib") {
-				name += ".bib"
+			// The first usable name of the list: \bibliography{a,b} loads both.
+			for _, name := range strings.Split(arg, ",") {
+				name = strings.TrimSpace(name)
+				if name == "" || strings.HasPrefix(name, "/") {
+					continue
+				}
+				if !strings.HasSuffix(strings.ToLower(name), ".bib") {
+					name += ".bib"
+				}
+				// Paths in \bibliography are relative to the main file's folder
+				// (Tectonic runs there), whichever .tex file names them.
+				if p := path.Join(base, name); !outside(p) {
+					return p, false
+				}
 			}
-			// Paths in \bibliography are relative to the project root (Tectonic runs there).
-			return path.Clean(name), false
+		}
+	}
+	if base != "." { // a main file at the root keeps the first .bib, as before
+		for _, b := range bibs {
+			if path.Dir(b) == base {
+				return b, true
+			}
 		}
 	}
 	if len(bibs) > 0 {
 		return bibs[0], true
 	}
-	return "references.bib", true
+	return path.Join(base, "references.bib"), true
+}
+
+// mainDir is the folder Tectonic compiles mainFile in, relative to the
+// project; "." for a main file at the root or one outside the project.
+func mainDir(mainFile string) string {
+	d := path.Dir(path.Clean(mainFile))
+	if outside(d) {
+		return "."
+	}
+	return d
+}
+
+// LoadName is how a .tex file names the project-relative bib to load it:
+// relative to the main file's folder, where \bibliography and \addbibresource
+// resolve. For example "references.bib" for paper/references.bib when the main
+// file is paper/main.tex, or "../shared/lib.bib" for shared/lib.bib.
+func LoadName(mainFile, bib string) string {
+	rel, err := filepath.Rel(filepath.FromSlash(mainDir(mainFile)), filepath.FromSlash(bib))
+	if err != nil {
+		return bib
+	}
+	return filepath.ToSlash(rel)
+}
+
+// outside reports whether the clean path p leaves the project.
+func outside(p string) bool {
+	return p == ".." || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/")
 }
 
 // Citation is the outcome of Cite.
@@ -177,6 +226,7 @@ type Citation struct {
 	Path       string `json:"path"`        // the .bib file, relative to the project
 	Added      bool   `json:"added"`       // false: the paper was already there
 	NeedsSetup bool   `json:"needs_setup"` // no .tex file loads a bibliography yet
+	Load       string `json:"load"`        // Path as \addbibresource names it (see LoadName)
 }
 
 // Cite adds p to the bibliography of the project at root (see BibTarget).
@@ -191,7 +241,7 @@ func Cite(root *os.Root, mainFile string, p Ref) (Citation, error) {
 		return Citation{}, err
 	}
 	content, key, added := AddEntry(string(old), p)
-	c := Citation{Key: key, Path: target, Added: added, NeedsSetup: needsSetup}
+	c := Citation{Key: key, Path: target, Added: added, NeedsSetup: needsSetup, Load: LoadName(mainFile, target)}
 	if !added {
 		return c, nil
 	}

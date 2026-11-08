@@ -374,7 +374,7 @@ func (t *Tools) cite(ctx context.Context, id string) (string, error) {
 	}
 	msg := fmt.Sprintf("Added %q to %s as %s. Cite it with \\cite{%s}.", c.Title, got.Path, got.Key, got.Key)
 	if got.NeedsSetup {
-		msg += fmt.Sprintf(" No .tex file loads a bibliography yet: add \\bibliographystyle{plain} and \\bibliography{%s} where the references should appear (or \\addbibresource{%s} with biblatex).", strings.TrimSuffix(got.Path, ".bib"), got.Path)
+		msg += fmt.Sprintf(" No .tex file loads a bibliography yet: add \\bibliographystyle{plain} and \\bibliography{%s} where the references should appear (or \\addbibresource{%s} with biblatex).", strings.TrimSuffix(got.Load, ".bib"), got.Load)
 	}
 	return msg, nil
 }
