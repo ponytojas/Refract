@@ -218,4 +218,5 @@ export default {
   'Appearance, editor and assistant settings': 'Ajustes de apariencia, editor y asistente',
   'Local account': 'Cuenta local',
   'No AI connected': 'No hay IA conectada',
+  Sections: 'Secciones',
 } as Record<string, string>

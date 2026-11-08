@@ -132,3 +132,54 @@ A citation: \\cite{example2024}.
   expect(log).not.toContain('No file main.bbl')
   expect(log).not.toContain('undefined')
 })
+
+test('click a section in the outline moves the cursor', async ({ page, request }) => {
+  const project = await (await request.post('/api/projects', { headers: api, data: { name: 'Paper' } })).json()
+  const files: Record<string, string> = {
+    'paper/main.tex':
+      '\\documentclass{article}\n\\begin{document}\n\\section{Introduction}\nText.\n\\input{chapters/method}\n\\section{Results}\nMore.\n\\end{document}\n',
+    'paper/chapters/method.tex': 'Lead-in.\n\\section{Method}\n\\subsection{Data}\nBody.\n',
+  }
+  for (const [path, data] of Object.entries(files))
+    expect(
+      (
+        await request.put(`/api/projects/${project.id}/file?path=${encodeURIComponent(path)}`, { headers: api, data })
+      ).ok(),
+    ).toBeTruthy()
+  expect(
+    (await request.patch(`/api/projects/${project.id}`, { headers: api, data: { main_file: 'paper/main.tex' } })).ok(),
+  ).toBeTruthy()
+
+  await page.goto(`/p/${project.id}`)
+  // The outline sits under the file tree, open by default, and collapses from its header.
+  const toggle = page.getByRole('button', { name: 'Outline', exact: true })
+  const outline = page.getByRole('navigation', { name: 'Outline' })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(outline).toBeHidden()
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  const items = outline.getByRole('button')
+  await expect(items).toHaveCount(4)
+  await expect
+    .poll(() => items.evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label'))))
+    .toEqual(['Introduction', 'Method', 'Data', 'Results'])
+  // Headings from an included file carry its path; those of the main file don't.
+  await expect(outline.getByRole('button', { name: 'Method', exact: true })).toHaveAccessibleDescription(
+    'Method · paper/chapters/method.tex:2',
+  )
+  await expect(outline.getByRole('button', { name: 'Method', exact: true })).toContainText('method.tex')
+  await expect(outline.getByRole('button', { name: 'Results', exact: true })).not.toContainText('.tex')
+
+  // A heading in an included file opens that file on its line, and becomes the current one.
+  const data = outline.getByRole('button', { name: 'Data', exact: true })
+  await data.click()
+  await expect(page.locator('.cm-activeLine')).toHaveText('\\subsection{Data}')
+  await expect(data).toHaveAttribute('aria-current', 'true')
+
+  const results = outline.getByRole('button', { name: 'Results', exact: true })
+  await results.click()
+  await expect(page.locator('.cm-activeLine')).toHaveText('\\section{Results}')
+  await expect(results).toHaveAttribute('aria-current', 'true')
+})

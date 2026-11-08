@@ -7,13 +7,14 @@ import { cn } from '@/lib/utils'
 import { t } from '@/lib/i18n'
 
 const PER_GROUP = 8 // with an empty query, each group shows its first few
-const ORDER = ['Selection', 'Actions', 'Files', 'Chats', 'Projects', 'Navigate', 'General']
+const ORDER = ['Selection', 'Actions', 'Sections', 'Files', 'Chats', 'Projects', 'Navigate', 'General']
 const groupRank = (g: string) => (ORDER.includes(g) ? ORDER.indexOf(g) : ORDER.length)
 const MAX = 50
 // Group names are data (compared against ORDER); only their display is translated.
 const GROUP_NAMES: Record<string, string> = {
   Selection: t('Selection'),
   Actions: t('Actions'),
+  Sections: t('Sections'),
   Files: t('Files'),
   Chats: t('Chats'),
   Projects: t('Projects'),

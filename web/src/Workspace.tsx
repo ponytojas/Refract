@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { EditorState } from '@codemirror/state'
-import { usePanelRef } from 'react-resizable-panels'
+import { usePanelRef, useDefaultLayout, type LayoutStorage, type PanelImperativeHandle } from 'react-resizable-panels'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -16,6 +16,9 @@ import {
   FolderPlus,
   GitBranch,
   History as HistoryIcon,
+  ChevronRight,
+  FolderTree,
+  ListTree,
   Loader2,
   MessageSquare,
   MessageSquarePlus,
@@ -25,6 +28,7 @@ import {
   Sparkles,
   Upload,
   X,
+  type LucideIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -93,7 +97,34 @@ import { useCommands } from '@/lib/commands'
 import { setPref, usePrefs } from '@/lib/prefs'
 import { editorShortcuts, mod } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
+import { buildOutline, currentHeading, emptyOutline, type Outline as OutlineData } from '@/lib/outline'
+import Outline from './Outline'
 import { t, tn } from '@/lib/i18n'
+
+// Saved panel layouts; storage can be unavailable (private windows, blocked site data).
+const layoutStorage: LayoutStorage = {
+  getItem: (k) => {
+    try {
+      return localStorage.getItem(k)
+    } catch {
+      return null
+    }
+  },
+  setItem: (k, v) => {
+    try {
+      localStorage.setItem(k, v)
+    } catch {
+      // not remembered
+    }
+  },
+}
+
+// Opening the outline restores its last size, but never just a sliver of the list.
+function openOutline(p: PanelImperativeHandle | null) {
+  if (!p) return
+  p.expand()
+  if (p.getSize().inPixels < 160) p.resize('40%')
+}
 
 const under = (p: string, prefix: string) => p === prefix || p.startsWith(prefix + '/')
 const moved = (p: string, from: string, to: string) => (under(p, from) ? to + p.slice(from.length) : p)
@@ -152,6 +183,17 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   const [aiRequest, setAiRequest] = useState<{ text: string; n: number } | undefined>()
   const [selLines, setSelLines] = useState('')
   const [sideTab, setSideTab] = useState<'files' | 'chats'>('files')
+  const [cursorLine, setCursorLine] = useState(1)
+  const [outline, setOutline] = useState<OutlineData>(emptyOutline)
+  // Files the outline read from the server (not open in the editor); cleared when the file list changes.
+  const outlineCache = useRef(new Map<string, string | null>())
+  const outlineRequest = useRef(0)
+  const refreshOutline = useRef(() => {})
+  // The outline is a collapsible split under the file tree; its size (and so whether it is open) is remembered.
+  const outlinePanel = usePanelRef()
+  const [outlineOpen, setOutlineOpen] = useState(true)
+  const [revealOutline, setRevealOutline] = useState(0)
+  const filesLayout = useDefaultLayout({ id: 'refract-files-outline', storage: layoutStorage })
   const [review, setReview] = useState<Turn | null>(null)
   const [turnUpdate, setTurnUpdate] = useState<Turn | undefined>()
   const [editorKey, setEditorKey] = useState(0) // bump to reload open files from disk
@@ -184,6 +226,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
       async (p, c) => {
         await writeFile(id, p, c)
         loadSymbols()
+        refreshOutline.current()
       },
       {
         onStatus: (p, s) => setStatuses((prev) => ({ ...prev, [p]: s })),
@@ -198,6 +241,57 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     loadSymbols()
     return api<FileEntry[]>(`/api/projects/${id}/files`).then(setFiles)
   }, [id, loadSymbols])
+
+  // The outline follows the main file and what it includes; it is rebuilt on
+  // save (above), not on every keystroke. Open files are read from the editor.
+  useLayoutEffect(() => {
+    refreshOutline.current = () => {
+      const main = project?.main_file
+      const request = ++outlineRequest.current
+      if (!main) return setOutline(emptyOutline)
+      const exists = new Set(files.filter((f) => !f.dir).map((f) => f.path))
+      const read = async (p: string) => {
+        const st = states.current.get(p)
+        if (st) return st.doc.toString()
+        const f = loaded.current.get(p)
+        if (f) return f.text ? f.content : null
+        if (!exists.has(p)) return null
+        if (!outlineCache.current.has(p))
+          outlineCache.current.set(
+            p,
+            await readFile(id, p).then(
+              (r) => (r.text ? r.content : null),
+              () => null,
+            ),
+          )
+        return outlineCache.current.get(p) ?? null
+      }
+      buildOutline(main, read)
+        .then((o) => {
+          if (request === outlineRequest.current) setOutline(o)
+        })
+        .catch(() => {}) // keep the last outline
+    }
+  })
+  useEffect(() => {
+    outlineCache.current.clear()
+    refreshOutline.current()
+  }, [files, project?.main_file])
+  useEffect(() => {
+    if (sideTab === 'files' && outlineOpen) refreshOutline.current()
+  }, [sideTab, outlineOpen])
+  // "Go to section…": open the outline (now mounted on the Files tab) and focus its current heading.
+  const focusOutline = useRef(false)
+  useEffect(() => {
+    if (!revealOutline) return
+    focusOutline.current = true
+    openOutline(outlinePanel.current)
+  }, [revealOutline, outlinePanel])
+  useEffect(() => {
+    if (!outlineOpen || !focusOutline.current) return
+    focusOutline.current = false
+    document.querySelector<HTMLElement>('#outline-list [aria-current="true"], #outline-list button')?.focus()
+  }, [outlineOpen, revealOutline])
   const loadChats = useCallback(
     () =>
       api<Chat[]>(`/api/projects/${id}/chats`)
@@ -609,6 +703,12 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     else p.collapse()
   }
 
+  function newChat() {
+    setChatId('')
+    setChatOpen(true)
+    setChatFocus((n) => n + 1)
+  }
+
   useCommands(() => [
     { id: 'ws:compile', group: 'Actions', label: t('Compile'), icon: Play, shortcut: `${mod}↵`, run: compile },
     {
@@ -617,11 +717,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
       label: t('New chat'),
       icon: MessageSquarePlus,
       keywords: 'assistant ai ask',
-      run: () => {
-        setChatId('')
-        setChatOpen(true)
-        setChatFocus((n) => n + 1)
-      },
+      run: newChat,
     },
     {
       id: 'ws:assistant',
@@ -681,6 +777,18 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
       run: () => setCiting({ target: null, suggest: false }),
     },
     {
+      id: 'ws:outline',
+      group: 'Actions',
+      label: t('Go to section…'),
+      icon: ListTree,
+      keywords: 'outline sections headings chapter',
+      run: () => {
+        if (sidebar.current?.isCollapsed()) sidebar.current.expand()
+        setSideTab('files')
+        setRevealOutline((n) => n + 1)
+      },
+    },
+    {
       id: 'ws:sidebar',
       group: 'Actions',
       label: sidebarCollapsed ? t('Show the sidebar') : t('Hide the sidebar'),
@@ -701,6 +809,15 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
           run: () => open(f.path),
         }
       }),
+    ...outline.headings.map((h, i) => ({
+      id: `section:${i}`,
+      group: 'Sections',
+      label: h.title,
+      hint: h.path === project?.main_file ? `L${h.line}` : `${h.path}:${h.line}`,
+      icon: ListTree,
+      keywords: 'section',
+      run: () => jumpTo(h.path, h.line),
+    })),
     ...chats.map((c) => ({
       id: `chat:${c.id}`,
       group: 'Chats',
@@ -844,12 +961,11 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                 value={sideTab}
                 onChange={(v) => setSideTab(v as 'files' | 'chats')}
                 options={[
-                  { value: 'files', label: t('Files') },
-                  { value: 'chats', label: t('Chats') },
+                  { value: 'files', label: t('Files'), icon: FolderTree },
+                  { value: 'chats', label: t('Chats'), icon: MessageSquare },
                 ]}
               />
-              <span className="flex-1" />
-              {sideTab === 'files' && (
+              {sideTab === 'files' ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
@@ -870,6 +986,16 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t('New chat')}
+                  className="text-muted-foreground"
+                  onClick={newChat}
+                >
+                  <Plus />
+                </Button>
               )}
               <input
                 ref={uploadInput}
@@ -884,31 +1010,76 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
             </div>
 
             {sideTab === 'files' ? (
-              <FileTree
-                files={files}
-                active={review ? undefined : active}
-                dirty={(p) => autosave.isDirty(p)}
-                onOpen={open}
-                onNew={create}
-                onRename={rename}
-                onDelete={remove}
-                onUpload={upload}
-                onUploadClick={() => uploadInput.current?.click()}
-                onSetMain={setMainFile}
-                onDownload={(p) => run(() => download(fileURL(id, p), p.split('/').pop()!))}
-                mainFile={project?.main_file}
-              />
+              <ResizablePanelGroup
+                id="refract-files-outline"
+                orientation="vertical"
+                className="min-h-0 flex-1"
+                defaultLayout={filesLayout.defaultLayout}
+                onLayoutChanged={filesLayout.onLayoutChanged}
+              >
+                <ResizablePanel id="files" minSize="64px">
+                  <div className="flex h-full flex-col">
+                    <FileTree
+                      files={files}
+                      active={review ? undefined : active}
+                      dirty={(p) => autosave.isDirty(p)}
+                      onOpen={open}
+                      onNew={create}
+                      onRename={rename}
+                      onDelete={remove}
+                      onUpload={upload}
+                      onUploadClick={() => uploadInput.current?.click()}
+                      onSetMain={setMainFile}
+                      onDownload={(p) => run(() => download(fileURL(id, p), p.split('/').pop()!))}
+                      mainFile={project?.main_file}
+                    />
+                  </div>
+                </ResizablePanel>
+                {/* A visible divider: the outline's height can be dragged. */}
+                <ResizableHandle className="mx-2 my-1 transition-colors duration-150 aria-[orientation=horizontal]:w-auto data-[separator=active]:bg-foreground/30 data-[separator=focus]:bg-foreground/30 data-[separator=hover]:bg-foreground/30" />
+                <ResizablePanel
+                  id="outline"
+                  panelRef={outlinePanel}
+                  defaultSize="40%"
+                  minSize="96px"
+                  collapsible
+                  collapsedSize="28px"
+                  onResize={(size) => setOutlineOpen(size.inPixels > 32)}
+                >
+                  <div className="flex h-full flex-col">
+                    <button
+                      className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors duration-100 hover:text-foreground"
+                      aria-expanded={outlineOpen}
+                      aria-controls="outline-list"
+                      onClick={() => {
+                        if (outlinePanel.current?.isCollapsed()) openOutline(outlinePanel.current)
+                        else outlinePanel.current?.collapse()
+                      }}
+                    >
+                      <ChevronRight
+                        className={cn('size-3.5 transition-transform duration-150', outlineOpen && 'rotate-90')}
+                      />
+                      <ListTree className="size-3.5" />
+                      {t('Outline')}
+                    </button>
+                    {outlineOpen && (
+                      <Outline
+                        outline={outline}
+                        current={active ? currentHeading(outline, active, cursorLine) : -1}
+                        mainFile={project?.main_file}
+                        onJump={jumpTo}
+                      />
+                    )}
+                  </div>
+                </ResizablePanel>
+              </ResizablePanelGroup>
             ) : (
               <div className="min-h-0 flex-1 overflow-auto px-2">
                 <Button
                   variant="ghost"
                   size="sm"
                   className="mb-1 w-full justify-start text-muted-foreground"
-                  onClick={() => {
-                    setChatId('')
-                    setChatOpen(true)
-                    setChatFocus((n) => n + 1)
-                  }}
+                  onClick={newChat}
                 >
                   <Plus /> {t('New chat')}
                 </Button>
@@ -1100,6 +1271,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                   onCompile={compile}
                   onSync={syncToPDF}
                   onSelect={setSelLines}
+                  onCursor={setCursorLine}
                   insert={insert}
                   onInserted={() => setInsert(undefined)}
                   onCite={(target, suggest) => setCiting({ target, suggest })}
@@ -1259,14 +1431,17 @@ function Segmented({
 }: {
   value: string
   onChange: (v: string) => void
-  options: { value: string; label: string }[]
+  options: { value: string; label: string; icon: LucideIcon }[]
 }) {
   const index = Math.max(
     0,
     options.findIndex((o) => o.value === value),
   )
   return (
-    <div className="relative grid shrink-0 grid-cols-2 rounded-lg bg-foreground/[0.06] p-0.5 text-xs" role="tablist">
+    <div
+      className="relative grid min-w-0 flex-1 grid-cols-2 rounded-lg bg-foreground/[0.06] p-0.5 text-xs"
+      role="tablist"
+    >
       <span
         className="absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-md bg-background shadow-xs transition-transform duration-200 ease-out"
         style={{ transform: `translateX(${index * 100}%)` }}
@@ -1277,13 +1452,15 @@ function Segmented({
           key={o.value}
           role="tab"
           aria-selected={o.value === value}
+          title={o.label}
           className={cn(
-            'relative px-3 py-1 font-medium transition-colors duration-150',
+            'relative flex min-w-0 items-center justify-center gap-1 px-2 py-1 font-medium transition-colors duration-150',
             o.value === value ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
           )}
           onClick={() => onChange(o.value)}
         >
-          {o.label}
+          <o.icon className="size-3.5 shrink-0" aria-hidden />
+          <span className="truncate">{o.label}</span>
         </button>
       ))}
     </div>

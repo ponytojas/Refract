@@ -331,6 +331,9 @@ function sectionSource(source: string): string {
   return chars.join('')
 }
 
+// For other heading readers (the outline): same masking, same offsets.
+export const maskForSections = sectionSource
+
 export function findSections(source: string): Section[] {
   const clean = sectionSource(source)
   const result: Section[] = []
