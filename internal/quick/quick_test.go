@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/ponytojas/Refract/internal/ai"
 )
@@ -99,5 +100,45 @@ func TestRun(t *testing.T) {
 	p = &fake{events: []ai.Event{{Type: ai.EventText, Text: "half"}}} // stream cut before completed
 	if _, err := Run(context.Background(), p, "m", "", Request{Action: "improve", Selection: "x"}); err == nil {
 		t.Error("incomplete reply accepted")
+	}
+}
+
+func TestProjectInstructions(t *testing.T) {
+	if got := ProjectInstructions("<!-- Write here -->\n\n## Style\n<!-- e.g. British -->\n", 100); got != "## Style" {
+		t.Errorf("comments not dropped: %q", got)
+	}
+	if got := ProjectInstructions("  <!-- only a comment -->  ", 100); got != "" {
+		t.Errorf("comment-only file = %q, want empty", got)
+	}
+	if got := ProjectInstructions("keep <!-- unterminated", 100); got != "keep" {
+		t.Errorf("unterminated comment = %q", got)
+	}
+	long := strings.Repeat("é", 2000) // 4000 bytes
+	got := ProjectInstructions(long, 2<<10)
+	if !utf8.ValidString(got) || !strings.HasSuffix(got, "[REFRACT.md is longer than 2 KB; only its beginning is included.]") {
+		t.Errorf("cut = …%q", got[len(got)-80:])
+	}
+	if body, _, _ := strings.Cut(got, "\n["); len(body) > 2<<10 {
+		t.Errorf("cut keeps %d bytes", len(body))
+	}
+}
+
+func TestPromptIncludesProjectInstructions(t *testing.T) {
+	for _, action := range []string{"improve", "explain"} {
+		instr, input := Prompt(Request{Action: action, Selection: "x", ProjectInstructions: "Use British spelling."})
+		if !strings.HasSuffix(instr, InstructionsHeading+"Use British spelling.") || strings.Contains(input, "British") {
+			t.Errorf("%s: instructions = %q", action, instr)
+		}
+	}
+	instr, _ := Prompt(Request{Action: "improve", Selection: "x", ProjectInstructions: strings.Repeat("a", 5000)})
+	if !strings.Contains(instr, "longer than 2 KB") {
+		t.Error("quick actions don't cap the instructions at 2 KB")
+	}
+	instr, _ = Prompt(Request{Action: "improve", Selection: "x", ProjectInstructions: "<!-- template -->"})
+	if strings.Contains(instr, "Project instructions") {
+		t.Error("an empty REFRACT.md adds a heading")
+	}
+	if err := (Request{Action: "improve", Selection: "x", ProjectInstructions: strings.Repeat("a", MaxProjectInstructions+1)}).Validate(); err == nil {
+		t.Error("oversized REFRACT.md accepted")
 	}
 }

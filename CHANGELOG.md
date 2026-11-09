@@ -9,6 +9,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - LaTeX completion in the editor: common commands and environments (`\begin{…}` closes itself), `\ref` and friends from the project's labels, `\cite` from its `.bib` files, and file paths in `\input`, `\include` and `\includegraphics`. Commands and environments show their arguments and a short description, the arguments stay in view while filling them in, and citations show the author, year and title of each work.
 - `REFRACT_MODE=selfhost|saas` says whether Refract runs as a self-hosted install (the default) or as the hosted service. The hosted service doesn't offer the ChatGPT plan: Settings → Assistant shows API providers only.
 - A document outline under the file tree: the sections of the main file and the files it `\input`s or `\include`s, indented by level. Click a heading to jump to it; the one containing the cursor is highlighted, and it refreshes on save. Headings are also in the command palette (<kbd>⌘K</kbd>, **Go to section…**).
+- Project instructions: a `REFRACT.md` at the project root that the assistant and quick actions always follow (style, spelling, notation, what not to touch). Open or create it from the project menu; ask the assistant to remember something and it proposes an edit to it.
 
 ### Fixed
 

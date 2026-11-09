@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ponytojas/Refract/internal/ai"
 )
@@ -22,13 +23,46 @@ type Request struct {
 	Before      string `json:"before"` // text just before the selection, for context
 	After       string `json:"after"`  // text just after it
 	File        string `json:"file"`
+	// ProjectInstructions is the project's REFRACT.md as the editor has it.
+	// The client sends it because quick actions aren't tied to a project.
+	ProjectInstructions string `json:"projectInstructions"`
 }
 
 const (
 	MaxSelection   = 20000
 	MaxContext     = 4000 // per side
 	MaxInstruction = 2000
+	// MaxProjectInstructions bounds what the client may send; only the first
+	// QuickInstructions bytes reach the model.
+	MaxProjectInstructions = 16 << 10
+	QuickInstructions      = 2 << 10
 )
+
+// InstructionsFile is the file at the project root whose text the assistant
+// and quick actions always follow.
+const InstructionsFile = "REFRACT.md"
+
+var htmlComment = regexp.MustCompile(`(?s)<!--.*?(-->|$)`)
+
+// ProjectInstructions prepares the text of REFRACT.md for a prompt: it drops
+// HTML comments (the template is only comments, so it counts as empty), trims
+// it, and cuts it to max bytes on a character boundary with a note saying so.
+// It returns "" when nothing is left.
+func ProjectInstructions(text string, max int) string {
+	text = strings.TrimSpace(htmlComment.ReplaceAllString(text, ""))
+	if len(text) <= max {
+		return text
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return strings.TrimSpace(text[:cut]) + fmt.Sprintf("\n[%s is longer than %d KB; only its beginning is included.]", InstructionsFile, max>>10)
+}
+
+// InstructionsHeading introduces the author's instructions after the rules,
+// which they never override.
+const InstructionsHeading = "\n\nProject instructions from the author (" + InstructionsFile + "). Follow them unless they conflict with the rules above:\n"
 
 var tasks = map[string]string{
 	"improve": "Improve the wording: clearer, more fluent and more precise. Keep the meaning, the tone and roughly the length.",
@@ -64,6 +98,9 @@ func (r Request) Validate() error {
 	if len(r.Instruction) > MaxInstruction {
 		return fmt.Errorf("instruction too long (max %d characters)", MaxInstruction)
 	}
+	if len(r.ProjectInstructions) > MaxProjectInstructions {
+		return fmt.Errorf("%s too long (max %d KB)", InstructionsFile, MaxProjectInstructions>>10)
+	}
 	return nil
 }
 
@@ -92,6 +129,9 @@ func Prompt(r Request) (instructions, input string) {
 			task = strings.TrimSpace(r.Instruction)
 		}
 		instructions = rewriteRules + task
+	}
+	if pi := ProjectInstructions(r.ProjectInstructions, QuickInstructions); pi != "" {
+		instructions += InstructionsHeading + pi
 	}
 	var b strings.Builder
 	if r.File != "" {

@@ -10,12 +10,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/arxiv"
 	"github.com/ponytojas/Refract/internal/cite"
 	"github.com/ponytojas/Refract/internal/compile"
 	"github.com/ponytojas/Refract/internal/openalex"
+	"github.com/ponytojas/Refract/internal/quick"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -271,5 +273,46 @@ func TestCitePaper(t *testing.T) {
 	}
 	if slices.ContainsFunc((&Tools{Dir: dir}).Definitions(), func(d ai.Tool) bool { return d.Name == "search_papers" }) {
 		t.Error("paper tools offered without a service")
+	}
+}
+
+func lastInstructions(t *testing.T, dir string) string {
+	t.Helper()
+	p := &fakeProvider{script: [][]ai.Event{{{Type: ai.EventText, Text: "done"}}}}
+	if _, _, err := run(t, p, dir); err != nil {
+		t.Fatal(err)
+	}
+	return p.requests[len(p.requests)-1].Instructions
+}
+
+func TestProjectInstructionsInPrompt(t *testing.T) {
+	dir := setup(t)
+	if got := lastInstructions(t, dir); strings.Contains(got, "Project instructions from the author") {
+		t.Errorf("heading without REFRACT.md:\n%s", got)
+	}
+	os.WriteFile(filepath.Join(dir, "REFRACT.md"), []byte("<!-- template -->\n"), 0o644)
+	if got := lastInstructions(t, dir); strings.Contains(got, "Project instructions from the author") {
+		t.Errorf("heading for a comment-only REFRACT.md:\n%s", got)
+	}
+	os.WriteFile(filepath.Join(dir, "REFRACT.md"), []byte("Use British spelling.\n"), 0o644)
+	if got := lastInstructions(t, dir); !strings.HasSuffix(got, quick.InstructionsHeading+"Use British spelling.") {
+		t.Errorf("REFRACT.md missing:\n%s", got)
+	}
+	os.WriteFile(filepath.Join(dir, "REFRACT.md"), []byte(strings.Repeat("ü", 6000)), 0o644) // 12 KB
+	got := lastInstructions(t, dir)
+	if !utf8.ValidString(got) || !strings.HasSuffix(got, "[REFRACT.md is longer than 8 KB; only its beginning is included.]") {
+		t.Errorf("not cut at 8 KB: …%q", got[len(got)-100:])
+	}
+}
+
+func TestProjectInstructionsStayInTheWorktree(t *testing.T) {
+	dir := setup(t)
+	outside := filepath.Join(t.TempDir(), "secret")
+	os.WriteFile(outside, []byte("server secret"), 0o644)
+	if err := os.Symlink(outside, filepath.Join(dir, "REFRACT.md")); err != nil {
+		t.Skip(err)
+	}
+	if got := lastInstructions(t, dir); strings.Contains(got, "server secret") {
+		t.Error("REFRACT.md followed a symlink out of the worktree")
 	}
 }
