@@ -37,6 +37,7 @@ import { shortcutGroups } from '@/lib/shortcuts'
 import { setTheme, useTheme, type Theme } from '@/lib/theme'
 import PlanBadge from './PlanBadge'
 import { useMe } from '@/components/AccountMenu'
+import { chatgptOffered } from '@/lib/mode'
 
 type Props = { status: ChatGPTStatus | null; onChange: (s: ChatGPTStatus) => void }
 
@@ -47,7 +48,11 @@ export default function SettingsDialog({ status, onChange }: Props) {
     <Dialog open={section !== null} onOpenChange={(o) => !o && openSettings(null)}>
       <DialogContent className="h-[min(640px,calc(100dvh-2rem))] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-[860px]">
         <DialogTitle className="sr-only">{t('Settings')}</DialogTitle>
-        <DialogDescription className="sr-only">{t('Appearance, editor and ChatGPT settings')}</DialogDescription>
+        <DialogDescription className="sr-only">
+          {chatgptOffered()
+            ? t('Appearance, editor and ChatGPT settings')
+            : t('Appearance, editor and assistant settings')}
+        </DialogDescription>
         <SettingsPanel value={section ?? 'general'} onValueChange={(v) => openSettings(v)} className="h-full">
           <SettingsNav title={t('Settings')} className="bg-foreground/[0.025]">
             <SettingsNavItem value="general" icon={<SunMoon />}>
@@ -170,7 +175,6 @@ function AssistantPane({ status, onChange }: Props) {
   const prefs = usePrefs()
   const [busy, setBusy] = useState(false)
   const input = useRef<HTMLInputElement>(null)
-  const me = useMe()
 
   async function run(fn: () => Promise<ChatGPTStatus>, ok: string) {
     setBusy(true)
@@ -186,7 +190,7 @@ function AssistantPane({ status, onChange }: Props) {
 
   const s = status?.status
   // The hosted service offers no ChatGPT plan (REFRACT_MODE=saas): the server has no routes for it.
-  const chatgpt = me?.mode !== 'saas'
+  const chatgpt = chatgptOffered()
   return (
     <SettingsPane
       value="assistant"
@@ -194,7 +198,7 @@ function AssistantPane({ status, onChange }: Props) {
       description={
         chatgpt
           ? t('Refract uses your ChatGPT plan or your own API keys for AI requests.')
-          : t('Use an API key here, or self-host Refract to use your ChatGPT plan.')
+          : t('Refract uses your own API keys for AI requests. To use your ChatGPT plan, self-host Refract.')
       }
     >
       {chatgpt && (
@@ -451,7 +455,12 @@ function Providers({ onChange }: { onChange: () => void }) {
   return (
     <SettingsGroup
       title={t('API providers')}
-      description={t('Use your own API keys or a local model server. Their models appear in the model picker.')}
+      description={
+        // A local model server runs on the user's computer, which the hosted service can't reach.
+        chatgptOffered()
+          ? t('Use your own API keys or a local model server. Their models appear in the model picker.')
+          : t('Use your own API keys. Their models appear in the model picker.')
+      }
     >
       {state.configured.map((c) => (
         <SettingsRow

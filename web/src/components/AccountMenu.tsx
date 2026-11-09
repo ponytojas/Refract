@@ -14,6 +14,7 @@ import { openSettings } from '@/lib/prefs'
 import { setTheme, useTheme, type Theme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { t } from '@/lib/i18n'
+import { chatgptOffered } from '@/lib/mode'
 
 const themes: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: 'light', label: t('Light'), icon: Sun },
@@ -22,7 +23,7 @@ const themes: { value: Theme; label: string; icon: typeof Sun }[] = [
 ]
 
 // Bottom-left account chip: ChatGPT identity, settings, theme.
-type Me = { id: string; email: string; can_sign_out: boolean; mode: 'selfhost' | 'saas' }
+type Me = { id: string; email: string; can_sign_out: boolean }
 let mePromise: Promise<Me | null> | null = null
 export function useMe() {
   const [me, setMe] = useState<Me | null>(null)
@@ -37,7 +38,9 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
   const { theme } = useTheme()
   const me = useMe()
   // With several users, the chip shows who is signed in to Refract; alone, the ChatGPT account.
-  const email = me && me.email !== 'local' ? me.email : status?.status.signed_in ? status.status.email : undefined
+  const chatgpt = chatgptOffered()
+  const local = !me || me.email === 'local'
+  const email = !local ? me.email : chatgpt && status?.status.signed_in ? status.status.email : undefined
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -52,14 +55,17 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
         {!compact && (
           <span className="min-w-0">
             <span className="flex items-center gap-1 truncate text-sm font-medium">
-              {email ?? t('Not signed in')} <ChevronsUpDown className="size-3 shrink-0 text-muted-foreground" />
+              {email ?? (chatgpt ? t('Not signed in') : t('Local account'))}{' '}
+              <ChevronsUpDown className="size-3 shrink-0 text-muted-foreground" />
             </span>
             <span className="block truncate text-xs text-muted-foreground">
               {status?.status.plan_granted
                 ? t('Using ChatGPT plan')
                 : status?.ai_ready
                   ? t('Using API providers')
-                  : t('ChatGPT not connected')}
+                  : chatgpt
+                    ? t('ChatGPT not connected')
+                    : t('No AI connected')}
             </span>
           </span>
         )}

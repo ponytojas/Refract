@@ -170,7 +170,11 @@ func (a *api) choose(ctx context.Context, want assistant.Choice, configured stri
 	case ok:
 		return assistant.Choice{Model: m.Slug, Effort: effort}, nil
 	case len(ms) == 0:
-		return assistant.Choice{}, &ai.Error{Kind: ai.ErrNotSignedIn, Message: "no models available: sign in with ChatGPT or add an API provider in Settings"}
+		msg := "no models available: add an API provider in Settings"
+		if a.mode.ChatGPT() {
+			msg = "no models available: sign in with ChatGPT or add an API provider in Settings"
+		}
+		return assistant.Choice{}, &ai.Error{Kind: ai.ErrNotSignedIn, Message: msg}
 	default:
 		return assistant.Choice{}, fmt.Errorf("model %q is not available", want.Model)
 	}

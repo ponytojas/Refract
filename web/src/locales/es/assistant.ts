@@ -131,4 +131,7 @@ export default {
   'cited {n} times': 'citado {n} veces',
   'Float over the editor': 'Flotar sobre el editor',
   'Dock to the side': 'Anclar a un lado',
+  // On the hosted service (REFRACT_MODE=saas)
+  'No AI connected. Add an API provider in Settings → Assistant.':
+    'No hay IA conectada. Añade un proveedor por API en Ajustes → Asistente.',
 } as Record<string, string>

@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import Login from './Login'
+import { setMode } from './lib/mode'
 import './index.css'
 
 const root = createRoot(document.getElementById('root')!)
@@ -9,7 +10,16 @@ const root = createRoot(document.getElementById('root')!)
 const app = import('./App')
 fetch('/api/me', { headers: { 'X-Refract': '1' } })
   .then(
-    (r) => r.status === 401,
+    async (r) => {
+      if (r.status === 401) return true
+      setMode(
+        await r.json().then(
+          (me) => me?.mode,
+          () => undefined,
+        ),
+      )
+      return false
+    },
     () => false,
   )
   .then(async (signedOut) => {
