@@ -210,4 +210,7 @@ export default {
   'Connect to push projects to your repositories, or create new ones.':
     'Conéctala para enviar proyectos a tus repositorios o crear otros nuevos.',
   'Connect GitHub': 'Conectar GitHub',
+  // Settings → Assistant on the hosted service (REFRACT_MODE=saas)
+  'Use an API key here, or self-host Refract to use your ChatGPT plan.':
+    'Usa aquí una clave de API, o aloja Refract por tu cuenta para usar tu plan de ChatGPT.',
 } as Record<string, string>

@@ -170,6 +170,7 @@ function AssistantPane({ status, onChange }: Props) {
   const prefs = usePrefs()
   const [busy, setBusy] = useState(false)
   const input = useRef<HTMLInputElement>(null)
+  const me = useMe()
 
   async function run(fn: () => Promise<ChatGPTStatus>, ok: string) {
     setBusy(true)
@@ -184,78 +185,86 @@ function AssistantPane({ status, onChange }: Props) {
   }
 
   const s = status?.status
+  // The hosted service offers no ChatGPT plan (REFRACT_MODE=saas): the server has no routes for it.
+  const chatgpt = me?.mode !== 'saas'
   return (
     <SettingsPane
       value="assistant"
       title={t('Assistant')}
-      description={t('Refract uses your ChatGPT plan or your own API keys for AI requests.')}
+      description={
+        chatgpt
+          ? t('Refract uses your ChatGPT plan or your own API keys for AI requests.')
+          : t('Use an API key here, or self-host Refract to use your ChatGPT plan.')
+      }
     >
-      <SettingsGroup title={t('ChatGPT account')}>
-        {!status ? (
-          <SettingsRow label={t('Loading…')} />
-        ) : s?.signed_in ? (
-          <>
+      {chatgpt && (
+        <SettingsGroup title={t('ChatGPT account')}>
+          {!status ? (
+            <SettingsRow label={t('Loading…')} />
+          ) : s?.signed_in ? (
+            <>
+              <SettingsRow
+                label={
+                  <span className="flex items-center gap-2">
+                    <CheckCircle2 className="size-4 text-success" /> {s.email}
+                  </span>
+                }
+                description={
+                  s.limit_reached
+                    ? describe({ kind: 'usage_limit', message: '' })
+                    : s.plan_granted
+                      ? t('Signed in. Requests count against your ChatGPT plan.')
+                      : describe({ kind: 'plan_not_granted', message: '' })
+                }
+              >
+                {s.plan_granted && <PlanBadge manageUsage={status.manage_usage} />}
+              </SettingsRow>
+              <SettingsRow
+                label={t('Credentials')}
+                description={t('Replace them after running {cmd} again.', { cmd: 'refract login' })}
+              >
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => input.current?.click()}>
+                  <Upload /> {t('Replace…')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => run(() => api('/api/chatgpt/signout', { method: 'POST' }), t('Signed out'))}
+                >
+                  {t('Sign out')}
+                </Button>
+              </SettingsRow>
+              <SettingsRow label={t('Usage')} description={t('Limits and remaining usage are managed by ChatGPT.')}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  render={<a href={status.manage_usage} target="_blank" rel="noreferrer" />}
+                  nativeButton={false}
+                >
+                  {t('Manage usage')} <ExternalLink />
+                </Button>
+              </SettingsRow>
+            </>
+          ) : (
             <SettingsRow
-              label={
-                <span className="flex items-center gap-2">
-                  <CheckCircle2 className="size-4 text-success" /> {s.email}
-                </span>
-              }
+              stacked
+              label={t('Not connected')}
               description={
-                s.limit_reached
-                  ? describe({ kind: 'usage_limit', message: '' })
-                  : s.plan_granted
-                    ? t('Signed in. Requests count against your ChatGPT plan.')
-                    : describe({ kind: 'plan_not_granted', message: '' })
+                <>
+                  {t('Sign-in happens on your own computer: run')}{' '}
+                  <code className="rounded bg-muted px-1 py-0.5 text-foreground">refract login</code>, {t('choose')}{' '}
+                  <em>Continue with ChatGPT</em>, {t('then upload the credentials file it writes.')}
+                </>
               }
             >
-              {s.plan_granted && <PlanBadge manageUsage={status.manage_usage} />}
-            </SettingsRow>
-            <SettingsRow
-              label={t('Credentials')}
-              description={t('Replace them after running {cmd} again.', { cmd: 'refract login' })}
-            >
-              <Button size="sm" variant="secondary" disabled={busy} onClick={() => input.current?.click()}>
-                <Upload /> {t('Replace…')}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => run(() => api('/api/chatgpt/signout', { method: 'POST' }), t('Signed out'))}
-              >
-                {t('Sign out')}
+              <Button size="sm" disabled={busy} onClick={() => input.current?.click()}>
+                <Upload /> {t('Upload credentials…')}
               </Button>
             </SettingsRow>
-            <SettingsRow label={t('Usage')} description={t('Limits and remaining usage are managed by ChatGPT.')}>
-              <Button
-                size="sm"
-                variant="ghost"
-                render={<a href={status.manage_usage} target="_blank" rel="noreferrer" />}
-                nativeButton={false}
-              >
-                {t('Manage usage')} <ExternalLink />
-              </Button>
-            </SettingsRow>
-          </>
-        ) : (
-          <SettingsRow
-            stacked
-            label={t('Not connected')}
-            description={
-              <>
-                {t('Sign-in happens on your own computer: run')}{' '}
-                <code className="rounded bg-muted px-1 py-0.5 text-foreground">refract login</code>, {t('choose')}{' '}
-                <em>Continue with ChatGPT</em>, {t('then upload the credentials file it writes.')}
-              </>
-            }
-          >
-            <Button size="sm" disabled={busy} onClick={() => input.current?.click()}>
-              <Upload /> {t('Upload credentials…')}
-            </Button>
-          </SettingsRow>
-        )}
-      </SettingsGroup>
+          )}
+        </SettingsGroup>
+      )}
       <Providers onChange={() => api<ChatGPTStatus>('/api/chatgpt/status').then(onChange, () => {})} />
       <SettingsGroup title={t('Chat')}>
         <SettingsRow

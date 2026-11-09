@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,7 +15,7 @@ import (
 // ("anthropic:claude-…") go to that provider with the user's key, the rest to
 // their ChatGPT plan. It implements ai.Provider, so nothing above it changes.
 type Router struct {
-	ChatGPT *ai.SIWC
+	ChatGPT *ai.SIWC                                    // nil when the ChatGPT plan isn't offered (REFRACT_MODE=saas)
 	Configs func(ctx context.Context) ([]Config, error) // the user's providers
 	HTTP    *http.Client
 
@@ -30,13 +31,26 @@ type cached struct {
 
 const modelsTTL = 10 * time.Minute
 
-func (r *Router) Status(ctx context.Context) ai.Status { return r.ChatGPT.Status(ctx) }
+func (r *Router) Status(ctx context.Context) ai.Status {
+	if r.ChatGPT == nil {
+		return ai.Status{Provider: "chatgpt"} // same shape, never signed in
+	}
+	return r.ChatGPT.Status(ctx)
+}
+
+// chatgpt is the provider for a slug without a configured provider's prefix.
+func (r *Router) chatgpt(slug string) (ai.Provider, string, error) {
+	if r.ChatGPT == nil {
+		return nil, "", &ai.Error{Kind: ai.ErrNotSignedIn, Message: fmt.Sprintf("model %q is not available: add an API provider in Settings", slug)}
+	}
+	return r.ChatGPT, slug, nil
+}
 
 // route finds the provider for a model slug and the model id it expects.
 func (r *Router) route(ctx context.Context, slug string) (ai.Provider, string, error) {
 	prefix, model, ok := strings.Cut(slug, ":")
 	if !ok {
-		return r.ChatGPT, slug, nil
+		return r.chatgpt(slug)
 	}
 	cs, err := r.Configs(ctx)
 	if err != nil {
@@ -47,7 +61,7 @@ func (r *Router) route(ctx context.Context, slug string) (ai.Provider, string, e
 			return &Provider{Config: c, HTTP: r.HTTP}, model, nil
 		}
 	}
-	return r.ChatGPT, slug, nil // not a provider prefix (ChatGPT slugs have no ':')
+	return r.chatgpt(slug) // not a provider prefix (ChatGPT slugs have no ':')
 }
 
 func (r *Router) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, error) {
@@ -65,7 +79,7 @@ func (r *Router) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, e
 func (r *Router) Models(ctx context.Context) ([]ai.Model, error) {
 	out := []ai.Model{}
 	var firstErr error
-	if st := r.ChatGPT.Status(ctx); st.SignedIn && st.PlanGranted {
+	if st := r.Status(ctx); st.SignedIn && st.PlanGranted {
 		ms, err := r.ChatGPT.Models(ctx)
 		if err != nil {
 			firstErr = err

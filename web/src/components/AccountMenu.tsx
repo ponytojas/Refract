@@ -22,7 +22,7 @@ const themes: { value: Theme; label: string; icon: typeof Sun }[] = [
 ]
 
 // Bottom-left account chip: ChatGPT identity, settings, theme.
-type Me = { id: string; email: string; can_sign_out: boolean }
+type Me = { id: string; email: string; can_sign_out: boolean; mode: 'selfhost' | 'saas' }
 let mePromise: Promise<Me | null> | null = null
 export function useMe() {
   const [me, setMe] = useState<Me | null>(null)
