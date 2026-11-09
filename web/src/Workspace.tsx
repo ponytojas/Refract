@@ -40,6 +40,7 @@ import {
   mkdir,
   move,
   readFile,
+  RequestError,
   removeFile,
   writeFile,
   type ChatGPTStatus,
@@ -619,10 +620,22 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     })
   }
 
+  // REFRACT.md as saved on the server, or undefined when there is none. The
+  // file list can be stale (another tab, the assistant), so this asks.
+  async function savedInstructions(): Promise<string | undefined> {
+    try {
+      const f = await readFile(id, INSTRUCTIONS_FILE)
+      return f.text ? f.content : ''
+    } catch (e) {
+      if (e instanceof RequestError && e.status === 404) return undefined
+      throw e
+    }
+  }
+
   // Project instructions: open REFRACT.md, creating it from the template the first time.
   async function openInstructions() {
     try {
-      if (!files.some((f) => f.path === INSTRUCTIONS_FILE)) {
+      if ((await savedInstructions()) === undefined) {
         await writeFile(id, INSTRUCTIONS_FILE, instructionsTemplate(t))
         await loadFiles()
       }
@@ -632,17 +645,14 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     }
   }
 
-  // What quick actions send: the editor's live text when REFRACT.md is open, the saved one otherwise.
+  // What quick actions send: the editor's live text when REFRACT.md is open,
+  // the saved one otherwise. A failed read fails the action rather than run it
+  // without the author's instructions.
   async function quickInstructions() {
-    if (!files.some((f) => f.path === INSTRUCTIONS_FILE)) return undefined
     const live = states.current.get(INSTRUCTIONS_FILE)
     if (live) return forQuickAction(live.doc.toString())
-    try {
-      const f = await readFile(id, INSTRUCTIONS_FILE)
-      return f.text ? forQuickAction(f.content) : undefined
-    } catch {
-      return undefined // the action still runs, just without them
-    }
+    if (!files.some((f) => f.path === INSTRUCTIONS_FILE)) return undefined
+    return forQuickAction(await savedInstructions())
   }
 
   function rename(from: string) {

@@ -303,6 +303,11 @@ func TestProjectInstructionsInPrompt(t *testing.T) {
 	if !utf8.ValidString(got) || !strings.HasSuffix(got, "[REFRACT.md is longer than 8 KB; only its beginning is included.]") {
 		t.Errorf("not cut at 8 KB: …%q", got[len(got)-100:])
 	}
+	_, kept, _ := strings.Cut(got, quick.InstructionsHeading)
+	kept, _, _ = strings.Cut(kept, "\n[REFRACT.md is longer")
+	if len(kept) != 8<<10 { // "ü" is 2 bytes, so exactly 8192 fit
+		t.Errorf("kept %d bytes, want %d", len(kept), 8<<10)
+	}
 }
 
 func TestProjectInstructionsStayInTheWorktree(t *testing.T) {

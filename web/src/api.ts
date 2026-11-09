@@ -7,7 +7,10 @@ const headers = { 'X-Refract': '1' }
 export type ApiError = { kind: string; message: string; code?: string; param?: string }
 
 export class RequestError extends Error {
-  constructor(public error: ApiError) {
+  constructor(
+    public error: ApiError,
+    public status = 0, // the HTTP status, when the request reached the server
+  ) {
     super(error.message)
   }
 }
@@ -150,7 +153,7 @@ export async function readFile(id: string, path: string): Promise<OpenedFile> {
   const res = await fetch(fileURL(id, path), { headers })
   if (!res.ok) {
     const data = await res.json().catch(() => null)
-    throw new RequestError(data?.error ?? { kind: 'other', message: `HTTP ${res.status}` })
+    throw new RequestError(data?.error ?? { kind: 'other', message: `HTTP ${res.status}` }, res.status)
   }
   if (res.headers.get('X-Refract-Text') === '1') return { text: true, content: await res.text() }
   const blob = await res.blob()

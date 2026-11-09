@@ -44,11 +44,13 @@ const InstructionsFile = "REFRACT.md"
 
 var htmlComment = regexp.MustCompile(`(?s)<!--.*?(-->|$)`)
 
-// ProjectInstructions prepares the text of REFRACT.md for a prompt: it drops
-// HTML comments (the template is only comments, so it counts as empty), trims
-// it, and cuts it to max bytes on a character boundary with a note saying so.
-// It returns "" when nothing is left.
+// ProjectInstructions prepares the text of REFRACT.md for a prompt: it
+// replaces invalid UTF-8 (so the cap holds once the prompt is serialized as
+// JSON), drops HTML comments (the template is only comments, so it counts as
+// empty), trims it, and cuts it to max bytes on a character boundary with a
+// note saying so. It returns "" when nothing is left.
 func ProjectInstructions(text string, max int) string {
+	text = strings.ToValidUTF8(text, "\uFFFD")
 	text = strings.TrimSpace(htmlComment.ReplaceAllString(text, ""))
 	if len(text) <= max {
 		return text

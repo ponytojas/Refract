@@ -2,6 +2,7 @@ package quick
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -118,8 +119,16 @@ func TestProjectInstructions(t *testing.T) {
 	if !utf8.ValidString(got) || !strings.HasSuffix(got, "[REFRACT.md is longer than 2 KB; only its beginning is included.]") {
 		t.Errorf("cut = …%q", got[len(got)-80:])
 	}
-	if body, _, _ := strings.Cut(got, "\n["); len(body) > 2<<10 {
-		t.Errorf("cut keeps %d bytes", len(body))
+	if body, _, _ := strings.Cut(got, "\n["); len(body) > 2<<10 || len(body) < 2<<10-1 {
+		t.Errorf("cut keeps %d bytes, want just under 2048", len(body))
+	}
+	// Invalid UTF-8 would turn into 3-byte replacement characters once the
+	// prompt is sent as JSON, past the cap; it's replaced before cutting.
+	bad := "ok " + strings.Repeat("\xff", 8192) + strings.Repeat("a", 3000)
+	got = ProjectInstructions(bad, 2<<10)
+	b, _ := json.Marshal(got)
+	if !utf8.ValidString(got) || len(b) > 2<<10+100 {
+		t.Errorf("invalid UTF-8 gives %d bytes of JSON (valid=%v)", len(b), utf8.ValidString(got))
 	}
 }
 
