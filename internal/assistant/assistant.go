@@ -153,12 +153,8 @@ func (s *Service) chat(ctx context.Context, id string) (*Chat, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A chat is the user's only if its project is (turns, diffs and accepts all come through here).
-	if _, err := s.Projects.Get(ctx, c.ProjectID); errors.Is(err, projects.ErrNotFound) {
-		return nil, ErrNotFound
-	} else if err != nil {
-		return nil, err
-	}
+	// Whether the user may reach this chat was checked before (access.Require
+	// on the chat's or turn's project, in the route table).
 	c.CreatedAt, c.UpdatedAt = time.Unix(created, 0), time.Unix(updated, 0)
 	return &c, nil
 }

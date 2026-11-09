@@ -3,7 +3,7 @@
 package projects
 
 import (
-	"github.com/ponytojas/Refract/internal/auth"
+	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/store"
 
 	"archive/zip"
@@ -58,13 +58,13 @@ func (s *Service) Path(id string) string { return filepath.Join(s.Dir, id) }
 
 const projectCols = `id, name, main_file, created_at, updated_at, owner`
 
-// List returns the request user's projects (all of them without a user: background work).
+// List returns the request user's projects; none without a user.
 func (s *Service) List(ctx context.Context) ([]Project, error) {
-	q, args := `SELECT `+projectCols+` FROM projects ORDER BY updated_at DESC`, []any{}
-	if u, ok := auth.UserFrom(ctx); ok {
-		q, args = `SELECT `+projectCols+` FROM projects WHERE owner = ? ORDER BY updated_at DESC`, []any{u.ID}
+	u, err := access.UserFrom(ctx)
+	if err != nil {
+		return []Project{}, nil
 	}
-	rows, err := s.DB.QueryContext(ctx, q, args...)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+projectCols+` FROM projects WHERE owner = ? ORDER BY updated_at DESC`, u.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +80,10 @@ func (s *Service) List(ctx context.Context) ([]Project, error) {
 	return out, rows.Err()
 }
 
-// Get returns a project. Another user's project is ErrNotFound: every access
-// to a project goes through here, so this is where users are kept apart.
+// Get returns a project, whoever owns it. Who may reach it is decided before:
+// every API route that addresses a project goes through access.Require (the
+// route table in cmd/refract), and background work rechecks before writing.
+// Code calling the service directly must do the same.
 func (s *Service) Get(ctx context.Context, id string) (*Project, error) {
 	p, err := scan(s.DB.QueryRowContext(ctx, `SELECT `+projectCols+` FROM projects WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -89,9 +91,6 @@ func (s *Service) Get(ctx context.Context, id string) (*Project, error) {
 	}
 	if err != nil {
 		return nil, err
-	}
-	if u, ok := auth.UserFrom(ctx); ok && p.Owner != u.ID {
-		return nil, ErrNotFound
 	}
 	return p, nil
 }
@@ -123,6 +122,10 @@ func (s *Service) ImportZip(ctx context.Context, name, zipPath string) (*ImportR
 // create builds the project in a temp dir and only moves it into place and
 // registers it once everything succeeded, so a failed import leaves nothing.
 func (s *Service) create(ctx context.Context, name string, fill func(dir string) ([]string, error), message string) (*ImportResult, error) {
+	u, err := access.UserFrom(ctx) // a project nobody owns would be unreachable
+	if err != nil {
+		return nil, err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "Untitled"
@@ -157,10 +160,7 @@ func (s *Service) create(ctx context.Context, name string, fill func(dir string)
 		return nil, err
 	}
 	now := time.Now()
-	p := &Project{ID: id, Name: name, MainFile: main, CreatedAt: now, UpdatedAt: now}
-	if u, ok := auth.UserFrom(ctx); ok {
-		p.Owner = u.ID
-	}
+	p := &Project{ID: id, Name: name, MainFile: main, CreatedAt: now, UpdatedAt: now, Owner: u.ID}
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO projects (id, name, main_file, created_at, updated_at, owner) VALUES (?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.MainFile, now.Unix(), now.Unix(), p.Owner); err != nil {
 		os.RemoveAll(s.Path(id))

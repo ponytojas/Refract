@@ -1,7 +1,6 @@
 package projects
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,13 +13,13 @@ func edit(t *testing.T, s *Service, id, rel, body, message string) {
 	if err := os.WriteFile(filepath.Join(s.Path(id), rel), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Checkpoint(context.Background(), id, message); err != nil {
+	if _, err := s.Checkpoint(ownerCtx, id, message); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestHistoryAndCommitDiff(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newTurnProject(t)
 	edit(t, s, id, "intro.tex", "changed\n", "Edit intro")
 
@@ -45,7 +44,7 @@ func TestHistoryAndCommitDiff(t *testing.T) {
 }
 
 func TestRestoreFileAddsACommit(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newTurnProject(t)
 	first, _ := s.History(ctx, id, 1)
 	edit(t, s, id, "intro.tex", "changed\n", "Edit intro")
@@ -88,7 +87,7 @@ func TestRestoreFileAddsACommit(t *testing.T) {
 }
 
 func TestRestoreProject(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newTurnProject(t)
 	first, _ := s.History(ctx, id, 1)
 	edit(t, s, id, "intro.tex", "changed\n", "Edit intro")

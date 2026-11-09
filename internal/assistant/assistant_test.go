@@ -78,6 +78,10 @@ func (okCompiler) Compile(context.Context, string, string) (*compile.Result, err
 
 const mainTex = "\\documentclass{article}\n\\begin{document}\n\\section{Introduction}\nIntro text.\n\n\\section{Method}\nMethod text.\n\\end{document}\n"
 
+// ownerCtx is the signed-in user the tests act as. Who may reach a chat or
+// turn is checked by the route table (cmd/refract/routes_test.go).
+var ownerCtx = auth.WithUser(context.Background(), auth.User{ID: "owner"})
+
 func setup(t *testing.T, p *fakeProvider) (*Service, *projects.Service, string, string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -96,7 +100,7 @@ func setup(t *testing.T, p *fakeProvider) (*Service, *projects.Service, string, 
 	w.Write([]byte(mainTex))
 	zw.Close()
 	zr, _ := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
-	res, err := ps.Import(context.Background(), "paper", projects.ZipSource(zr))
+	res, err := ps.Import(ownerCtx, "paper", projects.ZipSource(zr))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +109,7 @@ func setup(t *testing.T, p *fakeProvider) (*Service, *projects.Service, string, 
 		Agent:    agent.Agent{Provider: p, Compiler: okCompiler{}, MaxIterations: 10, Timeout: time.Minute},
 		ModelFor: func(_ context.Context, c Choice) (Choice, error) { return Choice{Model: cmp.Or(c.Model, "m")}, nil },
 	}
-	c, err := s.CreateChat(context.Background(), res.Project.ID)
+	c, err := s.CreateChat(ownerCtx, res.Project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +141,7 @@ func TestScenarioAcceptCreatesOneCommit(t *testing.T) {
 		done("Added a Related work subsection after the introduction."),
 	}}
 	s, ps, id, chat := setup(t, p)
-	ctx := context.Background()
+	ctx := ownerCtx
 	var activity []string
 	turn, err := s.Ask(ctx, chat, "Add a related-work subsection after the introduction", Context{OpenFile: "main.tex"}, Choice{}, func(e agent.Event) {
 		if e.Type == "activity" {
@@ -187,7 +191,7 @@ func TestScenarioRejectLeavesNoTrace(t *testing.T) {
 		done("Done."),
 	}}
 	s, ps, id, chat := setup(t, p)
-	ctx := context.Background()
+	ctx := ownerCtx
 	turn, err := s.Ask(ctx, chat, "add related work", Context{}, Choice{}, func(agent.Event) {})
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +219,7 @@ func TestScenarioRejectLeavesNoTrace(t *testing.T) {
 
 // Scenario 4: the user edits during the turn; accept merges cleanly or reports a conflict.
 func TestScenarioUserEditsDuringTurn(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	t.Run("different lines merge", func(t *testing.T) {
 		p := &fakeProvider{script: [][]ai.Event{{call("c1", "edit_file", addRelatedWork), {Type: ai.EventCompleted}}, done("ok")}}
 		s, ps, id, chat := setup(t, p)
@@ -265,7 +269,7 @@ func TestScenarioUsageLimit(t *testing.T) {
 	}}
 	s, ps, id, chat := setup(t, p)
 	logBefore := commits(t, ps, id)
-	turn, err := s.Ask(context.Background(), chat, "add related work", Context{}, Choice{}, func(agent.Event) {})
+	turn, err := s.Ask(ownerCtx, chat, "add related work", Context{}, Choice{}, func(agent.Event) {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,14 +287,14 @@ func TestScenarioUsageLimit(t *testing.T) {
 func TestStopAndBusy(t *testing.T) {
 	p := &fakeProvider{script: [][]ai.Event{done("never")}, block: make(chan struct{}), entered: make(chan struct{})}
 	s, ps, id, chat := setup(t, p)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ownerCtx)
 	result := make(chan *Turn)
 	go func() {
 		turn, _ := s.Ask(ctx, chat, "slow", Context{}, Choice{}, func(agent.Event) {})
 		result <- turn
 	}()
 	<-p.entered // the model is "thinking"
-	if _, err := s.Ask(context.Background(), chat, "second", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, ErrBusy) {
+	if _, err := s.Ask(ownerCtx, chat, "second", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, ErrBusy) {
 		t.Fatalf("concurrent turn: %v", err)
 	}
 	cancel() // Stop
@@ -302,7 +306,7 @@ func TestStopAndBusy(t *testing.T) {
 
 func TestRecoverMarksRunningTurnsStopped(t *testing.T) {
 	s, _, _, chat := setup(t, &fakeProvider{})
-	ctx := context.Background()
+	ctx := ownerCtx
 	s.save(ctx, &Turn{ID: "t1", ChatID: chat, Message: "x", Status: "running", CreatedAt: time.Now()})
 	if err := s.Recover(ctx); err != nil {
 		t.Fatal(err)
@@ -325,40 +329,6 @@ func TestContextAndHistory(t *testing.T) {
 
 // Chats and turns follow their project's owner: another user can't list,
 // read, continue, review or accept them.
-func TestChatsArePerUser(t *testing.T) {
-	s, ps, projectID, chatID := setup(t, &fakeProvider{script: [][]ai.Event{done("All good.")}})
-	ps.DB.Exec(`UPDATE projects SET owner = 'ana' WHERE id = ?`, projectID)
-	ana := auth.WithUser(context.Background(), auth.User{ID: "ana"})
-	ben := auth.WithUser(context.Background(), auth.User{ID: "ben"})
-
-	turn, err := s.Ask(ana, chatID, "check it", Context{}, Choice{}, func(agent.Event) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cs, err := s.Chats(ana, projectID); err != nil || len(cs) != 1 {
-		t.Fatalf("owner chats = %v, %v", cs, err)
-	}
-	isNotFound := func(name string, err error) {
-		t.Helper()
-		if !errors.Is(err, ErrNotFound) && !errors.Is(err, projects.ErrNotFound) {
-			t.Errorf("%s by another user: %v", name, err)
-		}
-	}
-	_, err = s.Chats(ben, projectID)
-	isNotFound("chats", err)
-	_, err = s.Turns(ben, chatID)
-	isNotFound("turns", err)
-	_, err = s.Ask(ben, chatID, "hi", Context{}, Choice{}, func(agent.Event) {})
-	isNotFound("ask", err)
-	_, err = s.CreateChat(ben, projectID)
-	isNotFound("new chat", err)
-	_, err = s.Diff(ben, turn.ID)
-	isNotFound("diff", err)
-	_, _, err = s.Accept(ben, turn.ID, nil)
-	isNotFound("accept", err)
-	_, err = s.Reject(ben, turn.ID)
-	isNotFound("reject", err)
-}
 
 // A chat remembers the model it used, and a turn keeps the model's reasoning.
 func TestChatModelAndReasoning(t *testing.T) {
@@ -368,7 +338,7 @@ func TestChatModelAndReasoning(t *testing.T) {
 		{Type: ai.EventText, Text: "Looks fine."},
 		{Type: ai.EventCompleted},
 	}}})
-	ctx := context.Background()
+	ctx := ownerCtx
 	var streamed string
 	turn, err := s.Ask(ctx, chatID, "Check the intro", Context{}, Choice{Model: "anthropic:claude-x", Effort: "high"}, func(e agent.Event) {
 		if e.Type == "reasoning" {

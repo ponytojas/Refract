@@ -15,8 +15,8 @@ type User struct {
 type userKey struct{}
 type identityKey struct{}
 
-// WithUser stores the request's user. Code running without one (startup,
-// background jobs) sees every project: ownership is only enforced for users.
+// WithUser stores the request's user. Without one, access (internal/access)
+// grants nothing: background work carries the user who started it.
 func WithUser(ctx context.Context, u User) context.Context {
 	return context.WithValue(ctx, userKey{}, u)
 }

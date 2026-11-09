@@ -1,7 +1,6 @@
 package projects
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +12,7 @@ const intro = "line 1\nline 2\nline 3\nline 4\nline 5\n"
 func newTurnProject(t *testing.T) (*Service, string) {
 	t.Helper()
 	s := newService(t)
-	res, err := s.Import(context.Background(), "p", ZipSource(makeZip(t,
+	res, err := s.Import(ownerCtx, "p", ZipSource(makeZip(t,
 		entry{name: "main.tex", body: doc},
 		entry{name: "intro.tex", body: intro},
 	)))
@@ -31,7 +30,7 @@ func read(t *testing.T, dir, rel string) string {
 
 func commitCount(t *testing.T, s *Service, id string) int {
 	t.Helper()
-	out, err := git(context.Background(), s.Path(id), "rev-list", "--count", "HEAD")
+	out, err := git(ownerCtx, s.Path(id), "rev-list", "--count", "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +44,7 @@ func commitCount(t *testing.T, s *Service, id string) int {
 // aiTurn runs a turn that edits intro.tex line 2 and adds notes.tex.
 func aiTurn(t *testing.T, s *Service, id, turn string) (base string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := ownerCtx
 	base, dir, err := s.StartTurn(ctx, id, turn)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +66,7 @@ func aiTurn(t *testing.T, s *Service, id, turn string) (base string) {
 }
 
 func TestTurnAcceptAll(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newTurnProject(t)
 	before := commitCount(t, s, id)
 	base := aiTurn(t, s, id, "t1")
@@ -96,7 +95,7 @@ func TestTurnAcceptAll(t *testing.T) {
 }
 
 func TestTurnAcceptPerFile(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newTurnProject(t)
 	base := aiTurn(t, s, id, "t1")
 	if _, c, err := s.AcceptTurn(ctx, id, "t1", base, []string{"notes.tex"}, "ai: notes"); err != nil || c != nil {
@@ -115,7 +114,7 @@ func TestTurnAcceptPerFile(t *testing.T) {
 }
 
 func TestTurnAcceptMergesUserEdits(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newTurnProject(t)
 	base := aiTurn(t, s, id, "t1")
 	// While the turn ran, the user edited another line of the same file (not committed).
@@ -130,7 +129,7 @@ func TestTurnAcceptMergesUserEdits(t *testing.T) {
 }
 
 func TestTurnAcceptConflictChangesNothing(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newTurnProject(t)
 	base := aiTurn(t, s, id, "t1")
 	userVersion := strings.Replace(intro, "line 2", "line 2 (user)", 1)
@@ -153,7 +152,7 @@ func TestTurnAcceptConflictChangesNothing(t *testing.T) {
 }
 
 func TestTurnReject(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newTurnProject(t)
 	before := commitCount(t, s, id)
 	aiTurn(t, s, id, "t1")

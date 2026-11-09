@@ -14,8 +14,10 @@ import (
 	"testing"
 
 	"github.com/ponytojas/Refract/internal/access"
+	"github.com/ponytojas/Refract/internal/assistant"
 	"github.com/ponytojas/Refract/internal/auth"
 	"github.com/ponytojas/Refract/internal/mode"
+	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/store"
 )
 
@@ -198,4 +200,47 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// The real handlers behind the table: another user's chat, turn and project
+// ids are not found, and nothing they ask for changes anything.
+func TestHandlersKeepUsersApart(t *testing.T) {
+	acc := accessDB(t)
+	ps := &projects.Service{DB: acc.DB, Dir: t.TempDir()}
+	rt := &router{mux: http.NewServeMux(), acc: acc}
+	(&projectsAPI{svc: ps}).routes(rt)
+	(&assistantAPI{svc: &assistant.Service{DB: acc.DB, Projects: ps}}).routes(rt)
+	call := func(user, method, path string) int {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(method, path, nil)
+		rt.mux.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), auth.User{ID: user})))
+		return w.Code
+	}
+	for _, tc := range []struct{ method, path string }{
+		{"GET", "/api/projects/" + ana.project},
+		{"GET", "/api/projects/" + ana.project + "/chats"},
+		{"POST", "/api/projects/" + ana.project + "/chats"},
+		{"GET", "/api/chats/" + ana.chat + "/turns"},
+		{"POST", "/api/turns/" + ana.turn + "/reject"},
+		{"DELETE", "/api/projects/" + ana.project},
+	} {
+		if got := call("ben", tc.method, tc.path); got != http.StatusNotFound {
+			t.Errorf("ben: %s %s = %d, want 404", tc.method, tc.path, got)
+		}
+	}
+	var status string
+	acc.DB.QueryRow(`SELECT status FROM turns WHERE id = ?`, ana.turn).Scan(&status)
+	var chats int
+	acc.DB.QueryRow(`SELECT count(*) FROM chats WHERE project_id = ?`, ana.project).Scan(&chats)
+	if status != "review" || chats != 1 {
+		t.Errorf("ben changed ana's data: turn %q, %d chats", status, chats)
+	}
+	for _, path := range []string{"/api/projects/" + ana.project + "/chats", "/api/chats/" + ana.chat + "/turns"} {
+		if got := call("ana", "GET", path); got != http.StatusOK {
+			t.Errorf("ana: GET %s = %d", path, got)
+		}
+	}
+	if ps, _ := ps.List(auth.WithUser(context.Background(), auth.User{ID: "ben"})); len(ps) != 1 || ps[0].ID != ben.project {
+		t.Errorf("ben lists %+v", ps)
+	}
 }

@@ -1,7 +1,6 @@
 package projects
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -19,10 +18,10 @@ func remoteProject(t *testing.T) (s *Service, id, bare string) {
 	s, id = newTurnProject(t)
 	s.Key = make([]byte, 32)
 	bare = filepath.Join(t.TempDir(), "remote.git")
-	if _, err := git(context.Background(), t.TempDir(), "init", "-q", "--bare", bare); err != nil {
+	if _, err := git(ownerCtx, t.TempDir(), "init", "-q", "--bare", bare); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetRemote(context.Background(), id, Remote{URL: "file://" + bare, Token: "secret"}, true); err != nil {
+	if err := s.SetRemote(ownerCtx, id, Remote{URL: "file://" + bare, Token: "secret"}, true); err != nil {
 		t.Fatal(err)
 	}
 	return s, id, bare
@@ -31,7 +30,7 @@ func remoteProject(t *testing.T) (s *Service, id, bare string) {
 // elsewhere commits a file in another clone of the remote and pushes it.
 func elsewhere(t *testing.T, bare, rel, body string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := ownerCtx
 	dir := filepath.Join(t.TempDir(), "clone")
 	allow := []string{"-c", "protocol.file.allow=always"}
 	if _, err := git(ctx, t.TempDir(), append(allow, "clone", "-q", "file://"+bare, dir)...); err != nil {
@@ -48,7 +47,7 @@ func elsewhere(t *testing.T, bare, rel, body string) {
 }
 
 func TestRemoteSettings(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newTurnProject(t)
 	s.Key = make([]byte, 32)
 	if _, err := s.Remote(ctx, id); !errors.Is(err, ErrNoRemote) {
@@ -91,7 +90,7 @@ func TestRemoteSettings(t *testing.T) {
 }
 
 func TestPushPull(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id, bare := remoteProject(t)
 
 	// An empty remote: nothing to pull; then push.
@@ -144,7 +143,7 @@ func TestOnCommitFires(t *testing.T) {
 	fired := make(chan string, 4)
 	s.OnCommit = func(id string) { fired <- id }
 	os.WriteFile(filepath.Join(s.Path(id), "main.tex"), []byte("x\n"), 0o644)
-	if _, err := s.Checkpoint(context.Background(), id, "c"); err != nil {
+	if _, err := s.Checkpoint(ownerCtx, id, "c"); err != nil {
 		t.Fatal(err)
 	}
 	select {
