@@ -189,7 +189,7 @@ func TestScenarioAcceptCreatesOneCommit(t *testing.T) {
 func TestScenarioRejectLeavesNoTrace(t *testing.T) {
 	p := &fakeProvider{script: [][]ai.Event{
 		{call("c1", "edit_file", addRelatedWork), {Type: ai.EventCompleted}},
-		done("Done."),
+		done("private answer after revocation"),
 	}}
 	s, ps, id, chat := setup(t, p)
 	ctx := ownerCtx
@@ -378,11 +378,15 @@ func (o onStream) Stream(ctx context.Context, r ai.Request) (<-chan ai.Event, er
 func TestTurnRechecksAccessBeforeWriting(t *testing.T) {
 	p := &fakeProvider{script: [][]ai.Event{
 		{call("c1", "edit_file", addRelatedWork), {Type: ai.EventCompleted}},
-		done("Done."),
+		done("private answer after revocation"),
 	}}
 	s, ps, id, chat := setup(t, p)
 	before := len(commits(t, ps, id))
-	s.Agent.Provider = onStream{p, func() { ps.DB.Exec(`UPDATE projects SET owner = 'someone else' WHERE id = ?`, id) }}
+	const chatUpdated = 1
+	s.Agent.Provider = onStream{p, func() {
+		ps.DB.Exec(`UPDATE projects SET owner = 'someone else' WHERE id = ?`, id)
+		ps.DB.Exec(`UPDATE chats SET updated_at = ? WHERE id = ?`, chatUpdated, chat)
+	}}
 	turn, err := s.Ask(ownerCtx, chat, "Add a related-work subsection", Context{}, Choice{}, func(agent.Event) {})
 	if err != nil {
 		t.Fatal(err)
@@ -392,5 +396,15 @@ func TestTurnRechecksAccessBeforeWriting(t *testing.T) {
 	}
 	if file(t, ps, id, "main.tex") != mainTex || len(commits(t, ps, id)) != before {
 		t.Error("the turn wrote to a project its user no longer owns")
+	}
+	var reply, reasoning, activity, status string
+	ps.DB.QueryRow(`SELECT reply, reasoning, activity, status FROM turns WHERE id = ?`, turn.ID).Scan(&reply, &reasoning, &activity, &status)
+	if reply != "" || reasoning != "" || activity != "[]" || status != "failed" {
+		t.Errorf("stored turn: reply %q, reasoning %q, activity %s, status %s", reply, reasoning, activity, status)
+	}
+	var touched int64
+	ps.DB.QueryRow(`SELECT updated_at FROM chats WHERE id = ?`, chat).Scan(&touched)
+	if touched != chatUpdated {
+		t.Error("the chat was touched after access was lost")
 	}
 }

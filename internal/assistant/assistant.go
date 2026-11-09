@@ -335,7 +335,7 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 	// the project. Nothing changes owners today; a feature that does must not
 	// do it while a turn runs (s.running), or this check and the write race.
 	if err := s.Access.Require(bg, p.ID, access.Owner); err != nil {
-		return fail("failed", err)
+		return s.lost(bg, p.ID, t)
 	}
 	files, err := s.Projects.FinishTurn(bg, p.ID, t.ID, base, "ai: "+title(text))
 	if err != nil {
@@ -348,6 +348,20 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 		s.Projects.EndTurn(bg, p.ID, t.ID)
 	}
 	return t, s.save(bg, t)
+}
+
+// lost ends a turn whose user no longer has access to its project: nothing
+// it produced is kept (changes, reply, reasoning, activity), and only the
+// turn's own status is recorded, so it doesn't stay "running".
+func (s *Service) lost(ctx context.Context, projectID string, t *Turn) (*Turn, error) {
+	s.Projects.EndTurn(ctx, projectID, t.ID)
+	t.Reply, t.Reasoning, t.Activity, t.Files = "", "", []string{}, []projects.Change{}
+	t.Status = "failed"
+	t.Error = &ai.Error{Kind: ai.ErrOther, Message: "you no longer have access to this project"}
+	errJSON, _ := json.Marshal(t.Error)
+	_, err := s.DB.ExecContext(ctx, `UPDATE turns SET reply = '', reasoning = '', activity = '[]', files = '[]', status = ?, error = ?, updated_at = ? WHERE id = ?`,
+		t.Status, string(errJSON), time.Now().Unix(), t.ID)
+	return t, err
 }
 
 // history replays earlier turns as plain messages (tool calls are not resent).

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/ponytojas/Refract/internal/access"
@@ -73,26 +74,52 @@ func (rt *router) register(r route, h http.HandlerFunc) {
 	rt.mux.Handle(r.Pattern, rt.guard(r, h))
 }
 
+// members are the collections whose members are projects, chats or turns:
+// /api/<collection>/<member>/…. A wildcard member must be the scope's own
+// wildcard, so a route can't address a project under another name
+// ({project}) as a user route.
+var members = map[string]struct {
+	scope    scope
+	wildcard string
+}{
+	"projects": {scopeProject, "{id}"},
+	"chats":    {scopeChat, "{chat}"},
+	"turns":    {scopeTurn, "{turn}"},
+}
+
+// userWildcards are the only user routes that take a path wildcard, none of
+// them a project, chat or turn. Adding one is a decision to review.
+var userWildcards = []string{"/api/providers/{id}"}
+
 // validate ties the scope to the path: anything addressing a project, chat or
-// turn must be registered with that scope and a role.
+// turn must be registered with that scope and a role, whatever its wildcard
+// is called.
 func (r route) validate() error {
-	_, path, ok := strings.Cut(r.Pattern, " ")
-	if !ok {
+	method, path, ok := strings.Cut(r.Pattern, " ")
+	if !ok || method == "" || !strings.HasPrefix(path, "/") {
 		return fmt.Errorf("route %q: want \"METHOD /path\"", r.Pattern)
 	}
-	under := func(prefix string) bool { return path == prefix || strings.HasPrefix(path, prefix+"/") }
-	for s, prefix := range scopePrefix {
-		if under(prefix) && r.Scope != s {
-			return fmt.Errorf("route %q addresses %s and must be registered with that scope", r.Pattern, prefix)
+	wildcard := func(seg string) bool { return strings.HasPrefix(seg, "{") && seg != "{$}" }
+	segs := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(segs) >= 3 && segs[0] == "api" {
+		if m, ok := members[segs[1]]; ok && (wildcard(segs[2]) || m.scope != scopeProject) {
+			// Under /api/projects only literal names (import, import-folder) are not members.
+			if segs[2] != m.wildcard || r.Scope != m.scope {
+				return fmt.Errorf("route %q addresses a member of /api/%s: register it with that scope, as %s", r.Pattern, segs[1], m.wildcard)
+			}
 		}
 	}
-	if r.Scope != scopeUser {
-		if !under(scopePrefix[r.Scope]) {
-			return fmt.Errorf("route %q is not under %s", r.Pattern, scopePrefix[r.Scope])
+	if r.Scope == scopeUser {
+		if strings.Contains(path, "{") && !slices.ContainsFunc(userWildcards, func(p string) bool { return path == p || strings.HasPrefix(path, p+"/") }) {
+			return fmt.Errorf("user route %q takes a path wildcard: list it in userWildcards if it is not a project, chat or turn", r.Pattern)
 		}
-		if r.Min == access.None {
-			return fmt.Errorf("route %q needs a minimum role", r.Pattern)
-		}
+		return nil
+	}
+	if !strings.HasPrefix(path+"/", scopePrefix[r.Scope]+"/") {
+		return fmt.Errorf("route %q is not under %s", r.Pattern, scopePrefix[r.Scope])
+	}
+	if r.Min == access.None {
+		return fmt.Errorf("route %q needs a minimum role", r.Pattern)
 	}
 	return nil
 }

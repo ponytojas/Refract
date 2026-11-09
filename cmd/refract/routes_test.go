@@ -124,6 +124,14 @@ func TestRouteScopeIsValidated(t *testing.T) {
 		{Pattern: "GET /api/projects/{id}/files", Scope: scopeProject}, // no role
 		{Pattern: "POST /api/turns/{turn}/accept", Scope: scopeUser},
 		{Pattern: "/api/projects/{id}", Scope: scopeProject, Min: access.Owner}, // no method
+		// Review of #20: a project under another wildcard name, as a user route.
+		{Pattern: "GET /api/projects/{project}/review-leak", Scope: scopeUser},
+		{Pattern: "GET /api/projects/{project}/files", Scope: scopeProject, Min: access.Owner},
+		{Pattern: "GET /api/projects/{id...}", Scope: scopeUser},
+		{Pattern: "GET /api/chats/{c}/turns", Scope: scopeUser},
+		{Pattern: "GET /api/turns/latest", Scope: scopeUser},
+		{Pattern: "GET /api/projects/import/{x}", Scope: scopeUser},
+		{Pattern: "GET /api/documents/{project}", Scope: scopeUser}, // any wildcard in a user route
 	} {
 		if r.validate() == nil {
 			t.Errorf("%+v: accepted", r)
