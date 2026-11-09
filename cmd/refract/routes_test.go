@@ -117,6 +117,40 @@ func TestRouteTableAccess(t *testing.T) {
 	}
 }
 
+// A missing resource and another user's resource must be indistinguishable.
+func TestMissingResourcesMatchInaccessibleResources(t *testing.T) {
+	rt := table(accessDB(t))
+	ctx := auth.WithUser(context.Background(), auth.User{ID: "ana"})
+	missing := owned{"missing-project", "missing-chat", "missing-turn"}
+
+	for _, r := range rt.routes {
+		if r.Scope == scopeUser {
+			continue
+		}
+		t.Run(r.Pattern, func(t *testing.T) {
+			call := func(ids owned) *httptest.ResponseRecorder {
+				w := httptest.NewRecorder()
+				rt.mux.ServeHTTP(w, request(r, ids).WithContext(ctx))
+				return w
+			}
+			inaccessible := call(ben)
+			nonexistent := call(missing)
+			for name, response := range map[string]*httptest.ResponseRecorder{
+				"inaccessible": inaccessible,
+				"nonexistent":  nonexistent,
+			} {
+				if response.Code != http.StatusNotFound {
+					t.Fatalf("%s: status = %d, want 404", name, response.Code)
+				}
+			}
+			if nonexistent.Body.String() != inaccessible.Body.String() {
+				t.Errorf("404 bodies differ: nonexistent = %q, inaccessible = %q",
+					nonexistent.Body.String(), inaccessible.Body.String())
+			}
+		})
+	}
+}
+
 func TestRouteScopeIsValidated(t *testing.T) {
 	for _, r := range []route{
 		{Pattern: "GET /api/projects/{id}/files", Scope: scopeUser},
