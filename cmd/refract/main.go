@@ -195,7 +195,9 @@ func run() error {
 		return err
 	}
 
-	ra := &remoteAPI{svc: pa.svc, db: db, key: key}
+	acc := &access.Checker{DB: db}
+	asa.svc.Access = acc
+	ra := &remoteAPI{svc: pa.svc, db: db, key: key, acc: acc}
 	if id := os.Getenv("REFRACT_GITHUB_CLIENT_ID"); id != "" {
 		ra.github = &github.Client{HTTP: outbound, ClientID: id, Web: "https://github.com", API: "https://api.github.com"}
 	}
@@ -207,7 +209,7 @@ func run() error {
 
 	app := http.NewServeMux()
 	// Every API route goes through the route table and its access check.
-	registerRoutes(&router{mux: app, acc: &access.Checker{DB: db}}, a, pa, ca, asa, ra, pp, login)
+	registerRoutes(&router{mux: app, acc: acc}, a, pa, ca, asa, ra, pp, login)
 	app.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	app.Handle("/", web.Handler())
 

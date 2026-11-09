@@ -1,12 +1,15 @@
 package projects
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ponytojas/Refract/internal/auth"
 )
 
 // remoteProject is a project plus a bare repository acting as its remote, and
@@ -141,7 +144,12 @@ func TestPushPull(t *testing.T) {
 func TestOnCommitFires(t *testing.T) {
 	s, id := newTurnProject(t)
 	fired := make(chan string, 4)
-	s.OnCommit = func(id string) { fired <- id }
+	s.OnCommit = func(ctx context.Context, id string) {
+		if u, _ := auth.UserFrom(ctx); u.ID != "owner" {
+			t.Errorf("OnCommit runs as %q, want the committing user", u.ID)
+		}
+		fired <- id
+	}
 	os.WriteFile(filepath.Join(s.Path(id), "main.tex"), []byte("x\n"), 0o644)
 	if _, err := s.Checkpoint(ownerCtx, id, "c"); err != nil {
 		t.Fatal(err)

@@ -205,7 +205,7 @@ func (s *Service) Pull(ctx context.Context, id string) (*PullResult, error) {
 		res.Changed = append(res.Changed, c.Path)
 	}
 	if len(res.Changed) > 0 {
-		s.committed(id)
+		s.committed(ctx, id)
 	}
 	return res, s.touch(ctx, id)
 }

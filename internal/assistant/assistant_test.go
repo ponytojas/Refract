@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/agent"
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/auth"
@@ -105,7 +106,7 @@ func setup(t *testing.T, p *fakeProvider) (*Service, *projects.Service, string, 
 		t.Fatal(err)
 	}
 	s := &Service{
-		DB: db, Projects: ps,
+		DB: db, Projects: ps, Access: &access.Checker{DB: db},
 		Agent:    agent.Agent{Provider: p, Compiler: okCompiler{}, MaxIterations: 10, Timeout: time.Minute},
 		ModelFor: func(_ context.Context, c Choice) (Choice, error) { return Choice{Model: cmp.Or(c.Model, "m")}, nil },
 	}
@@ -358,5 +359,38 @@ func TestChatModelAndReasoning(t *testing.T) {
 	chats, _ := s.Chats(ctx, projectID)
 	if chats[0].Model != "anthropic:claude-x" {
 		t.Fatalf("chat %+v", chats[0])
+	}
+}
+
+// onStream runs before each model call, to change things while a turn runs.
+type onStream struct {
+	ai.Provider
+	before func()
+}
+
+func (o onStream) Stream(ctx context.Context, r ai.Request) (<-chan ai.Event, error) {
+	o.before()
+	return o.Provider.Stream(ctx, r)
+}
+
+// A turn runs for minutes; if the project stops being the user's meanwhile,
+// nothing it did is kept.
+func TestTurnRechecksAccessBeforeWriting(t *testing.T) {
+	p := &fakeProvider{script: [][]ai.Event{
+		{call("c1", "edit_file", addRelatedWork), {Type: ai.EventCompleted}},
+		done("Done."),
+	}}
+	s, ps, id, chat := setup(t, p)
+	before := len(commits(t, ps, id))
+	s.Agent.Provider = onStream{p, func() { ps.DB.Exec(`UPDATE projects SET owner = 'someone else' WHERE id = ?`, id) }}
+	turn, err := s.Ask(ownerCtx, chat, "Add a related-work subsection", Context{}, Choice{}, func(agent.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Status != "failed" || len(turn.Files) != 0 {
+		t.Fatalf("turn = %+v", turn)
+	}
+	if file(t, ps, id, "main.tex") != mainTex || len(commits(t, ps, id)) != before {
+		t.Error("the turn wrote to a project its user no longer owns")
 	}
 }

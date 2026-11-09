@@ -142,7 +142,7 @@ func (s *Service) AcceptTurn(ctx context.Context, id, turn, base string, files [
 	if _, err := git(ctx, root, "merge", "-q", "--ff-only", commit); err != nil {
 		return "", nil, fmt.Errorf("%w: files changed while accepting, try again: %v", ErrConflict, err)
 	}
-	s.committed(id)
+	s.committed(ctx, id)
 	return commit, nil, s.touch(ctx, id)
 }
 

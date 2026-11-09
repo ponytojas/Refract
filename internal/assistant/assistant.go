@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/agent"
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/projects"
@@ -76,6 +77,7 @@ type Service struct {
 	Agent    agent.Agent                                   // template; Model and Effort are filled by ModelFor
 	ModelFor func(context.Context, Choice) (Choice, error) // resolves the user's choice for the agent loop
 	Provider func(context.Context) ai.Provider             // the request user's provider; nil keeps Agent.Provider
+	Access   *access.Checker                               // rechecks the user after a long turn, before writing
 
 	mu      sync.Mutex
 	running map[string]bool // project id → a turn is running
@@ -84,6 +86,7 @@ type Service struct {
 const maxHistoryTurns = 10
 
 // Recover marks turns left running by a restart as stopped and removes their worktrees.
+// It runs at startup for every user, without one: it only ends turns, never writes work.
 func (s *Service) Recover(ctx context.Context) error {
 	rows, err := s.DB.QueryContext(ctx, `SELECT t.id, c.project_id FROM turns t JOIN chats c ON c.id = t.chat_id WHERE t.status = 'running'`)
 	if err != nil {
@@ -328,6 +331,10 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 		return fail("failed", err)
 	}
 
+	// A turn runs for minutes: write its changes only if the user still owns the project.
+	if err := s.Access.Require(bg, p.ID, access.Owner); err != nil {
+		return fail("failed", err)
+	}
 	files, err := s.Projects.FinishTurn(bg, p.ID, t.ID, base, "ai: "+title(text))
 	if err != nil {
 		return fail("failed", err)

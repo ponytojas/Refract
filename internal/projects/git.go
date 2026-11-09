@@ -68,10 +68,12 @@ func (s *Service) Checkpoint(ctx context.Context, id, message string) (bool, err
 	return s.checkpoint(ctx, id, message, true)
 }
 
-// committed tells OnCommit (auto-push) that the project's history grew.
-func (s *Service) committed(id string) {
+// committed tells OnCommit (auto-push) that the project's history grew. It
+// gets the context of whoever committed, so it acts as them: their user, not
+// their request's deadline.
+func (s *Service) committed(ctx context.Context, id string) {
 	if s.OnCommit != nil {
-		go s.OnCommit(id)
+		go s.OnCommit(context.WithoutCancel(ctx), id)
 	}
 }
 
@@ -90,7 +92,7 @@ func (s *Service) checkpoint(ctx context.Context, id, message string, notify boo
 		return false, err
 	}
 	if notify {
-		s.committed(id)
+		s.committed(ctx, id)
 	}
 	return true, nil
 }

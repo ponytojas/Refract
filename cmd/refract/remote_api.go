@@ -23,7 +23,8 @@ type remoteAPI struct {
 	svc    *projects.Service
 	db     *sql.DB
 	key    []byte
-	github *github.Client // nil when REFRACT_GITHUB_CLIENT_ID is not set
+	github *github.Client  // nil when REFRACT_GITHUB_CLIENT_ID is not set
+	acc    *access.Checker // auto-push rechecks who may push
 
 	mu      sync.Mutex
 	last    map[string]syncStatus         // project → last push/pull
@@ -64,10 +65,15 @@ func (a *remoteAPI) record(id, op string, auto bool, err error) syncStatus {
 	return st
 }
 
-// AutoPush runs after commits (projects.Service.OnCommit).
-func (a *remoteAPI) AutoPush(id string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+// AutoPush runs after commits (projects.Service.OnCommit), as the user who
+// committed: it pushes only if they still own the project.
+func (a *remoteAPI) AutoPush(ctx context.Context, id string) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	if err := a.acc.Require(ctx, id, access.Owner); err != nil {
+		slog.Debug("auto-push skipped", "project", id, "err", err)
+		return
+	}
 	r, err := a.svc.Remote(ctx, id)
 	if err != nil || !r.AutoPush {
 		return

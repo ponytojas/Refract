@@ -47,8 +47,8 @@ type Service struct {
 	DB       *sql.DB
 	Dir      string // <data>/projects
 	Limits   Limits
-	Key      []byte          // seals remote tokens
-	OnCommit func(id string) // called (in its own goroutine) after commits on the main branch
+	Key      []byte                               // seals remote tokens
+	OnCommit func(ctx context.Context, id string) // called (in its own goroutine, as the committing user) after commits on the main branch
 	// GitHubToken returns the GitHub token of a user (a project's owner), for remotes that use their account.
 	GitHubToken func(ctx context.Context, owner string) (string, error)
 }
