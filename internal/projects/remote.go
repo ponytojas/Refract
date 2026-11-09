@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/store"
 )
 
@@ -51,11 +52,20 @@ func checkRemote(r Remote) error {
 
 func remoteKey(id string) string { return "remote:" + id }
 
-// Remote returns the project's remote, or ErrNoRemote.
+// Remote returns the project's remote, or ErrNoRemote. A GitHub remote gets
+// the token of the user acting, never of whoever owns the project now, and
+// only for their own project: remote operations act with their credentials.
 func (s *Service) Remote(ctx context.Context, id string) (*Remote, error) {
+	u, err := access.UserFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
 	p, err := s.Get(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if p.Owner != u.ID {
+		return nil, ErrNotFound
 	}
 	sealed, err := store.GetSetting(ctx, s.DB, remoteKey(id))
 	if err != nil {
@@ -73,7 +83,7 @@ func (s *Service) Remote(ctx context.Context, id string) (*Remote, error) {
 		return nil, err
 	}
 	if r.GitHub && s.GitHubToken != nil {
-		if r.Token, err = s.GitHubToken(ctx, p.Owner); err != nil {
+		if r.Token, err = s.GitHubToken(ctx, u.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -131,7 +141,10 @@ func gitRemote(ctx context.Context, dir string, r *Remote, args ...string) (stri
 	return out, err
 }
 
-var remoteLocks sync.Map // project id → *sync.Mutex: one push/pull at a time
+// remoteLocks: one push or pull at a time per project. Push and Pull load the
+// remote (who may act, with which credentials) while holding it, so anything
+// that ever changes a project's owner must hold it too.
+var remoteLocks sync.Map // project id → *sync.Mutex
 
 func lockRemote(id string) func() {
 	m, _ := remoteLocks.LoadOrStore(id, &sync.Mutex{})
@@ -141,11 +154,11 @@ func lockRemote(id string) func() {
 
 // Push saves pending edits as a commit and pushes the history to the remote branch.
 func (s *Service) Push(ctx context.Context, id string) error {
+	defer lockRemote(id)()
 	r, err := s.Remote(ctx, id)
 	if err != nil {
 		return err
 	}
-	defer lockRemote(id)()
 	if _, err := s.checkpoint(ctx, id, "Checkpoint before push", false); err != nil {
 		return err
 	}
@@ -167,11 +180,11 @@ type PullResult struct {
 // it: a fast-forward when possible, else a merge commit. On conflicts the
 // merge is aborted and nothing changes.
 func (s *Service) Pull(ctx context.Context, id string) (*PullResult, error) {
+	defer lockRemote(id)()
 	r, err := s.Remote(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	defer lockRemote(id)()
 	if _, err := s.checkpoint(ctx, id, "Checkpoint before pull", false); err != nil {
 		return nil, err
 	}

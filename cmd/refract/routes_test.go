@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -53,9 +52,15 @@ func accessDB(t *testing.T) *access.Checker {
 	return &access.Checker{DB: db}
 }
 
-// table is the production route table, with every optional route included.
+// reached is what a handler in the walked table answers.
+const reached = 299
+
+// table is the production route table, with every optional route included and
+// each handler replaced by one answering reached. Registration and the guard
+// are the real ones.
 func table(acc *access.Checker) *router {
-	rt := &router{mux: http.NewServeMux(), acc: acc}
+	sentinel := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(reached) })
+	rt := &router{mux: http.NewServeMux(), acc: acc, stub: func(route) http.HandlerFunc { return sentinel }}
 	registerRoutes(rt, &api{mode: mode.SelfHost}, &projectsAPI{}, &compileAPI{}, &assistantAPI{}, &remoteAPI{}, &papersAPI{}, &loginAPI{})
 	return rt
 }
@@ -78,18 +83,13 @@ func TestRouteTableAccess(t *testing.T) {
 	if len(rt.routes) < 40 {
 		t.Fatalf("only %d routes in the table", len(rt.routes))
 	}
-	const reached = 299
-	sentinel := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(reached) })
 	as := func(user string) context.Context {
 		return auth.WithUser(context.Background(), auth.User{ID: user})
 	}
 	for _, r := range rt.routes {
-		h := rt.guard(r, sentinel)
-		mux := http.NewServeMux() // so path values are set, as in production
-		mux.Handle(r.Pattern, h)
 		call := func(ctx context.Context, o owned) int {
 			w := httptest.NewRecorder()
-			mux.ServeHTTP(w, request(r, o).WithContext(ctx))
+			rt.mux.ServeHTTP(w, request(r, o).WithContext(ctx))
 			return w.Code
 		}
 		scoped := r.Scope != scopeUser
@@ -141,14 +141,21 @@ func TestRouteScopeIsValidated(t *testing.T) {
 	}
 }
 
-// No route reaches the signed-in app without the table: outside it, only
-// the server's own plumbing in run and the sign-in routes register handlers.
+// No route reaches the signed-in app without the table. Outside it, only
+// these exact registrations exist: the server's plumbing in run, and the
+// sign-in routes, served before anyone is signed in. Adding one here is a
+// decision to review, not a formality.
+var allowedRegistrations = map[string][]string{
+	"routes.go:register": {"r.Pattern"}, // the table itself
+	"main.go:run":        {`"/api/"`, `"/"`, `"GET /healthz"`, `"/api/auth/"`},
+	"login_api.go:handler": {
+		`"GET /api/auth/config"`, `"POST /api/auth/login"`, `"POST /api/auth/logout"`,
+		`"GET /api/auth/oidc/start"`, `"GET /api/auth/oidc/callback"`,
+		`"/api/auth/oidc/"`, `"/api/auth/"`,
+	},
+}
+
 func TestNoRoutesOutsideTheTable(t *testing.T) {
-	allowed := map[string][]string{
-		"register": nil, // the table itself
-		"handler":  nil, // loginAPI: /api/auth/*, before anyone is signed in
-		"run":      {`"/api/"`, `"/"`, `"GET /healthz"`, `"/api/auth/"`},
-	}
 	files, _ := filepath.Glob("*.go")
 	fset := token.NewFileSet()
 	for _, name := range files {
@@ -168,25 +175,20 @@ func TestNoRoutesOutsideTheTable(t *testing.T) {
 			if !ok || fn.Body == nil {
 				continue
 			}
+			where := name + ":" + fn.Name.Name
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
 					return true
 				}
 				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || (sel.Sel.Name != "Handle" && sel.Sel.Name != "HandleFunc") {
+				if !ok || (sel.Sel.Name != "Handle" && sel.Sel.Name != "HandleFunc") || len(call.Args) == 0 {
 					return true
 				}
-				patterns, ok := allowed[fn.Name.Name]
-				pattern := ""
-				if lit, isLit := call.Args[0].(*ast.BasicLit); isLit {
-					pattern = lit.Value
+				arg := string(src[fset.Position(call.Args[0].Pos()).Offset:fset.Position(call.Args[0].End()).Offset])
+				if !contains(allowedRegistrations[where], arg) {
+					t.Errorf("%s: %s registers %s outside the route table (use router.user/project/chat/turn)", fset.Position(call.Pos()), where, arg)
 				}
-				if ok && (patterns == nil || contains(patterns, pattern)) {
-					return true
-				}
-				p, _ := strconv.Unquote(pattern)
-				t.Errorf("%s: %s registers %q outside the route table (use router.user/project/chat/turn)", fset.Position(call.Pos()), fn.Name.Name, p)
 				return true
 			})
 		}

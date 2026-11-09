@@ -41,6 +41,9 @@ type router struct {
 	mux    *http.ServeMux
 	acc    *access.Checker
 	routes []route
+	// stub, in tests, replaces each handler before it is registered, so the
+	// table can be walked through the real registration and guard.
+	stub func(route) http.HandlerFunc
 }
 
 func (rt *router) user(pattern string, h http.HandlerFunc) {
@@ -64,6 +67,9 @@ func (rt *router) register(r route, h http.HandlerFunc) {
 		panic(err) // a programming error: fail at startup, not on a request
 	}
 	rt.routes = append(rt.routes, r)
+	if rt.stub != nil {
+		h = rt.stub(r)
+	}
 	rt.mux.Handle(r.Pattern, rt.guard(r, h))
 }
 

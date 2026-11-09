@@ -331,7 +331,9 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 		return fail("failed", err)
 	}
 
-	// A turn runs for minutes: write its changes only if the user still owns the project.
+	// A turn runs for minutes: write its changes only if the user still owns
+	// the project. Nothing changes owners today; a feature that does must not
+	// do it while a turn runs (s.running), or this check and the write race.
 	if err := s.Access.Require(bg, p.ID, access.Owner); err != nil {
 		return fail("failed", err)
 	}
