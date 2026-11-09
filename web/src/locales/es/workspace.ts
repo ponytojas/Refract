@@ -235,4 +235,8 @@ export default {
   'Pull from the remote': 'Traer del remoto',
   'Go to source here': 'Ir al código aquí',
   'Download PDF': 'Descargar PDF',
+  Outline: 'Esquema',
+  'Go to section…': 'Ir a la sección…',
+  'Set a main file to see its outline.': 'Elige un archivo principal para ver su esquema.',
+  'No sections yet.': 'Aún no hay secciones.',
 } as Record<string, string>

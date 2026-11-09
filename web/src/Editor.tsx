@@ -48,6 +48,7 @@ type Props = {
   onCompile: () => void
   onSync: (path: string, line: number, col: number) => void // forward sync (Mod-J)
   onSelect?: (lines: string) => void // selected lines ("3" or "3–9"), "" when nothing is selected
+  onCursor?: (line: number) => void // the cursor's line, on every move and file switch
   jump?: { path: string; line: number; n: number } // n changes on every request
   insert?: { path: string; text: string } // replace the selection with text, then onInserted
   onInserted?: () => void
@@ -73,6 +74,7 @@ export default function Editor({
   onCompile,
   onSync,
   onSelect,
+  onCursor,
   jump,
   insert,
   onInserted,
@@ -86,8 +88,8 @@ export default function Editor({
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const current = useRef(path)
-  const cb = useRef({ onChange, onSave, onCompile, onSync, onSelect, mainFile })
-  cb.current = { onChange, onSave, onCompile, onSync, onSelect, mainFile }
+  const cb = useRef({ onChange, onSave, onCompile, onSync, onSelect, onCursor, mainFile })
+  cb.current = { onChange, onSave, onCompile, onSync, onSelect, onCursor, mainFile }
 
   const [mounted, setMounted] = useState<EditorView | null>(null)
   const [limitTarget, setLimitTarget] = useState<LimitTarget | null>(null)
@@ -244,6 +246,7 @@ export default function Editor({
         const a = u.state.doc.lineAt(from).number
         const b = u.state.doc.lineAt(to).number
         cb.current.onSelect?.(empty ? '' : a === b ? `${a}` : `${a}–${b}`)
+        cb.current.onCursor?.(u.state.doc.lineAt(u.state.selection.main.head).number)
       }
     }),
   ]).current
@@ -286,6 +289,7 @@ export default function Editor({
     current.current = path
     setLimitTarget(null)
     if (v.state !== next) v.setState(next)
+    cb.current.onCursor?.(v.state.doc.lineAt(v.state.selection.main.head).number)
     bump()
     v.focus()
   }, [path])
