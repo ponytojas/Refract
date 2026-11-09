@@ -182,4 +182,28 @@ test('click a section in the outline moves the cursor', async ({ page, request }
   await results.click()
   await expect(page.locator('.cm-activeLine')).toHaveText('\\section{Results}')
   await expect(results).toHaveAttribute('aria-current', 'true')
+
+  // Rename a heading in the included file, close its tab (which saves it), and
+  // collapse and expand the outline: it shows the saved title, on its line.
+  await data.click()
+  await expect(page.locator('.cm-activeLine')).toHaveText('\\subsection{Data}')
+  await page.keyboard.press('End')
+  await page.keyboard.press('Shift+Home')
+  await page.keyboard.type('\\subsection{Samples}')
+  await expect(page.locator('.cm-activeLine')).toHaveText('\\subsection{Samples}')
+  await page.getByRole('button', { name: 'Close paper/chapters/method.tex', exact: true }).click()
+  await expect
+    .poll(async () =>
+      (await request.get(`/api/projects/${project.id}/file?path=paper/chapters/method.tex`, { headers: api })).text(),
+    )
+    .toContain('\\subsection{Samples}')
+  await toggle.click()
+  await expect(outline).toBeHidden()
+  await toggle.click()
+  await expect
+    .poll(() => items.evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label'))))
+    .toEqual(['Introduction', 'Method', 'Samples', 'Results'])
+  await expect(outline.getByRole('button', { name: 'Samples', exact: true })).toHaveAccessibleDescription(
+    'Samples · paper/chapters/method.tex:3',
+  )
 })

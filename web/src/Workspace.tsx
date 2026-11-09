@@ -97,7 +97,7 @@ import { useCommands } from '@/lib/commands'
 import { setPref, usePrefs } from '@/lib/prefs'
 import { editorShortcuts, mod } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
-import { buildOutline, currentHeading, emptyOutline, type Outline as OutlineData } from '@/lib/outline'
+import { buildOutline, currentHeading, emptyOutline, OutlineCache, type Outline as OutlineData } from '@/lib/outline'
 import Outline from './Outline'
 import { t, tn } from '@/lib/i18n'
 
@@ -185,8 +185,10 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   const [sideTab, setSideTab] = useState<'files' | 'chats'>('files')
   const [cursorLine, setCursorLine] = useState(1)
   const [outline, setOutline] = useState<OutlineData>(emptyOutline)
-  // Files the outline read from the server (not open in the editor); cleared when the file list changes.
-  const outlineCache = useRef(new Map<string, string | null>())
+  // Files the outline read from the server (not open in the editor): updated on
+  // save, cleared when the file list changes.
+  const outlineCache = useRef<OutlineCache | null>(null)
+  outlineCache.current ??= new OutlineCache((p) => readFile(id, p).then((r) => (r.text ? r.content : null)))
   const outlineRequest = useRef(0)
   const refreshOutline = useRef(() => {})
   // The outline is a collapsible split under the file tree; its size (and so whether it is open) is remembered.
@@ -225,6 +227,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     saver.current = new Autosaver(
       async (p, c) => {
         await writeFile(id, p, c)
+        outlineCache.current!.saved(p, c)
         loadSymbols()
         refreshOutline.current()
       },
@@ -256,15 +259,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
         const f = loaded.current.get(p)
         if (f) return f.text ? f.content : null
         if (!exists.has(p)) return null
-        if (!outlineCache.current.has(p))
-          outlineCache.current.set(
-            p,
-            await readFile(id, p).then(
-              (r) => (r.text ? r.content : null),
-              () => null,
-            ),
-          )
-        return outlineCache.current.get(p) ?? null
+        return outlineCache.current!.read(p)
       }
       buildOutline(main, read)
         .then((o) => {
@@ -274,7 +269,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     }
   })
   useEffect(() => {
-    outlineCache.current.clear()
+    outlineCache.current!.clear()
     refreshOutline.current()
   }, [files, project?.main_file])
   useEffect(() => {

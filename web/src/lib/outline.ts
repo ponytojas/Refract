@@ -24,13 +24,26 @@ const levels: Record<string, number> = {
   subsubsection: 4,
   paragraph: 5,
 }
-// One level of nested braces in the title: \section{The \emph{best} way}.
-const heading =
-  /\\(part|chapter|section|subsection|subsubsection|paragraph)\*?\s*(?:\[[^\]]*\])?\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g
+// The command up to the title's opening brace; the title itself is read by
+// balanced(), so formatting can nest: \section{A \textbf{\emph{b}} c}.
+const heading = /\\(part|chapter|section|subsection|subsubsection|paragraph)\*?\s*(?:\[[^\]]*\])?\s*\{/g
 // \include{x}, \input{x} and the unbraced \input x. \inputenc, \includegraphics… don't match.
 const include = /\\(?:input|include)\s*\{([^{}]*)\}|\\input\s+([^\s{}%\\]+)/g
 
 type Item = { at: number; heading?: Omit<Heading, 'path' | 'line'>; include?: string }
+
+// Index of the brace closing the one at open, or -1 when it never closes.
+// Escaped braces (\{ \}) don't count.
+function balanced(source: string, open: number): number {
+  let depth = 0
+  for (let i = open; i < source.length; i++) {
+    const c = source[i]
+    if (c === '\\') i++
+    else if (c === '{') depth++
+    else if (c === '}' && --depth === 0) return i
+  }
+  return -1
+}
 
 function lineAt(source: string, offset: number): number {
   let n = 1
@@ -44,10 +57,14 @@ function scan(source: string): Item[] {
   const clean = maskForSections(source)
   const items: Item[] = []
   for (const m of clean.matchAll(heading)) {
+    const open = m.index + m[0].length - 1
+    const close = balanced(clean, open)
+    if (close < 0) continue
+    const arg = clean.slice(open + 1, close)
     const title =
-      latexWords(m[2])
+      latexWords(arg)
         .map((w) => w.text)
-        .join(' ') || m[2].trim()
+        .join(' ') || arg.trim()
     items.push({ at: m.index, heading: { level: levels[m[1]], title } })
   }
   for (const m of clean.matchAll(include)) {
@@ -115,6 +132,36 @@ export async function buildOutline(mainFile: string, read: (path: string) => Pro
   }
   await walk(mainFile, 0)
   return out
+}
+
+/**
+ * Contents of files the outline reads from the server, kept between rebuilds.
+ * A save replaces the entry: once the file's tab is closed, the outline reads
+ * what was saved, not what was fetched before the file was opened.
+ */
+export class OutlineCache {
+  private files = new Map<string, Promise<string | null>>()
+  private fetch: (path: string) => Promise<string | null>
+  constructor(fetch: (path: string) => Promise<string | null>) {
+    this.fetch = fetch
+  }
+
+  read(path: string): Promise<string | null> {
+    let f = this.files.get(path)
+    if (!f) {
+      f = this.fetch(path).catch(() => null)
+      this.files.set(path, f)
+    }
+    return f
+  }
+
+  saved(path: string, content: string) {
+    this.files.set(path, Promise.resolve(content))
+  }
+
+  clear() {
+    this.files.clear()
+  }
 }
 
 /** Index of the heading that contains line of path, or -1. */

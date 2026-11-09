@@ -1,7 +1,7 @@
 // Run with: node --test web/src/lib/outline.test.ts
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildOutline, currentHeading, depths, headingsIn, resolveInclude } from './outline.ts'
+import { buildOutline, currentHeading, depths, headingsIn, OutlineCache, resolveInclude } from './outline.ts'
 
 const reader = (files: Record<string, string>) => async (p: string) => files[p] ?? null
 const titles = (o: { headings: { title: string }[] }) => o.headings.map((h) => h.title)
@@ -126,4 +126,55 @@ test('depth follows the hierarchy, without empty steps for skipped levels', () =
     '\\chapter{C}',
   ].join('\n')
   assert.deepEqual(depths(headingsIn(src, 'main.tex')), [0, 1, 2, 0, 1, 1, 0])
+})
+
+test('titles with formatting nested at any depth, and escaped braces', () => {
+  const src = [
+    '\\section{Title with \\textbf{\\emph{nested formatting}}}',
+    '\\subsection{A \\{literal\\} brace}',
+    '\\section{Never closed',
+    '\\section{After}',
+  ].join('\n')
+  const hs = headingsIn(src, 'main.tex')
+  assert.deepEqual(hs.map((h) => [h.title, h.line]).slice(0, 2), [
+    ['Title with nested formatting', 1],
+    ['A literal brace', 2], // escaped braces don't end the title
+  ])
+  // An unclosed title swallows the rest, as TeX would; it never throws.
+  assert.ok(hs.length >= 2)
+})
+
+// Review of #16: rename a heading in an included file, save, close its tab,
+// and the outline must show the new heading, not the content fetched before.
+test('a saved file replaces what the outline cached for it', async () => {
+  const server: Record<string, string> = { 'main.tex': '\\input{ch}', 'ch.tex': '\\section{Old}' }
+  let fetches = 0
+  const cache = new OutlineCache(async (p) => {
+    fetches++
+    return server[p] ?? null
+  })
+  const open = new Map<string, string>()
+  const read = async (p: string) => open.get(p) ?? cache.read(p)
+
+  assert.deepEqual(titles(await buildOutline('main.tex', read)), ['Old'])
+  open.set('ch.tex', '\\section{New}') // opened and edited
+  assert.deepEqual(titles(await buildOutline('main.tex', read)), ['New'])
+  server['ch.tex'] = open.get('ch.tex')!
+  cache.saved('ch.tex', open.get('ch.tex')!) // the autosave
+  open.delete('ch.tex') // tab closed
+  const o = await buildOutline('main.tex', read)
+  assert.deepEqual(titles(o), ['New'])
+  assert.equal(o.headings[0].line, 1)
+  assert.equal(fetches, 2) // main.tex and ch.tex once each: the save didn't refetch
+
+  cache.clear() // the file list changed
+  await buildOutline('main.tex', read)
+  assert.equal(fetches, 4)
+})
+
+test('a failed fetch reads as a missing file', async () => {
+  const cache = new OutlineCache(async () => {
+    throw new Error('offline')
+  })
+  assert.equal(await cache.read('x.tex'), null)
 })
