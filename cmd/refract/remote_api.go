@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/ponytojas/Refract/internal/access"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -36,17 +37,17 @@ type syncStatus struct {
 	Error string    `json:"error,omitempty"`
 }
 
-func (a *remoteAPI) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/projects/{id}/remote", a.get)
-	mux.HandleFunc("PUT /api/projects/{id}/remote", a.put)
-	mux.HandleFunc("POST /api/projects/{id}/remote/push", a.push)
-	mux.HandleFunc("POST /api/projects/{id}/remote/pull", a.pull)
-	mux.HandleFunc("GET /api/github", a.githubStatus)
-	mux.HandleFunc("POST /api/github/device", a.githubStart)
-	mux.HandleFunc("POST /api/github/device/poll", a.githubPoll)
-	mux.HandleFunc("DELETE /api/github", a.githubDisconnect)
-	mux.HandleFunc("GET /api/github/repos", a.githubRepos)
-	mux.HandleFunc("POST /api/github/repos", a.githubCreate)
+func (a *remoteAPI) routes(rt *router) {
+	rt.project("GET /api/projects/{id}/remote", access.Owner, a.get)
+	rt.project("PUT /api/projects/{id}/remote", access.Owner, a.put)
+	rt.project("POST /api/projects/{id}/remote/push", access.Owner, a.push)
+	rt.project("POST /api/projects/{id}/remote/pull", access.Owner, a.pull)
+	rt.user("GET /api/github", a.githubStatus)
+	rt.user("POST /api/github/device", a.githubStart)
+	rt.user("POST /api/github/device/poll", a.githubPoll)
+	rt.user("DELETE /api/github", a.githubDisconnect)
+	rt.user("GET /api/github/repos", a.githubRepos)
+	rt.user("POST /api/github/repos", a.githubCreate)
 }
 
 func (a *remoteAPI) record(id, op string, auto bool, err error) syncStatus {

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/auth"
 	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/providers"
@@ -42,7 +43,7 @@ func newAIServer(t *testing.T, m mode.Mode) http.Handler {
 
 	a := &api{base: &siwc.Session{DB: db, Key: key}, mode: m, providers: &providers.Store{DB: db, Key: key}}
 	mux := http.NewServeMux()
-	a.routes(mux)
+	a.routes(&router{mux: mux, acc: &access.Checker{DB: db}})
 	mux.HandleFunc("/api/", http.NotFound) // as in main
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mux.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), auth.User{ID: "ana"})))

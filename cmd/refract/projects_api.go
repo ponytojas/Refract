@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"errors"
+	"github.com/ponytojas/Refract/internal/access"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -22,26 +23,26 @@ type projectsAPI struct {
 	tmp string // where uploads are spooled before unzipping
 }
 
-func (a *projectsAPI) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/projects", a.list)
-	mux.HandleFunc("POST /api/projects", a.create)
-	mux.HandleFunc("POST /api/projects/import", a.importZip)
-	mux.HandleFunc("POST /api/projects/import-folder", a.importFolder)
-	mux.HandleFunc("GET /api/projects/{id}", a.get)
-	mux.HandleFunc("PATCH /api/projects/{id}", a.update)
-	mux.HandleFunc("DELETE /api/projects/{id}", a.delete)
-	mux.HandleFunc("GET /api/projects/{id}/export", a.export)
-	mux.HandleFunc("GET /api/projects/{id}/checks", a.checks)
-	mux.HandleFunc("GET /api/projects/{id}/files", a.listFiles)
-	mux.HandleFunc("GET /api/projects/{id}/symbols", a.symbols)
-	mux.HandleFunc("GET /api/projects/{id}/file", a.readFile)
-	mux.HandleFunc("PUT /api/projects/{id}/file", a.writeFile)
-	mux.HandleFunc("DELETE /api/projects/{id}/file", a.removeFile)
-	mux.HandleFunc("POST /api/projects/{id}/mkdir", a.mkdir)
-	mux.HandleFunc("POST /api/projects/{id}/move", a.move)
-	mux.HandleFunc("GET /api/projects/{id}/history", a.history)
-	mux.HandleFunc("GET /api/projects/{id}/history/{hash}", a.commitDiff)
-	mux.HandleFunc("POST /api/projects/{id}/history/{hash}/restore", a.restore)
+func (a *projectsAPI) routes(rt *router) {
+	rt.user("GET /api/projects", a.list)
+	rt.user("POST /api/projects", a.create)
+	rt.user("POST /api/projects/import", a.importZip)
+	rt.user("POST /api/projects/import-folder", a.importFolder)
+	rt.project("GET /api/projects/{id}", access.Owner, a.get)
+	rt.project("PATCH /api/projects/{id}", access.Owner, a.update)
+	rt.project("DELETE /api/projects/{id}", access.Owner, a.delete)
+	rt.project("GET /api/projects/{id}/export", access.Owner, a.export)
+	rt.project("GET /api/projects/{id}/checks", access.Owner, a.checks)
+	rt.project("GET /api/projects/{id}/files", access.Owner, a.listFiles)
+	rt.project("GET /api/projects/{id}/symbols", access.Owner, a.symbols)
+	rt.project("GET /api/projects/{id}/file", access.Owner, a.readFile)
+	rt.project("PUT /api/projects/{id}/file", access.Owner, a.writeFile)
+	rt.project("DELETE /api/projects/{id}/file", access.Owner, a.removeFile)
+	rt.project("POST /api/projects/{id}/mkdir", access.Owner, a.mkdir)
+	rt.project("POST /api/projects/{id}/move", access.Owner, a.move)
+	rt.project("GET /api/projects/{id}/history", access.Owner, a.history)
+	rt.project("GET /api/projects/{id}/history/{hash}", access.Owner, a.commitDiff)
+	rt.project("POST /api/projects/{id}/history/{hash}/restore", access.Owner, a.restore)
 }
 
 func (a *projectsAPI) history(w http.ResponseWriter, r *http.Request) {
@@ -316,8 +317,10 @@ func (a *projectsAPI) checks(w http.ResponseWriter, r *http.Request) {
 
 func projectError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, projects.ErrNotFound), errors.Is(err, fs.ErrNotExist):
+	case errors.Is(err, projects.ErrNotFound), errors.Is(err, fs.ErrNotExist), errors.Is(err, access.ErrNotFound):
 		httpError(w, err, http.StatusNotFound)
+	case errors.Is(err, access.ErrForbidden), errors.Is(err, access.ErrNoUser):
+		httpError(w, err, http.StatusForbidden)
 	case errors.Is(err, projects.ErrNoRemote):
 		httpError(w, err, http.StatusNotFound)
 	case errors.Is(err, projects.ErrBehind):

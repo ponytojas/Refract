@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/ponytojas/Refract/internal/access"
 	"net/http"
 	"os"
 	"strings"
@@ -22,10 +23,10 @@ type papersAPI struct {
 	choose   func(context.Context, assistant.Choice) (assistant.Choice, error) // the model for suggestions and placement
 }
 
-func (a *papersAPI) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/papers/search", a.search)
-	mux.HandleFunc("POST /api/projects/{id}/papers/suggest", a.suggest)
-	mux.HandleFunc("POST /api/projects/{id}/cite", a.cite)
+func (a *papersAPI) routes(rt *router) {
+	rt.user("GET /api/papers/search", a.search)
+	rt.project("POST /api/projects/{id}/papers/suggest", access.Owner, a.suggest)
+	rt.project("POST /api/projects/{id}/cite", access.Owner, a.cite)
 }
 
 const maxPassage = 8000

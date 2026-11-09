@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/auth"
 	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/refs"
@@ -25,7 +26,7 @@ func TestProjectSymbols(t *testing.T) {
 	t.Cleanup(func() { db.Close() })
 	svc := &projects.Service{DB: db, Dir: filepath.Join(dir, "projects"), Limits: projects.DefaultLimits}
 	mux := http.NewServeMux()
-	(&projectsAPI{svc: svc}).routes(mux)
+	(&projectsAPI{svc: svc}).routes(&router{mux: mux, acc: &access.Checker{DB: db}})
 
 	as := func(user string) context.Context { return auth.WithUser(context.Background(), auth.User{ID: user}) }
 	p, err := svc.Create(as("ana"), "Paper")
