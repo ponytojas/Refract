@@ -12,11 +12,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"syscall"
 	"time"
 
+	"github.com/ponytojas/Refract/internal/netguard"
 	"github.com/ponytojas/Refract/internal/store"
 )
 
@@ -53,6 +55,21 @@ func kind(id string) (Kind, bool) {
 		}
 	}
 	return Kind{}, false
+}
+
+// KindsFor is Kinds as offered to people: without private networks (the
+// hosted service), local models (Ollama) can't be reached and aren't offered.
+func KindsFor(private bool) []Kind {
+	if private {
+		return Kinds
+	}
+	out := make([]Kind, 0, len(Kinds))
+	for _, k := range Kinds {
+		if k.ID != "ollama" {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // Config is one provider a user set up. ID prefixes its models ("anthropic:claude-…").
@@ -94,6 +111,23 @@ func (c Config) Validate() error {
 		if m == "" || len(m) > 200 {
 			return errors.New("invalid model id")
 		}
+	}
+	return nil
+}
+
+// CheckPublic adds the hosted service's rules to Validate: no local models,
+// and a base URL that is a public https address. Names are checked again
+// when connecting (HTTPClient), since what they resolve to can change.
+func (c Config) CheckPublic() error {
+	if c.Kind == "ollama" {
+		return errors.New("Ollama runs on your own computer, which the hosted service can't reach: self-host Refract to use local models")
+	}
+	u, err := url.Parse(c.base())
+	if err != nil || u.Scheme != "https" {
+		return errors.New("on the hosted service, the base URL must be an https:// address")
+	}
+	if a, err := netip.ParseAddr(u.Hostname()); err == nil && !netguard.Allowed(a) {
+		return netguard.ErrPrivate
 	}
 	return nil
 }
@@ -168,23 +202,20 @@ func (s *Store) Delete(ctx context.Context, user, id string) error {
 
 // HTTPClient is for calls to provider endpoints. Base URLs are user-supplied,
 // so link-local addresses (cloud metadata services such as 169.254.169.254)
-// are refused. Private and loopback addresses stay allowed: that is where
-// local models (Ollama, LM Studio) live.
-func HTTPClient() *http.Client {
-	dialer := &net.Dialer{
-		Timeout: 10 * time.Second,
-		Control: func(_, address string, _ syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return err
-			}
-			if ip := net.ParseIP(host); ip != nil && (ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
-				return fmt.Errorf("refusing to connect to link-local address %s", ip)
-			}
-			return nil
-		},
-	}
+// are always refused. With private (self-hosted), private and loopback
+// addresses stay allowed: that is where local models (Ollama, LM Studio)
+// live. Without it (the hosted service), only public addresses are reached,
+// and proxy settings are ignored so the check sees the real destination.
+func HTTPClient(private bool) *http.Client {
+	return httpClient(netguard.Control(private), private)
+}
+
+func httpClient(control func(network, address string, c syscall.RawConn) error, proxy bool) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: control}
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.DialContext = dialer.DialContext
+	if !proxy {
+		t.Proxy = nil
+	}
 	return &http.Client{Transport: t, Timeout: 10 * time.Minute} // long: reasoning streams
 }

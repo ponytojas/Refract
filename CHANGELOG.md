@@ -24,6 +24,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - A failed request to OpenAlex no longer includes the server's OpenAlex key in the error shown to the user or sent to the assistant's model.
 - Built with Go 1.27.4, which fixes a crash of the HTTP server in Go's `net/http` (GO-2026-6859).
 - With `REFRACT_MODE=saas`, Refract refuses to start without sign-in (`REFRACT_AUTH=none`) or without an https `REFRACT_PUBLIC_URL`.
+- With `REFRACT_MODE=saas`, AI providers and git remotes can only reach public addresses: loopback, private and metadata addresses are refused at every connection, Ollama isn't offered, base URLs must be https, and git connects only to the addresses it checked, without following redirects.
 
 ## [0.1.2] - 2026-10-27
 
