@@ -4,10 +4,10 @@ go 1.27.3
 
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
-	github.com/go-jose/go-jose/v4 v4.1.6
-	github.com/zendev-sh/goai v0.10.9
+	github.com/go-jose/go-jose/v4 v4.1.9
+	github.com/zendev-sh/goai v0.11.0
 	golang.org/x/oauth2 v0.37.0
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 )
 
 require (
