@@ -281,6 +281,10 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 	// Whatever happens to the request, the turn's outcome is recorded.
 	bg := context.WithoutCancel(ctx)
 	fail := func(status string, err error) (*Turn, error) {
+		// However the turn ends, what it produced is kept only for its user.
+		if err := s.Access.Require(bg, p.ID, access.Owner); err != nil {
+			return s.lost(bg, p.ID, t)
+		}
 		if ctx.Err() != nil {
 			status = "stopped" // whatever failed, the user stopped it
 		}

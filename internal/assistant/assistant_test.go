@@ -408,3 +408,41 @@ func TestTurnRechecksAccessBeforeWriting(t *testing.T) {
 		t.Error("the chat was touched after access was lost")
 	}
 }
+
+// Stopping a turn, or a provider error, after access was lost keeps nothing
+// either: every way a turn ends goes through the same check.
+func TestTurnEndingsAfterAccessLossKeepNothing(t *testing.T) {
+	for _, ending := range []string{"stopped", "provider error"} {
+		t.Run(ending, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(ownerCtx)
+			defer cancel()
+			second := done("unused")
+			if ending == "provider error" {
+				second = []ai.Event{{Type: ai.EventError, Err: &ai.Error{Kind: ai.ErrOther, Message: "upstream failed"}}}
+			}
+			p := &fakeProvider{script: [][]ai.Event{
+				{{Type: ai.EventReasoning, Text: "private reasoning"}, call("c1", "edit_file", addRelatedWork), {Type: ai.EventCompleted}},
+				second,
+			}}
+			s, ps, id, chat := setup(t, p)
+			p.before = map[int]func(){1: func() {
+				ps.DB.Exec(`UPDATE projects SET owner = 'someone else' WHERE id = ?`, id)
+				if ending == "stopped" {
+					cancel()
+				}
+			}}
+			turn, _ := s.Ask(ctx, chat, "Add a related-work subsection", Context{}, Choice{}, func(agent.Event) {})
+			if turn == nil {
+				t.Fatal("no turn")
+			}
+			var reply, reasoning, activity, status string
+			ps.DB.QueryRow(`SELECT reply, reasoning, activity, status FROM turns WHERE id = ?`, turn.ID).Scan(&reply, &reasoning, &activity, &status)
+			if reply != "" || reasoning != "" || activity != "[]" || status != "failed" {
+				t.Errorf("stored turn: reply %q, reasoning %q, activity %s, status %s", reply, reasoning, activity, status)
+			}
+			if file(t, ps, id, "main.tex") != mainTex {
+				t.Error("the turn changed the project")
+			}
+		})
+	}
+}
