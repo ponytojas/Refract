@@ -335,7 +335,7 @@ func TestListModels(t *testing.T) {
 }
 
 func TestRouterRoutesByPrefix(t *testing.T) {
-	r := &Router{Configs: func(context.Context) ([]Config, error) {
+	r := &Router{ChatGPT: &ai.SIWC{}, Configs: func(context.Context) ([]Config, error) {
 		return []Config{{ID: "ol", Kind: "ollama"}}, nil
 	}}
 	p, model, _ := r.route(context.Background(), "ol:llama3:8b")
@@ -345,6 +345,26 @@ func TestRouterRoutesByPrefix(t *testing.T) {
 	for _, slug := range []string{"gpt-5", "nope:model"} {
 		if p, model, _ := r.route(context.Background(), slug); p != ai.Provider(r.ChatGPT) || model != slug {
 			t.Fatalf("%s: got %T %q", slug, p, model)
+		}
+	}
+}
+
+// Without the ChatGPT plan (REFRACT_MODE=saas) only configured providers are
+// reachable: no panic, no ChatGPT models, and a clear error for other slugs.
+func TestRouterWithoutChatGPT(t *testing.T) {
+	ctx := context.Background()
+	r := &Router{Configs: func(context.Context) ([]Config, error) { return nil, nil }}
+	if st := r.Status(ctx); st.SignedIn || st.PlanGranted {
+		t.Errorf("status = %+v", st)
+	}
+	if ms, err := r.Models(ctx); err != nil || len(ms) != 0 {
+		t.Errorf("models = %v, %v", ms, err)
+	}
+	for _, slug := range []string{"gpt-5", "nope:model"} {
+		_, err := r.Stream(ctx, ai.Request{Model: slug})
+		var ae *ai.Error
+		if !errors.As(err, &ae) || ae.Kind != ai.ErrNotSignedIn {
+			t.Errorf("%s: %v", slug, err)
 		}
 	}
 }

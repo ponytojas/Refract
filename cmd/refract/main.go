@@ -25,6 +25,7 @@ import (
 	"github.com/ponytojas/Refract/internal/compile"
 	"github.com/ponytojas/Refract/internal/fonts"
 	"github.com/ponytojas/Refract/internal/github"
+	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/openalex"
 	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/providers"
@@ -101,6 +102,10 @@ func run() error {
 		return err
 	}
 	addr := cmp.Or(os.Getenv("REFRACT_ADDR"), ":8080")
+	deployment, err := mode.Parse(os.Getenv("REFRACT_MODE"))
+	if err != nil {
+		return err
+	}
 
 	key, err := store.ParseKey(os.Getenv("REFRACT_SECRET_KEY"))
 	if err != nil {
@@ -122,12 +127,18 @@ func run() error {
 		return err
 	}
 
-	session := &siwc.Session{DB: db, Key: key, OAuth: siwc.NewOAuth(ctx), AllowedSubject: os.Getenv("REFRACT_ALLOWED_SUBJECT")}
+	// The session also keeps per-user settings (the welcome flag), so it
+	// exists in every mode; it only talks to OpenAI where the plan is offered.
+	session := &siwc.Session{DB: db, Key: key, AllowedSubject: os.Getenv("REFRACT_ALLOWED_SUBJECT")}
+	if deployment.ChatGPT() {
+		session.OAuth = siwc.NewOAuth(ctx)
+	}
 	if _, err := session.HostID(ctx); err != nil {
 		return err
 	}
 	a := &api{
 		base:  session,
+		mode:  deployment,
 		model: os.Getenv("REFRACT_MODEL_AGENT"),
 		quick: os.Getenv("REFRACT_MODEL_QUICK"),
 

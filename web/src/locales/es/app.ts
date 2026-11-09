@@ -210,4 +210,12 @@ export default {
   'Connect to push projects to your repositories, or create new ones.':
     'Conéctala para enviar proyectos a tus repositorios o crear otros nuevos.',
   'Connect GitHub': 'Conectar GitHub',
+  // On the hosted service (REFRACT_MODE=saas), which offers no ChatGPT plan
+  'Refract uses your own API keys for AI requests. To use your ChatGPT plan, self-host Refract.':
+    'Refract usa tus propias claves de API para las peticiones de IA. Para usar tu plan de ChatGPT, aloja Refract por tu cuenta.',
+  'Use your own API keys. Their models appear in the model picker.':
+    'Usa tus propias claves de API. Sus modelos aparecen en el selector de modelos.',
+  'Appearance, editor and assistant settings': 'Ajustes de apariencia, editor y asistente',
+  'Local account': 'Cuenta local',
+  'No AI connected': 'No hay IA conectada',
 } as Record<string, string>
