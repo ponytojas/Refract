@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/agent"
 	"github.com/ponytojas/Refract/internal/arxiv"
 	"github.com/ponytojas/Refract/internal/assistant"
@@ -194,21 +195,21 @@ func run() error {
 		return err
 	}
 
-	app := http.NewServeMux()
-	a.routes(app)
-	pa.routes(app)
-	ca.routes(app)
-	asa.routes(app)
-	ra := &remoteAPI{svc: pa.svc, db: db, key: key}
+	acc := &access.Checker{DB: db}
+	asa.svc.Access = acc
+	ra := &remoteAPI{svc: pa.svc, db: db, key: key, acc: acc}
 	if id := os.Getenv("REFRACT_GITHUB_CLIENT_ID"); id != "" {
 		ra.github = &github.Client{HTTP: outbound, ClientID: id, Web: "https://github.com", API: "https://api.github.com"}
 	}
 	pa.svc.OnCommit = ra.AutoPush
 	pa.svc.GitHubToken = ra.Token
-	ra.routes(app)
-	(&papersAPI{papers: papers, projects: pa.svc, provider: a.providerFor, choose: func(ctx context.Context, want assistant.Choice) (assistant.Choice, error) {
+	pp := &papersAPI{papers: papers, projects: pa.svc, provider: a.providerFor, choose: func(ctx context.Context, want assistant.Choice) (assistant.Choice, error) {
 		return a.choose(ctx, want, a.quick)
-	}}).routes(app)
+	}}
+
+	app := http.NewServeMux()
+	// Every API route goes through the route table and its access check.
+	registerRoutes(&router{mux: app, acc: acc}, a, pa, ca, asa, ra, pp, login)
 	app.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	app.Handle("/", web.Handler())
 
@@ -222,7 +223,6 @@ func run() error {
 		w.Write([]byte("ok"))
 	})
 	if login != nil {
-		login.accountRoutes(app)
 		mux.Handle("/api/auth/", login.handler())
 	}
 	mux.Handle("/", guard(people.Middleware(auth.RequireCSRFHeader(app))))

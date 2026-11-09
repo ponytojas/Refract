@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/auth"
 	"github.com/ponytojas/Refract/internal/store"
 )
@@ -44,6 +45,9 @@ func makeZip(t *testing.T, entries ...entry) *zip.Reader {
 	return zr
 }
 
+// ownerCtx is the signed-in user the tests act as.
+var ownerCtx = auth.WithUser(context.Background(), auth.User{ID: "owner"})
+
 func newService(t *testing.T) *Service {
 	t.Helper()
 	dir := t.TempDir()
@@ -72,7 +76,7 @@ func tree(t *testing.T, dir string) map[string]string {
 
 func assertNothingLeft(t *testing.T, s *Service) {
 	t.Helper()
-	if ps, _ := s.List(context.Background()); len(ps) != 0 {
+	if ps, _ := s.List(ownerCtx); len(ps) != 0 {
 		t.Fatalf("projects registered: %v", ps)
 	}
 	if ents, _ := os.ReadDir(s.Dir); len(ents) != 0 {
@@ -86,7 +90,7 @@ func TestImportRejectsUnsafePaths(t *testing.T) {
 	for _, name := range []string{"../evil.tex", "/abs.tex", "a/../../evil.tex", "C:/evil.tex", `..\evil.tex`} {
 		t.Run(name, func(t *testing.T) {
 			s := newService(t)
-			_, err := s.Import(context.Background(), "x", ZipSource(makeZip(t, entry{name: "main.tex", body: doc}, entry{name: name, body: "x"})))
+			_, err := s.Import(ownerCtx, "x", ZipSource(makeZip(t, entry{name: "main.tex", body: doc}, entry{name: name, body: "x"})))
 			if !errors.Is(err, ErrUnsafePath) {
 				t.Fatalf("err = %v, want ErrUnsafePath", err)
 			}
@@ -107,7 +111,7 @@ func TestImportLimits(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s := newService(t)
 			s.Limits = Limits{MaxBytes: 100, MaxFiles: 2}
-			_, err := s.Import(context.Background(), "x", ZipSource(makeZip(t, entries...)))
+			_, err := s.Import(ownerCtx, "x", ZipSource(makeZip(t, entries...)))
 			if !errors.Is(err, ErrTooLarge) {
 				t.Fatalf("err = %v, want ErrTooLarge", err)
 			}
@@ -118,7 +122,7 @@ func TestImportLimits(t *testing.T) {
 
 func TestImportSkipsAndStrips(t *testing.T) {
 	s := newService(t)
-	res, err := s.Import(context.Background(), "Paper", ZipSource(makeZip(t,
+	res, err := s.Import(ownerCtx, "Paper", ZipSource(makeZip(t,
 		entry{name: "paper/main.tex", body: doc},
 		entry{name: "paper/sec/intro.tex", body: "Intro"},
 		entry{name: "paper/link.tex", body: "/etc/passwd", symlink: true},
@@ -143,7 +147,7 @@ func TestImportSkipsAndStrips(t *testing.T) {
 }
 
 func TestImportCreatesRepoAndDetectsMain(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s := newService(t)
 	res, err := s.Import(ctx, "Thesis", ZipSource(makeZip(t,
 		entry{name: "thesis.tex", body: doc + "\\setmainfont{Open Sans}\n"},
@@ -195,7 +199,7 @@ func TestImportCreatesRepoAndDetectsMain(t *testing.T) {
 }
 
 func TestCreateEmpty(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s := newService(t)
 	p, err := s.Create(ctx, "  ")
 	if err != nil {
@@ -210,7 +214,7 @@ func TestCreateEmpty(t *testing.T) {
 }
 
 func TestExportReimportIsIdentical(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s := newService(t)
 	res, err := s.Import(ctx, "p", ZipSource(makeZip(t,
 		entry{name: "main.tex", body: doc},
@@ -261,7 +265,7 @@ func TestMultipartSourceStripsFolder(t *testing.T) {
 	}
 	mw.Close()
 	s := newService(t)
-	res, err := s.Import(context.Background(), "paper", MultipartSource(multipart.NewReader(&buf, mw.Boundary())))
+	res, err := s.Import(ownerCtx, "paper", MultipartSource(multipart.NewReader(&buf, mw.Boundary())))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +349,7 @@ func TestFixtures(t *testing.T) {
 	s := newService(t)
 	for _, z := range zips {
 		t.Run(filepath.Base(z), func(t *testing.T) {
-			res, err := s.ImportZip(context.Background(), filepath.Base(z), z)
+			res, err := s.ImportZip(ownerCtx, filepath.Base(z), z)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -361,9 +365,10 @@ func TestFixtures(t *testing.T) {
 
 // Users only ever see their own projects; code without a user (startup,
 // background jobs) sees all of them.
+// Who may reach a project is the route table's job (access.Require, see
+// cmd/refract/routes_test.go); the service only lists and creates per user.
 func TestProjectsArePerUser(t *testing.T) {
 	s := newService(t)
-	s.Key = make([]byte, 32)
 	ana := auth.WithUser(context.Background(), auth.User{ID: "ana"})
 	ben := auth.WithUser(context.Background(), auth.User{ID: "ben"})
 	p, err := s.Create(ana, "thesis")
@@ -373,37 +378,24 @@ func TestProjectsArePerUser(t *testing.T) {
 	if got, err := s.Get(ana, p.ID); err != nil || got.Owner != "ana" {
 		t.Fatalf("owner get = %+v, %v", got, err)
 	}
-	notFound := func(name string, err error) {
-		t.Helper()
-		if !errors.Is(err, ErrNotFound) {
-			t.Errorf("%s by another user: %v, want ErrNotFound", name, err)
-		}
-	}
-	_, err = s.Get(ben, p.ID)
-	notFound("get", err)
-	notFound("rename", s.Rename(ben, p.ID, "x"))
-	notFound("set main", s.SetMainFile(ben, p.ID, "main.tex"))
-	_, err = s.ListFiles(ben, p.ID)
-	notFound("list files", err)
-	_, _, err = s.ReadFile(ben, p.ID, "main.tex")
-	notFound("read file", err)
-	notFound("write file", s.WriteFile(ben, p.ID, "x.tex", strings.NewReader("x")))
-	_, err = s.History(ben, p.ID, 10)
-	notFound("history", err)
-	_, err = s.Remote(ben, p.ID)
-	notFound("remote", err)
-	notFound("delete", s.Delete(ben, p.ID))
-
 	if ps, _ := s.List(ben); len(ps) != 0 {
 		t.Errorf("ben lists %d projects", len(ps))
 	}
 	if ps, _ := s.List(ana); len(ps) != 1 {
 		t.Errorf("ana lists %d projects", len(ps))
 	}
-	if ps, _ := s.List(context.Background()); len(ps) != 1 {
-		t.Errorf("background lists %d projects", len(ps))
+	for name, ctx := range map[string]context.Context{
+		"no user":       context.Background(),
+		"empty user id": auth.WithUser(context.Background(), auth.User{}),
+	} {
+		if ps, err := s.List(ctx); err != nil || len(ps) != 0 {
+			t.Errorf("%s lists %d projects, %v", name, len(ps), err)
+		}
+		if _, err := s.Create(ctx, "orphan"); !errors.Is(err, access.ErrNoUser) {
+			t.Errorf("%s creates a project: %v", name, err)
+		}
 	}
-	if _, err := s.Get(ana, p.ID); err != nil {
-		t.Errorf("ben's attempts changed ana's project: %v", err)
+	if entries, _ := os.ReadDir(s.Dir); len(entries) != 1 {
+		t.Errorf("%d project directories, want only ana's", len(entries))
 	}
 }

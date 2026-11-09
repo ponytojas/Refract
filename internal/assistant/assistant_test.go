@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/agent"
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/auth"
@@ -78,6 +79,10 @@ func (okCompiler) Compile(context.Context, string, string) (*compile.Result, err
 
 const mainTex = "\\documentclass{article}\n\\begin{document}\n\\section{Introduction}\nIntro text.\n\n\\section{Method}\nMethod text.\n\\end{document}\n"
 
+// ownerCtx is the signed-in user the tests act as. Who may reach a chat or
+// turn is checked by the route table (cmd/refract/routes_test.go).
+var ownerCtx = auth.WithUser(context.Background(), auth.User{ID: "owner"})
+
 func setup(t *testing.T, p *fakeProvider) (*Service, *projects.Service, string, string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -96,16 +101,16 @@ func setup(t *testing.T, p *fakeProvider) (*Service, *projects.Service, string, 
 	w.Write([]byte(mainTex))
 	zw.Close()
 	zr, _ := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
-	res, err := ps.Import(context.Background(), "paper", projects.ZipSource(zr))
+	res, err := ps.Import(ownerCtx, "paper", projects.ZipSource(zr))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &Service{
-		DB: db, Projects: ps,
+		DB: db, Projects: ps, Access: &access.Checker{DB: db},
 		Agent:    agent.Agent{Provider: p, Compiler: okCompiler{}, MaxIterations: 10, Timeout: time.Minute},
 		ModelFor: func(_ context.Context, c Choice) (Choice, error) { return Choice{Model: cmp.Or(c.Model, "m")}, nil },
 	}
-	c, err := s.CreateChat(context.Background(), res.Project.ID)
+	c, err := s.CreateChat(ownerCtx, res.Project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +142,7 @@ func TestScenarioAcceptCreatesOneCommit(t *testing.T) {
 		done("Added a Related work subsection after the introduction."),
 	}}
 	s, ps, id, chat := setup(t, p)
-	ctx := context.Background()
+	ctx := ownerCtx
 	var activity []string
 	turn, err := s.Ask(ctx, chat, "Add a related-work subsection after the introduction", Context{OpenFile: "main.tex"}, Choice{}, func(e agent.Event) {
 		if e.Type == "activity" {
@@ -184,10 +189,10 @@ func TestScenarioAcceptCreatesOneCommit(t *testing.T) {
 func TestScenarioRejectLeavesNoTrace(t *testing.T) {
 	p := &fakeProvider{script: [][]ai.Event{
 		{call("c1", "edit_file", addRelatedWork), {Type: ai.EventCompleted}},
-		done("Done."),
+		done("private answer after revocation"),
 	}}
 	s, ps, id, chat := setup(t, p)
-	ctx := context.Background()
+	ctx := ownerCtx
 	turn, err := s.Ask(ctx, chat, "add related work", Context{}, Choice{}, func(agent.Event) {})
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +220,7 @@ func TestScenarioRejectLeavesNoTrace(t *testing.T) {
 
 // Scenario 4: the user edits during the turn; accept merges cleanly or reports a conflict.
 func TestScenarioUserEditsDuringTurn(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	t.Run("different lines merge", func(t *testing.T) {
 		p := &fakeProvider{script: [][]ai.Event{{call("c1", "edit_file", addRelatedWork), {Type: ai.EventCompleted}}, done("ok")}}
 		s, ps, id, chat := setup(t, p)
@@ -265,7 +270,7 @@ func TestScenarioUsageLimit(t *testing.T) {
 	}}
 	s, ps, id, chat := setup(t, p)
 	logBefore := commits(t, ps, id)
-	turn, err := s.Ask(context.Background(), chat, "add related work", Context{}, Choice{}, func(agent.Event) {})
+	turn, err := s.Ask(ownerCtx, chat, "add related work", Context{}, Choice{}, func(agent.Event) {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,14 +288,14 @@ func TestScenarioUsageLimit(t *testing.T) {
 func TestStopAndBusy(t *testing.T) {
 	p := &fakeProvider{script: [][]ai.Event{done("never")}, block: make(chan struct{}), entered: make(chan struct{})}
 	s, ps, id, chat := setup(t, p)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ownerCtx)
 	result := make(chan *Turn)
 	go func() {
 		turn, _ := s.Ask(ctx, chat, "slow", Context{}, Choice{}, func(agent.Event) {})
 		result <- turn
 	}()
 	<-p.entered // the model is "thinking"
-	if _, err := s.Ask(context.Background(), chat, "second", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, ErrBusy) {
+	if _, err := s.Ask(ownerCtx, chat, "second", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, ErrBusy) {
 		t.Fatalf("concurrent turn: %v", err)
 	}
 	cancel() // Stop
@@ -302,7 +307,7 @@ func TestStopAndBusy(t *testing.T) {
 
 func TestRecoverMarksRunningTurnsStopped(t *testing.T) {
 	s, _, _, chat := setup(t, &fakeProvider{})
-	ctx := context.Background()
+	ctx := ownerCtx
 	s.save(ctx, &Turn{ID: "t1", ChatID: chat, Message: "x", Status: "running", CreatedAt: time.Now()})
 	if err := s.Recover(ctx); err != nil {
 		t.Fatal(err)
@@ -325,40 +330,6 @@ func TestContextAndHistory(t *testing.T) {
 
 // Chats and turns follow their project's owner: another user can't list,
 // read, continue, review or accept them.
-func TestChatsArePerUser(t *testing.T) {
-	s, ps, projectID, chatID := setup(t, &fakeProvider{script: [][]ai.Event{done("All good.")}})
-	ps.DB.Exec(`UPDATE projects SET owner = 'ana' WHERE id = ?`, projectID)
-	ana := auth.WithUser(context.Background(), auth.User{ID: "ana"})
-	ben := auth.WithUser(context.Background(), auth.User{ID: "ben"})
-
-	turn, err := s.Ask(ana, chatID, "check it", Context{}, Choice{}, func(agent.Event) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cs, err := s.Chats(ana, projectID); err != nil || len(cs) != 1 {
-		t.Fatalf("owner chats = %v, %v", cs, err)
-	}
-	isNotFound := func(name string, err error) {
-		t.Helper()
-		if !errors.Is(err, ErrNotFound) && !errors.Is(err, projects.ErrNotFound) {
-			t.Errorf("%s by another user: %v", name, err)
-		}
-	}
-	_, err = s.Chats(ben, projectID)
-	isNotFound("chats", err)
-	_, err = s.Turns(ben, chatID)
-	isNotFound("turns", err)
-	_, err = s.Ask(ben, chatID, "hi", Context{}, Choice{}, func(agent.Event) {})
-	isNotFound("ask", err)
-	_, err = s.CreateChat(ben, projectID)
-	isNotFound("new chat", err)
-	_, err = s.Diff(ben, turn.ID)
-	isNotFound("diff", err)
-	_, _, err = s.Accept(ben, turn.ID, nil)
-	isNotFound("accept", err)
-	_, err = s.Reject(ben, turn.ID)
-	isNotFound("reject", err)
-}
 
 // A chat remembers the model it used, and a turn keeps the model's reasoning.
 func TestChatModelAndReasoning(t *testing.T) {
@@ -368,7 +339,7 @@ func TestChatModelAndReasoning(t *testing.T) {
 		{Type: ai.EventText, Text: "Looks fine."},
 		{Type: ai.EventCompleted},
 	}}})
-	ctx := context.Background()
+	ctx := ownerCtx
 	var streamed string
 	turn, err := s.Ask(ctx, chatID, "Check the intro", Context{}, Choice{Model: "anthropic:claude-x", Effort: "high"}, func(e agent.Event) {
 		if e.Type == "reasoning" {
@@ -388,5 +359,90 @@ func TestChatModelAndReasoning(t *testing.T) {
 	chats, _ := s.Chats(ctx, projectID)
 	if chats[0].Model != "anthropic:claude-x" {
 		t.Fatalf("chat %+v", chats[0])
+	}
+}
+
+// onStream runs before each model call, to change things while a turn runs.
+type onStream struct {
+	ai.Provider
+	before func()
+}
+
+func (o onStream) Stream(ctx context.Context, r ai.Request) (<-chan ai.Event, error) {
+	o.before()
+	return o.Provider.Stream(ctx, r)
+}
+
+// A turn runs for minutes; if the project stops being the user's meanwhile,
+// nothing it did is kept.
+func TestTurnRechecksAccessBeforeWriting(t *testing.T) {
+	p := &fakeProvider{script: [][]ai.Event{
+		{call("c1", "edit_file", addRelatedWork), {Type: ai.EventCompleted}},
+		done("private answer after revocation"),
+	}}
+	s, ps, id, chat := setup(t, p)
+	before := len(commits(t, ps, id))
+	const chatUpdated = 1
+	s.Agent.Provider = onStream{p, func() {
+		ps.DB.Exec(`UPDATE projects SET owner = 'someone else' WHERE id = ?`, id)
+		ps.DB.Exec(`UPDATE chats SET updated_at = ? WHERE id = ?`, chatUpdated, chat)
+	}}
+	turn, err := s.Ask(ownerCtx, chat, "Add a related-work subsection", Context{}, Choice{}, func(agent.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Status != "failed" || len(turn.Files) != 0 {
+		t.Fatalf("turn = %+v", turn)
+	}
+	if file(t, ps, id, "main.tex") != mainTex || len(commits(t, ps, id)) != before {
+		t.Error("the turn wrote to a project its user no longer owns")
+	}
+	var reply, reasoning, activity, status string
+	ps.DB.QueryRow(`SELECT reply, reasoning, activity, status FROM turns WHERE id = ?`, turn.ID).Scan(&reply, &reasoning, &activity, &status)
+	if reply != "" || reasoning != "" || activity != "[]" || status != "failed" {
+		t.Errorf("stored turn: reply %q, reasoning %q, activity %s, status %s", reply, reasoning, activity, status)
+	}
+	var touched int64
+	ps.DB.QueryRow(`SELECT updated_at FROM chats WHERE id = ?`, chat).Scan(&touched)
+	if touched != chatUpdated {
+		t.Error("the chat was touched after access was lost")
+	}
+}
+
+// Stopping a turn, or a provider error, after access was lost keeps nothing
+// either: every way a turn ends goes through the same check.
+func TestTurnEndingsAfterAccessLossKeepNothing(t *testing.T) {
+	for _, ending := range []string{"stopped", "provider error"} {
+		t.Run(ending, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(ownerCtx)
+			defer cancel()
+			second := done("unused")
+			if ending == "provider error" {
+				second = []ai.Event{{Type: ai.EventError, Err: &ai.Error{Kind: ai.ErrOther, Message: "upstream failed"}}}
+			}
+			p := &fakeProvider{script: [][]ai.Event{
+				{{Type: ai.EventReasoning, Text: "private reasoning"}, call("c1", "edit_file", addRelatedWork), {Type: ai.EventCompleted}},
+				second,
+			}}
+			s, ps, id, chat := setup(t, p)
+			p.before = map[int]func(){1: func() {
+				ps.DB.Exec(`UPDATE projects SET owner = 'someone else' WHERE id = ?`, id)
+				if ending == "stopped" {
+					cancel()
+				}
+			}}
+			turn, _ := s.Ask(ctx, chat, "Add a related-work subsection", Context{}, Choice{}, func(agent.Event) {})
+			if turn == nil {
+				t.Fatal("no turn")
+			}
+			var reply, reasoning, activity, status string
+			ps.DB.QueryRow(`SELECT reply, reasoning, activity, status FROM turns WHERE id = ?`, turn.ID).Scan(&reply, &reasoning, &activity, &status)
+			if reply != "" || reasoning != "" || activity != "[]" || status != "failed" {
+				t.Errorf("stored turn: reply %q, reasoning %q, activity %s, status %s", reply, reasoning, activity, status)
+			}
+			if file(t, ps, id, "main.tex") != mainTex {
+				t.Error("the turn changed the project")
+			}
+		})
 	}
 }

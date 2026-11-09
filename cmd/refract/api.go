@@ -62,23 +62,23 @@ func (a *api) forUser(ctx context.Context) *userAI {
 // by model.
 func (a *api) providerFor(ctx context.Context) ai.Provider { return a.forUser(ctx).router }
 
-func (a *api) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/me", func(w http.ResponseWriter, r *http.Request) {
+func (a *api) routes(rt *router) {
+	rt.user("GET /api/me", func(w http.ResponseWriter, r *http.Request) {
 		u, _ := auth.UserFrom(r.Context())
 		writeJSON(w, map[string]any{"id": u.ID, "email": u.Email, "can_sign_out": a.canSignOut, "mode": a.mode})
 	})
-	mux.HandleFunc("GET /api/chatgpt/status", a.status)
+	rt.user("GET /api/chatgpt/status", a.status)
 	if a.mode.ChatGPT() { // elsewhere these fall through to a 404
-		mux.HandleFunc("POST /api/chatgpt/credentials", a.importCredentials)
-		mux.HandleFunc("POST /api/chatgpt/signout", a.signOut)
+		rt.user("POST /api/chatgpt/credentials", a.importCredentials)
+		rt.user("POST /api/chatgpt/signout", a.signOut)
 	}
-	mux.HandleFunc("POST /api/chatgpt/welcome-seen", a.welcomeSeen)
-	mux.HandleFunc("GET /api/models", a.models)
-	mux.HandleFunc("GET /api/providers", a.listProviders)
-	mux.HandleFunc("PUT /api/providers/{id}", a.saveProvider)
-	mux.HandleFunc("DELETE /api/providers/{id}", a.deleteProvider)
-	mux.HandleFunc("POST /api/providers/{id}/test", a.testProvider)
-	mux.HandleFunc("POST /api/quick", a.quickAction)
+	rt.user("POST /api/chatgpt/welcome-seen", a.welcomeSeen)
+	rt.user("GET /api/models", a.models)
+	rt.user("GET /api/providers", a.listProviders)
+	rt.user("PUT /api/providers/{id}", a.saveProvider)
+	rt.user("DELETE /api/providers/{id}", a.deleteProvider)
+	rt.user("POST /api/providers/{id}/test", a.testProvider)
+	rt.user("POST /api/quick", a.quickAction)
 }
 
 func (a *api) status(w http.ResponseWriter, r *http.Request) {

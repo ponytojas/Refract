@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/ponytojas/Refract/internal/access"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -22,7 +23,8 @@ type remoteAPI struct {
 	svc    *projects.Service
 	db     *sql.DB
 	key    []byte
-	github *github.Client // nil when REFRACT_GITHUB_CLIENT_ID is not set
+	github *github.Client  // nil when REFRACT_GITHUB_CLIENT_ID is not set
+	acc    *access.Checker // auto-push rechecks who may push
 
 	mu      sync.Mutex
 	last    map[string]syncStatus         // project → last push/pull
@@ -36,17 +38,17 @@ type syncStatus struct {
 	Error string    `json:"error,omitempty"`
 }
 
-func (a *remoteAPI) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/projects/{id}/remote", a.get)
-	mux.HandleFunc("PUT /api/projects/{id}/remote", a.put)
-	mux.HandleFunc("POST /api/projects/{id}/remote/push", a.push)
-	mux.HandleFunc("POST /api/projects/{id}/remote/pull", a.pull)
-	mux.HandleFunc("GET /api/github", a.githubStatus)
-	mux.HandleFunc("POST /api/github/device", a.githubStart)
-	mux.HandleFunc("POST /api/github/device/poll", a.githubPoll)
-	mux.HandleFunc("DELETE /api/github", a.githubDisconnect)
-	mux.HandleFunc("GET /api/github/repos", a.githubRepos)
-	mux.HandleFunc("POST /api/github/repos", a.githubCreate)
+func (a *remoteAPI) routes(rt *router) {
+	rt.project("GET /api/projects/{id}/remote", access.Owner, a.get)
+	rt.project("PUT /api/projects/{id}/remote", access.Owner, a.put)
+	rt.project("POST /api/projects/{id}/remote/push", access.Owner, a.push)
+	rt.project("POST /api/projects/{id}/remote/pull", access.Owner, a.pull)
+	rt.user("GET /api/github", a.githubStatus)
+	rt.user("POST /api/github/device", a.githubStart)
+	rt.user("POST /api/github/device/poll", a.githubPoll)
+	rt.user("DELETE /api/github", a.githubDisconnect)
+	rt.user("GET /api/github/repos", a.githubRepos)
+	rt.user("POST /api/github/repos", a.githubCreate)
 }
 
 func (a *remoteAPI) record(id, op string, auto bool, err error) syncStatus {
@@ -63,10 +65,15 @@ func (a *remoteAPI) record(id, op string, auto bool, err error) syncStatus {
 	return st
 }
 
-// AutoPush runs after commits (projects.Service.OnCommit).
-func (a *remoteAPI) AutoPush(id string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+// AutoPush runs after commits (projects.Service.OnCommit), as the user who
+// committed: it pushes only if they still own the project.
+func (a *remoteAPI) AutoPush(ctx context.Context, id string) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	if err := a.acc.Require(ctx, id, access.Owner); err != nil {
+		slog.Debug("auto-push skipped", "project", id, "err", err)
+		return
+	}
 	r, err := a.svc.Remote(ctx, id)
 	if err != nil || !r.AutoPush {
 		return

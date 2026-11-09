@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ponytojas/Refract/internal/access"
 	"log/slog"
 	"net/http"
 
@@ -17,14 +18,14 @@ type assistantAPI struct {
 	svc *assistant.Service
 }
 
-func (a *assistantAPI) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/projects/{id}/chats", a.chats)
-	mux.HandleFunc("POST /api/projects/{id}/chats", a.createChat)
-	mux.HandleFunc("GET /api/chats/{chat}/turns", a.turns)
-	mux.HandleFunc("POST /api/chats/{chat}/turns", a.ask)
-	mux.HandleFunc("GET /api/turns/{turn}/diff", a.diff)
-	mux.HandleFunc("POST /api/turns/{turn}/accept", a.accept)
-	mux.HandleFunc("POST /api/turns/{turn}/reject", a.reject)
+func (a *assistantAPI) routes(rt *router) {
+	rt.project("GET /api/projects/{id}/chats", access.Owner, a.chats)
+	rt.project("POST /api/projects/{id}/chats", access.Owner, a.createChat)
+	rt.chat("GET /api/chats/{chat}/turns", access.Owner, a.turns)
+	rt.chat("POST /api/chats/{chat}/turns", access.Owner, a.ask)
+	rt.turn("GET /api/turns/{turn}/diff", access.Owner, a.diff)
+	rt.turn("POST /api/turns/{turn}/accept", access.Owner, a.accept)
+	rt.turn("POST /api/turns/{turn}/reject", access.Owner, a.reject)
 }
 
 func (a *assistantAPI) chats(w http.ResponseWriter, r *http.Request) {

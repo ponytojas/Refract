@@ -1,7 +1,6 @@
 package projects
 
 import (
-	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -13,7 +12,7 @@ import (
 func newProject(t *testing.T) (*Service, string) {
 	t.Helper()
 	s := newService(t)
-	res, err := s.Import(context.Background(), "p", ZipSource(makeZip(t,
+	res, err := s.Import(ownerCtx, "p", ZipSource(makeZip(t,
 		entry{name: "main.tex", body: doc},
 		entry{name: "sec/intro.tex", body: "Intro"},
 		entry{name: "fig/logo.png", body: "\x89PNG\r\n\x1a\n\x00\x00"},
@@ -25,7 +24,7 @@ func newProject(t *testing.T) (*Service, string) {
 }
 
 func TestFilePathsAreConfined(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newProject(t)
 	bad := []string{"", ".", "../x.tex", "/etc/passwd", "sec/../../x", ".git/config", "sub/.git/config", ".refract/build/main.pdf", ".DS_Store"}
 	for _, p := range bad {
@@ -53,7 +52,7 @@ func TestFilePathsAreConfined(t *testing.T) {
 }
 
 func TestFileOperations(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newProject(t)
 
 	b, text, err := s.ReadFile(ctx, id, "main.tex")
@@ -113,7 +112,7 @@ func TestFileOperations(t *testing.T) {
 }
 
 func TestWriteFileTooLarge(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newProject(t)
 	big := strings.NewReader(strings.Repeat("x", MaxFileSize+1))
 	if err := s.WriteFile(ctx, id, "main.tex", big); !errors.Is(err, ErrTooLarge) {
@@ -125,7 +124,7 @@ func TestWriteFileTooLarge(t *testing.T) {
 }
 
 func TestCheckpointCommitsOnlyChanges(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newProject(t)
 	if made, err := s.Checkpoint(ctx, id, "checkpoint: compile"); err != nil || made {
 		t.Fatalf("clean tree: made=%v err=%v", made, err)

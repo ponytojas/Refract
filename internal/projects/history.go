@@ -144,7 +144,7 @@ func (s *Service) commitIfChanged(ctx context.Context, id, message string) (stri
 	if err := s.touch(ctx, id); err != nil {
 		return "", err
 	}
-	s.committed(id)
+	s.committed(ctx, id)
 	out, err := git(ctx, dir, "rev-parse", "HEAD")
 	return strings.TrimSpace(out), err
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/agent"
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/projects"
@@ -76,6 +77,7 @@ type Service struct {
 	Agent    agent.Agent                                   // template; Model and Effort are filled by ModelFor
 	ModelFor func(context.Context, Choice) (Choice, error) // resolves the user's choice for the agent loop
 	Provider func(context.Context) ai.Provider             // the request user's provider; nil keeps Agent.Provider
+	Access   *access.Checker                               // rechecks the user after a long turn, before writing
 
 	mu      sync.Mutex
 	running map[string]bool // project id → a turn is running
@@ -84,6 +86,7 @@ type Service struct {
 const maxHistoryTurns = 10
 
 // Recover marks turns left running by a restart as stopped and removes their worktrees.
+// It runs at startup for every user, without one: it only ends turns, never writes work.
 func (s *Service) Recover(ctx context.Context) error {
 	rows, err := s.DB.QueryContext(ctx, `SELECT t.id, c.project_id FROM turns t JOIN chats c ON c.id = t.chat_id WHERE t.status = 'running'`)
 	if err != nil {
@@ -153,12 +156,8 @@ func (s *Service) chat(ctx context.Context, id string) (*Chat, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A chat is the user's only if its project is (turns, diffs and accepts all come through here).
-	if _, err := s.Projects.Get(ctx, c.ProjectID); errors.Is(err, projects.ErrNotFound) {
-		return nil, ErrNotFound
-	} else if err != nil {
-		return nil, err
-	}
+	// Whether the user may reach this chat was checked before (access.Require
+	// on the chat's or turn's project, in the route table).
 	c.CreatedAt, c.UpdatedAt = time.Unix(created, 0), time.Unix(updated, 0)
 	return &c, nil
 }
@@ -282,6 +281,10 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 	// Whatever happens to the request, the turn's outcome is recorded.
 	bg := context.WithoutCancel(ctx)
 	fail := func(status string, err error) (*Turn, error) {
+		// However the turn ends, what it produced is kept only for its user.
+		if err := s.Access.Require(bg, p.ID, access.Owner); err != nil {
+			return s.lost(bg, p.ID, t)
+		}
 		if ctx.Err() != nil {
 			status = "stopped" // whatever failed, the user stopped it
 		}
@@ -332,6 +335,12 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 		return fail("failed", err)
 	}
 
+	// A turn runs for minutes: write its changes only if the user still owns
+	// the project. Nothing changes owners today; a feature that does must not
+	// do it while a turn runs (s.running), or this check and the write race.
+	if err := s.Access.Require(bg, p.ID, access.Owner); err != nil {
+		return s.lost(bg, p.ID, t)
+	}
 	files, err := s.Projects.FinishTurn(bg, p.ID, t.ID, base, "ai: "+title(text))
 	if err != nil {
 		return fail("failed", err)
@@ -343,6 +352,20 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 		s.Projects.EndTurn(bg, p.ID, t.ID)
 	}
 	return t, s.save(bg, t)
+}
+
+// lost ends a turn whose user no longer has access to its project: nothing
+// it produced is kept (changes, reply, reasoning, activity), and only the
+// turn's own status is recorded, so it doesn't stay "running".
+func (s *Service) lost(ctx context.Context, projectID string, t *Turn) (*Turn, error) {
+	s.Projects.EndTurn(ctx, projectID, t.ID)
+	t.Reply, t.Reasoning, t.Activity, t.Files = "", "", []string{}, []projects.Change{}
+	t.Status = "failed"
+	t.Error = &ai.Error{Kind: ai.ErrOther, Message: "you no longer have access to this project"}
+	errJSON, _ := json.Marshal(t.Error)
+	_, err := s.DB.ExecContext(ctx, `UPDATE turns SET reply = '', reasoning = '', activity = '[]', files = '[]', status = ?, error = ?, updated_at = ? WHERE id = ?`,
+		t.Status, string(errJSON), time.Now().Unix(), t.ID)
+	return t, err
 }
 
 // history replays earlier turns as plain messages (tool calls are not resent).

@@ -39,9 +39,9 @@ func (a *loginAPI) handler() http.Handler {
 }
 
 // accountRoutes are for signed-in users.
-func (a *loginAPI) accountRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/account", a.account)
-	mux.HandleFunc("POST /api/account/password", a.changePassword)
+func (a *loginAPI) accountRoutes(rt *router) {
+	rt.user("GET /api/account", a.account)
+	rt.user("POST /api/account/password", a.changePassword)
 }
 
 func (a *loginAPI) config(w http.ResponseWriter, r *http.Request) {

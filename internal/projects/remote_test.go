@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ponytojas/Refract/internal/auth"
 )
 
 // remoteProject is a project plus a bare repository acting as its remote, and
@@ -19,10 +21,10 @@ func remoteProject(t *testing.T) (s *Service, id, bare string) {
 	s, id = newTurnProject(t)
 	s.Key = make([]byte, 32)
 	bare = filepath.Join(t.TempDir(), "remote.git")
-	if _, err := git(context.Background(), t.TempDir(), "init", "-q", "--bare", bare); err != nil {
+	if _, err := git(ownerCtx, t.TempDir(), "init", "-q", "--bare", bare); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetRemote(context.Background(), id, Remote{URL: "file://" + bare, Token: "secret"}, true); err != nil {
+	if err := s.SetRemote(ownerCtx, id, Remote{URL: "file://" + bare, Token: "secret"}, true); err != nil {
 		t.Fatal(err)
 	}
 	return s, id, bare
@@ -31,7 +33,7 @@ func remoteProject(t *testing.T) (s *Service, id, bare string) {
 // elsewhere commits a file in another clone of the remote and pushes it.
 func elsewhere(t *testing.T, bare, rel, body string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := ownerCtx
 	dir := filepath.Join(t.TempDir(), "clone")
 	allow := []string{"-c", "protocol.file.allow=always"}
 	if _, err := git(ctx, t.TempDir(), append(allow, "clone", "-q", "file://"+bare, dir)...); err != nil {
@@ -48,7 +50,7 @@ func elsewhere(t *testing.T, bare, rel, body string) {
 }
 
 func TestRemoteSettings(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id := newTurnProject(t)
 	s.Key = make([]byte, 32)
 	if _, err := s.Remote(ctx, id); !errors.Is(err, ErrNoRemote) {
@@ -91,7 +93,7 @@ func TestRemoteSettings(t *testing.T) {
 }
 
 func TestPushPull(t *testing.T) {
-	ctx := context.Background()
+	ctx := ownerCtx
 	s, id, bare := remoteProject(t)
 
 	// An empty remote: nothing to pull; then push.
@@ -142,9 +144,14 @@ func TestPushPull(t *testing.T) {
 func TestOnCommitFires(t *testing.T) {
 	s, id := newTurnProject(t)
 	fired := make(chan string, 4)
-	s.OnCommit = func(id string) { fired <- id }
+	s.OnCommit = func(ctx context.Context, id string) {
+		if u, _ := auth.UserFrom(ctx); u.ID != "owner" {
+			t.Errorf("OnCommit runs as %q, want the committing user", u.ID)
+		}
+		fired <- id
+	}
 	os.WriteFile(filepath.Join(s.Path(id), "main.tex"), []byte("x\n"), 0o644)
-	if _, err := s.Checkpoint(context.Background(), id, "c"); err != nil {
+	if _, err := s.Checkpoint(ownerCtx, id, "c"); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -154,5 +161,49 @@ func TestOnCommitFires(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("OnCommit not called")
+	}
+}
+
+// Remote operations act with the acting user's credentials, so they only run
+// on that user's own project: the token is never someone else's.
+func TestRemoteActsAsItsUser(t *testing.T) {
+	s := newService(t)
+	s.Key = make([]byte, 32)
+	p, err := s.Create(ownerCtx, "paper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRemote(ownerCtx, p.ID, Remote{URL: "https://127.0.0.1:1/paper.git", Branch: "main", GitHub: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	var asked []string
+	s.GitHubToken = func(_ context.Context, user string) (string, error) {
+		asked = append(asked, user)
+		return "token-of-" + user, nil
+	}
+	r, err := s.Remote(ownerCtx, p.ID)
+	if err != nil || r.Token != "token-of-owner" {
+		t.Fatalf("owner: %+v, %v", r, err)
+	}
+
+	// The project now belongs to someone else (no such feature yet; anything
+	// that adds one must hold the remote lock): the old owner's push stops
+	// before resolving credentials or committing.
+	s.DB.Exec(`UPDATE projects SET owner = 'ben' WHERE id = ?`, p.ID)
+	s.WriteFile(ownerCtx, p.ID, "late.tex", strings.NewReader("x"))
+	before, _ := s.History(ownerCtx, p.ID, 100)
+	asked = nil
+	if err := s.Push(ownerCtx, p.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("push by the former owner: %v", err)
+	}
+	if _, err := s.Pull(ownerCtx, p.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("pull by the former owner: %v", err)
+	}
+	if _, err := s.Remote(context.Background(), p.ID); err == nil {
+		t.Error("remote without a user")
+	}
+	after, _ := s.History(ownerCtx, p.ID, 100)
+	if len(asked) != 0 || len(after) != len(before) {
+		t.Errorf("tokens asked %v, commits %d → %d", asked, len(before), len(after))
 	}
 }

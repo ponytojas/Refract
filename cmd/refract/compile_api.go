@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"github.com/ponytojas/Refract/internal/access"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,12 +21,12 @@ type compileAPI struct {
 	synctex *compile.SyncTeX
 }
 
-func (a *compileAPI) routes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/projects/{id}/compile", a.compile)
-	mux.HandleFunc("GET /api/projects/{id}/pdf", a.output(".pdf", "application/pdf"))
-	mux.HandleFunc("GET /api/projects/{id}/log", a.output(".log", "text/plain; charset=utf-8"))
-	mux.HandleFunc("GET /api/projects/{id}/synctex/forward", a.forward)
-	mux.HandleFunc("GET /api/projects/{id}/synctex/inverse", a.inverse)
+func (a *compileAPI) routes(rt *router) {
+	rt.project("POST /api/projects/{id}/compile", access.Owner, a.compile)
+	rt.project("GET /api/projects/{id}/pdf", access.Owner, a.output(".pdf", "application/pdf"))
+	rt.project("GET /api/projects/{id}/log", access.Owner, a.output(".log", "text/plain; charset=utf-8"))
+	rt.project("GET /api/projects/{id}/synctex/forward", access.Owner, a.forward)
+	rt.project("GET /api/projects/{id}/synctex/inverse", access.Owner, a.inverse)
 }
 
 // forward: ?file=&line=&col= → boxes on the PDF.
