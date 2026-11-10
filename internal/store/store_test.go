@@ -371,6 +371,38 @@ func TestConcurrentOpen(t *testing.T) {
 	}
 }
 
+// Two processes may create the database together: the server's first start
+// and a `refract users` run. Both must succeed and be able to write.
+func TestConcurrentOpenOfNewDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "refract.db")
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := range 4 {
+		wg.Go(func() {
+			db, err := Open(path)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer db.Close()
+			if err := SetSetting(t.Context(), db, fmt.Sprint("k", i), "v"); err != nil {
+				errs <- err
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	if got := versionOf(t, path); got != len(migrations) {
+		t.Fatalf("user_version = %d, want %d", got, len(migrations))
+	}
+	if left, _ := filepath.Glob(path + ".pre-upgrade*"); len(left) != 0 {
+		t.Fatalf("a new database left %v", left)
+	}
+}
+
 func TestFailedUpgradeChangesNothing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "refract.db")
 	n := len(migrations)

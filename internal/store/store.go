@@ -3,11 +3,14 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // migrations are applied in order; the schema version is PRAGMA user_version.
@@ -99,8 +102,8 @@ func Open(path string) (*sql.DB, error) {
 // only ever at its old version or the latest one, and two processes opening
 // it together (the server and `refract users`) upgrade it once.
 func migrate(db *sql.DB, path string) error {
-	var version int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+	version, err := schemaVersion(db)
+	if err != nil {
 		return err
 	}
 	if version > len(migrations) {
@@ -138,6 +141,24 @@ func migrate(db *sql.DB, path string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// schemaVersion makes the database's first query. It opens the first
+// connection, which switches a new database to WAL, and SQLite answers "busy"
+// to that at once, without waiting busy_timeout, while another process is
+// doing the same: two processes creating the database together. Wait for the
+// other as busy_timeout would.
+func schemaVersion(db *sql.DB) (int, error) {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var version int
+		err := db.QueryRow(`PRAGMA user_version`).Scan(&version)
+		var busy *sqlite.Error
+		if err == nil || !errors.As(err, &busy) || busy.Code()&0xff != sqlite3.SQLITE_BUSY || time.Now().After(deadline) {
+			return version, err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func newer(version int) error {
