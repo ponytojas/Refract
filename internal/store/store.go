@@ -109,36 +109,23 @@ func migrate(db *sql.DB, path string) error {
 	if version == len(migrations) {
 		return nil
 	}
-	// The copy is written before taking the write lock (VACUUM can't run in a
-	// transaction), under a name of its own, and only gets its final name
-	// below, once the lock shows nobody else upgraded in between.
-	var copied string
-	if version > 0 {
-		var err error
-		if copied, err = snapshot(db, path); err != nil {
-			return fmt.Errorf("copying the database before upgrading it: %w", err)
-		}
-		defer os.Remove(copied) // no-op once renamed
-	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback() // no-op after Commit
-	var locked int
-	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&locked); err != nil {
+	// Read again: holding the write lock, nobody else can change it.
+	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	switch {
-	case locked > len(migrations):
-		return newer(locked)
-	case locked == len(migrations):
-		return nil // another process upgraded it while this one waited
-	case locked != version:
-		return fmt.Errorf("the database changed from schema version %d to %d while preparing its upgrade: start Refract again", version, locked)
+	if version > len(migrations) {
+		return newer(version)
 	}
-	if copied != "" {
-		if err := os.Rename(copied, path+".pre-upgrade"); err != nil {
+	if version == len(migrations) {
+		return nil // another process upgraded it while this one waited
+	}
+	if version > 0 {
+		if err := snapshot(db, path); err != nil {
 			return fmt.Errorf("copying the database before upgrading it: %w", err)
 		}
 	}
@@ -157,17 +144,20 @@ func newer(version int) error {
 	return fmt.Errorf("the database is at schema version %d and this Refract knows up to %d: a newer Refract wrote it. Run that version or a later one, or restore a backup from before the upgrade", version, len(migrations))
 }
 
-// snapshot writes a consistent copy of the database to a new file beside it
-// and returns that file's path.
-func snapshot(db *sql.DB, path string) (string, error) {
+// snapshot writes a consistent copy of the database to path.pre-upgrade. The
+// caller holds the write lock and has changed nothing yet, so the copy, read
+// on another connection, is exactly what the upgrade starts from: no write
+// can land between the two. It is written under a name of its own and then
+// renamed, so the copy from an earlier upgrade is replaced whole or not at all.
+func snapshot(db *sql.DB, path string) error {
 	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".pre-upgrade-*")
 	if err != nil {
-		return "", err
+		return err
 	}
-	f.Close() // VACUUM INTO accepts an empty file as its target
+	f.Close()                 // VACUUM INTO accepts an empty file as its target
+	defer os.Remove(f.Name()) // no-op once renamed
 	if _, err := db.Exec(`VACUUM INTO ?`, f.Name()); err != nil {
-		os.Remove(f.Name())
-		return "", err
+		return err
 	}
-	return f.Name(), nil
+	return os.Rename(f.Name(), path+".pre-upgrade")
 }

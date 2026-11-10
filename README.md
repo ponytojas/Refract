@@ -232,7 +232,7 @@ Everything lives in the `/data` volume:
 | Path | Contents |
 |---|---|
 | `refract.db` | Users, sessions, projects, chats and settings (SQLite). Credentials and keys in it are encrypted with `REFRACT_SECRET_KEY`. |
-| `refract.db.pre-upgrade` | A copy of the database from just before the last upgrade changed it. Safe to delete once the new version works. |
+| `refract.db.pre-upgrade` | A copy of the database exactly as it was when the last upgrade started. Safe to delete once the new version works. |
 | `projects/` | One git repository per project. |
 | `tectonic-cache/` | LaTeX packages Tectonic has downloaded. Safe to delete: they come back on the next compile. |
 | `tmp/` | Uploads in progress. |

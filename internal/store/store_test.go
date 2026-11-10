@@ -145,20 +145,79 @@ func TestRefusesNewerDatabase(t *testing.T) {
 	}
 }
 
+// seed puts one row in every table a database at schema version n has. A
+// migration that adds a table adds its row here: TestUpgradeKeepsData fails
+// for a table left empty.
+func seed(t *testing.T, db *sql.DB, n int) {
+	t.Helper()
+	rows := []struct {
+		since int // the migration that created the table
+		sql   string
+	}{
+		{1, `INSERT INTO settings (key, value) VALUES ('k', 'v')`},
+		{2, `INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p', 'Paper', 1, 1)`},
+		{3, `INSERT INTO chats (id, project_id, title, created_at, updated_at) VALUES ('c', 'p', 'Chat', 1, 1)`},
+		{3, `INSERT INTO turns (id, chat_id, message, status, created_at, updated_at) VALUES ('t', 'c', 'Hi', 'review', 1, 1)`},
+		{4, `INSERT INTO users (id, email, created_at) VALUES ('u', 'u@example.com', 1)`},
+		{5, `INSERT INTO sessions (id, user_id, expires_at) VALUES ('s', 'u', 1)`},
+		{7, `INSERT INTO login_failures (key, count, since) VALUES ('ip:1', 1, 1)`},
+	}
+	for _, r := range rows {
+		if r.since > n {
+			continue
+		}
+		if _, err := db.Exec(r.sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// counts returns how many rows each table of the database has.
+func counts(t *testing.T, db *sql.DB) map[string]int {
+	t.Helper()
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, name)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, name := range tables {
+		var c int
+		if err := db.QueryRow(`SELECT count(*) FROM "` + name + `"`).Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		got[name] = c
+	}
+	return got
+}
+
+// From every earlier schema version, with a row in every table, an upgrade
+// reaches the latest version, loses no row, and leaves a copy of the
+// database as it was.
 func TestUpgradeKeepsData(t *testing.T) {
 	for n := 1; n < len(migrations); n++ {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "refract.db")
 			old := at(t, path, n)
-			if _, err := old.Exec(`INSERT INTO settings (key, value) VALUES ('k', 'v')`); err != nil {
-				t.Fatal(err)
-			}
-			if n >= 2 {
-				if _, err := old.Exec(`INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p', 'Paper', 1, 1)`); err != nil {
-					t.Fatal(err)
+			seed(t, old, n)
+			before := counts(t, old)
+			old.Close()
+			for table, c := range before {
+				if c == 0 {
+					t.Fatalf("table %s has no row at version %d: add one to seed", table, n)
 				}
 			}
-			old.Close()
 
 			db, err := Open(path)
 			if err != nil {
@@ -169,20 +228,102 @@ func TestUpgradeKeepsData(t *testing.T) {
 			if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil || v != len(migrations) {
 				t.Fatalf("user_version = %d, %v; want %d", v, err, len(migrations))
 			}
+			after := counts(t, db)
+			for table, c := range before {
+				if after[table] != c {
+					t.Errorf("table %s went from %d rows to %d", table, c, after[table])
+				}
+			}
 			var value string
 			if err := db.QueryRow(`SELECT value FROM settings WHERE key = 'k'`).Scan(&value); err != nil || value != "v" {
 				t.Fatalf("setting = %q, %v", value, err)
 			}
-			if n >= 2 {
-				var name string
-				if err := db.QueryRow(`SELECT name FROM projects WHERE id = 'p'`).Scan(&name); err != nil || name != "Paper" {
-					t.Fatalf("project = %q, %v", name, err)
-				}
-			}
+
 			if got := versionOf(t, path+".pre-upgrade"); got != n {
 				t.Fatalf("the copy is at version %d, want %d", got, n)
 			}
+			copied, err := sql.Open("sqlite", "file:"+path+".pre-upgrade?mode=ro")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer copied.Close()
+			if got := counts(t, copied); fmt.Sprint(got) != fmt.Sprint(before) {
+				t.Fatalf("the copy holds %v, want %v", got, before)
+			}
 		})
+	}
+}
+
+// Another process may still be writing when an upgrade starts (an older
+// server, while `refract users` of a newer version opens the database). The
+// copy must hold every write committed before the upgrade, not only those
+// from before the copy began.
+func TestCopyHoldsEveryWriteBeforeTheUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "refract.db")
+	at(t, path, 1).Close()
+	writer, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(10000)&_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	// Each row records the schema version its transaction saw.
+	write := func(i int) error {
+		tx, err := writer.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		var v int
+		if err := tx.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)`, fmt.Sprint("w", i), fmt.Sprint(v)); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	stop := make(chan struct{})
+	failed := make(chan error, 1)
+	go func() {
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				failed <- nil
+				return
+			default:
+			}
+			if err := write(i); err != nil {
+				failed <- err
+				return
+			}
+			time.Sleep(time.Millisecond) // leave the upgrade room to take the lock
+		}
+	}()
+	time.Sleep(20 * time.Millisecond) // let some writes land first
+	db, err := Open(path)
+	close(stop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := <-failed; err != nil {
+		t.Fatal(err)
+	}
+
+	var written, copied int
+	if err := db.QueryRow(`SELECT count(*) FROM settings WHERE value = '1'`).Scan(&written); err != nil {
+		t.Fatal(err)
+	}
+	c, err := sql.Open("sqlite", "file:"+path+".pre-upgrade?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.QueryRow(`SELECT count(*) FROM settings`).Scan(&copied); err != nil {
+		t.Fatal(err)
+	}
+	if written == 0 || copied != written {
+		t.Fatalf("%d rows were written before the upgrade and the copy holds %d", written, copied)
 	}
 }
 
