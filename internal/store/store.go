@@ -4,6 +4,8 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	_ "modernc.org/sqlite"
 )
@@ -83,34 +85,89 @@ func Open(path string) (*sql.DB, error) {
 	}
 	db.SetMaxOpenConns(8)
 	db.SetMaxIdleConns(8)
-	if err := migrate(db); err != nil {
+	if err := migrate(db, path); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return db, nil
 }
 
-func migrate(db *sql.DB) error {
+// migrate brings the database to the latest schema, or refuses it. A database
+// newer than this binary was written by a later Refract, and serving it would
+// mean guessing at its schema. Before an upgrade a copy is kept beside the
+// database. The whole upgrade is one write transaction, so the database is
+// only ever at its old version or the latest one, and two processes opening
+// it together (the server and `refract users`) upgrade it once.
+func migrate(db *sql.DB, path string) error {
 	var version int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	for i := version; i < len(migrations); i++ {
-		tx, err := db.Begin()
-		if err != nil {
-			return err
+	if version > len(migrations) {
+		return newer(version)
+	}
+	if version == len(migrations) {
+		return nil
+	}
+	// The copy is written before taking the write lock (VACUUM can't run in a
+	// transaction), under a name of its own, and only gets its final name
+	// below, once the lock shows nobody else upgraded in between.
+	var copied string
+	if version > 0 {
+		var err error
+		if copied, err = snapshot(db, path); err != nil {
+			return fmt.Errorf("copying the database before upgrading it: %w", err)
 		}
-		if _, err := tx.Exec(migrations[i]); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migration %d: %w", i+1, err)
-		}
-		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, i+1)); err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
+		defer os.Remove(copied) // no-op once renamed
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // no-op after Commit
+	var locked int
+	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&locked); err != nil {
+		return err
+	}
+	switch {
+	case locked > len(migrations):
+		return newer(locked)
+	case locked == len(migrations):
+		return nil // another process upgraded it while this one waited
+	case locked != version:
+		return fmt.Errorf("the database changed from schema version %d to %d while preparing its upgrade: start Refract again", version, locked)
+	}
+	if copied != "" {
+		if err := os.Rename(copied, path+".pre-upgrade"); err != nil {
+			return fmt.Errorf("copying the database before upgrading it: %w", err)
 		}
 	}
-	return nil
+	for i := version; i < len(migrations); i++ {
+		if _, err := tx.Exec(migrations[i]); err != nil {
+			return fmt.Errorf("migration %d: %w", i+1, err)
+		}
+	}
+	if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, len(migrations))); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func newer(version int) error {
+	return fmt.Errorf("the database is at schema version %d and this Refract knows up to %d: a newer Refract wrote it. Run that version or a later one, or restore a backup from before the upgrade", version, len(migrations))
+}
+
+// snapshot writes a consistent copy of the database to a new file beside it
+// and returns that file's path.
+func snapshot(db *sql.DB, path string) (string, error) {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".pre-upgrade-*")
+	if err != nil {
+		return "", err
+	}
+	f.Close() // VACUUM INTO accepts an empty file as its target
+	if _, err := db.Exec(`VACUUM INTO ?`, f.Name()); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }

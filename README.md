@@ -232,6 +232,7 @@ Everything lives in the `/data` volume:
 | Path | Contents |
 |---|---|
 | `refract.db` | Users, sessions, projects, chats and settings (SQLite). Credentials and keys in it are encrypted with `REFRACT_SECRET_KEY`. |
+| `refract.db.pre-upgrade` | A copy of the database from just before the last upgrade changed it. Safe to delete once the new version works. |
 | `projects/` | One git repository per project. |
 | `tectonic-cache/` | LaTeX packages Tectonic has downloaded. Safe to delete: they come back on the next compile. |
 | `tmp/` | Uploads in progress. |
@@ -239,6 +240,8 @@ Everything lives in the `/data` volume:
 To back up, stop the container, copy the volume, and keep `REFRACT_SECRET_KEY` with the copy.
 
 To upgrade, pull the new image (`docker pull ghcr.io/ponytojas/refract:0.1`, or a newer version's tag) and start a new container on the same volume. Database changes are applied automatically at startup.
+
+To go back to an older version after an upgrade, stop Refract, replace `refract.db` with `refract.db.pre-upgrade` (changes made since the upgrade are lost), and start the older version. An older Refract refuses to open a database a newer one has upgraded.
 
 Stopping Refract lets requests in flight and auto-pushes finish, and running assistant turns record that they were stopped: up to about 20 seconds. Docker's default is to kill the container after 10, so start it with `--stop-timeout 30` as above.
 
