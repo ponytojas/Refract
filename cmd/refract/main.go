@@ -109,6 +109,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := checkDeployment(deployment, cmp.Or(os.Getenv("REFRACT_AUTH"), "cloudflare"), os.Getenv("REFRACT_PUBLIC_URL")); err != nil {
+		return err
+	}
 
 	key, err := store.ParseKey(os.Getenv("REFRACT_SECRET_KEY"))
 	if err != nil {

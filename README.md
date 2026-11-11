@@ -326,9 +326,9 @@ All settings are environment variables.
 | `REFRACT_AUTH` | `cloudflare` (default), `password` or `none`. See [Choose how people sign in](#choose-how-people-sign-in). |
 | `REFRACT_DATA_DIR` | Where projects, the database and caches live. Default `/data`. |
 | `REFRACT_ADDR` | Listen address. Default `:8080`. |
-| `REFRACT_MODE` | `selfhost` (default) or `saas`, for the hosted service. With `saas`, the ChatGPT plan is off (OpenAI's plan usage covers self-hosted apps): people use the assistant with API providers only. |
+| `REFRACT_MODE` | `selfhost` (default) or `saas`, for the hosted service. With `saas`, the ChatGPT plan is off (OpenAI's plan usage covers self-hosted apps): people use the assistant with API providers only. With `saas`, Refract refuses to start with `REFRACT_AUTH=none` or without an https `REFRACT_PUBLIC_URL`. |
 | `REFRACT_CF_TEAM_DOMAIN`, `REFRACT_CF_AUD` | Cloudflare Access team domain and application AUD tag. |
-| `REFRACT_PUBLIC_URL` | The address users open Refract at, e.g. `https://refract.example.com`. Needed for OpenID Connect. |
+| `REFRACT_PUBLIC_URL` | The address users open Refract at, e.g. `https://refract.example.com`. Needed for OpenID Connect, and required with `REFRACT_MODE=saas`. |
 | `REFRACT_OIDC_ISSUER`, `REFRACT_OIDC_CLIENT_ID`, `REFRACT_OIDC_CLIENT_SECRET` | Your OpenID Connect provider's issuer URL and Refract's client credentials there. |
 | `REFRACT_OIDC_NAME` | Label of the sign-in button: *Continue with …*. Default `SSO`. |
 | `REFRACT_OIDC_ALLOWED` | Comma-separated emails and `@domains` that may create an account by signing in with OpenID Connect. Empty: existing accounts only. |
