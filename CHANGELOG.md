@@ -16,6 +16,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - When no file loads a bibliography yet, the setup hint after citing (in the editor and from the assistant) names the `.bib` relative to the main file's folder, as `\bibliography` resolves it.
 - Citing ignores a commented-out `\bibliography` or `\addbibresource`, uses the first usable name of a list such as `\bibliography{a,b}`, and drops spaces from `\bibliography` names as LaTeX does (`{my refs}` is `myrefs.bib`).
 - When no file loads a bibliography yet and the main file is in a subfolder, citations go to a `.bib` in that folder if there is one, before any other `.bib` in the project.
+- Stopping the server waits for requests in flight (up to 10 s) and for auto-pushes in progress, and lets running assistant turns record that they were stopped, instead of closing the database under them. Give Docker time for it with `docker run --stop-timeout 30`.
 
 ### Security
 

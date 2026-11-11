@@ -154,7 +154,7 @@ To use the assistant, connect an AI in **Settings → Assistant** (see [AI model
 Refract is a single container: the Go server with the web app built in, Tectonic, SyncTeX and git. It listens on port 8080 and keeps everything under `/data`.
 
 ```sh
-docker run -d --name refract --restart unless-stopped \
+docker run -d --name refract --restart unless-stopped --stop-timeout 30 \
   -p 127.0.0.1:8080:8080 -v refract-data:/data \
   -e REFRACT_SECRET_KEY="<the output of: openssl rand -base64 32>" \
   -e REFRACT_AUTH=password \
@@ -239,6 +239,8 @@ Everything lives in the `/data` volume:
 To back up, stop the container, copy the volume, and keep `REFRACT_SECRET_KEY` with the copy.
 
 To upgrade, pull the new image (`docker pull ghcr.io/ponytojas/refract:0.1`, or a newer version's tag) and start a new container on the same volume. Database changes are applied automatically at startup.
+
+Stopping Refract lets requests in flight and auto-pushes finish, and running assistant turns record that they were stopped: up to about 20 seconds. Docker's default is to kill the container after 10, so start it with `--stop-timeout 30` as above.
 
 ### Moving from `REFRACT_AUTH=none` to a sign-in mode
 
