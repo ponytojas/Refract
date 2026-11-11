@@ -235,17 +235,16 @@ func run() error {
 		return err
 	}
 	slog.Info("listening", "addr", addr, "data_dir", dataDir)
-	if err := serve(ctx, srv, ln, 10*time.Second, 5*time.Second); err != nil {
-		return err
-	}
+	err = serve(ctx, srv, ln, 10*time.Second, 5*time.Second)
 	// Auto-pushes started by the last commits still read the database.
 	if !pa.svc.Drain(5 * time.Second) {
 		slog.Warn("shutdown: an auto-push is still running")
 	}
-	return nil
+	return err
 }
 
-// serve runs srv on ln until ctx is cancelled. Then it stops accepting
+// serve runs srv on ln until ctx is cancelled or the listener fails, and
+// returns that failure, if any. Either way it then stops accepting
 // connections and gives requests in flight drain to finish. What is still
 // open after that (assistant streams) is closed, which cancels those
 // requests, and serve waits up to settle for their handlers to record what
@@ -260,9 +259,9 @@ func serve(ctx context.Context, srv *http.Server, ln net.Listener, drain, settle
 	})
 	failed := make(chan error, 1)
 	go func() { failed <- srv.Serve(ln) }()
+	var serveErr error
 	select {
-	case err := <-failed:
-		return err // it never served
+	case serveErr = <-failed: // requests may still be running: wait for them too
 	case <-ctx.Done():
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), drain)
@@ -277,7 +276,7 @@ func serve(ctx context.Context, srv *http.Server, ln net.Listener, drain, settle
 	if n := inflight.Load(); n > 0 {
 		slog.Warn("shutdown: requests still running", "count", n)
 	}
-	return nil
+	return serveErr
 }
 
 // authMiddleware picks the web UI guard from REFRACT_AUTH. It fails closed:

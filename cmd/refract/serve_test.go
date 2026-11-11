@@ -129,3 +129,46 @@ func TestServeReturnsServeError(t *testing.T) {
 		t.Fatal("serve didn't return")
 	}
 }
+
+// A listener can fail after requests started: they still get to finish
+// before serve returns its error, and with it the database closes.
+func TestServeErrorStillWaits(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	var finished atomic.Bool
+	done := make(chan error, 1)
+	go func() {
+		done <- serve(context.Background(), &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(started)
+			<-release
+			finished.Store(true)
+		})}, ln, 5*time.Second, time.Second)
+	}()
+	go func() {
+		if resp, err := http.Get("http://" + ln.Addr().String()); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	<-started
+	ln.Close()
+	select {
+	case err := <-done:
+		t.Fatalf("serve returned (%v) with a request in flight", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("serve hid the listener's error")
+		}
+		if !finished.Load() {
+			t.Error("serve returned before the request finished")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("serve didn't return")
+	}
+}
