@@ -20,6 +20,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 ### Security
 
 - Every API route that touches a project, chat, turn or file goes through one authorization check, declared with the route; without a signed-in user nothing is reachable. Auto-push and assistant turns check again, as the user who started them, before they write. Projects left without an owner after the first account was created stay unreachable.
+- A failed request to OpenAlex no longer includes the server's OpenAlex key in the error shown to the user or sent to the assistant's model.
 
 ## [0.1.2] - 2026-10-27
 

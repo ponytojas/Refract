@@ -78,11 +78,17 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, v any) erro
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+path+q.Encode(), nil)
 	if err != nil {
-		return err
+		// Never err itself: it quotes the URL, and the URL carries the key.
+		return errors.New("OpenAlex: the request could not be built")
 	}
 	req.Header.Set("User-Agent", "Refract (https://github.com/ponytojas/Refract)")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		// A *url.Error prints the whole URL, api_key included: keep its cause only.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return fmt.Errorf("OpenAlex is unreachable: %w", err)
 	}
 	defer resp.Body.Close()

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ponytojas/Refract/internal/refs"
 )
@@ -83,5 +84,32 @@ func TestRefUsesDOIBibTeX(t *testing.T) {
 	b = c.Ref(context.Background(), w).BibTeX("k")
 	if !strings.HasPrefix(b, "@article{k,\n") || !strings.Contains(b, "doi = {10.9999/unknown}") || !strings.Contains(b, "journal = {Nature}") {
 		t.Errorf("fallback =\n%s", b)
+	}
+}
+
+// The key travels in the query string, and transport errors quote the URL:
+// none of that may reach the error text shown to users and models.
+func TestErrorsNeverCarryTheKey(t *testing.T) {
+	const key = "openalex-test-key-1234567890"
+	srv := httptest.NewServer(http.NotFoundHandler())
+	closed := srv.URL
+	srv.Close() // every request now fails at the transport
+	c := &Client{HTTP: &http.Client{Timeout: 2 * time.Second}, BaseURL: closed, DOIURL: closed + "/doi", APIKey: key}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := map[string]func() error{
+		"search": func() error { _, err := c.Search(context.Background(), "attention", 5); return err },
+		"doi":    func() error { _, err := c.ByDOI(context.Background(), "10.1000/x"); return err },
+		"cancel": func() error { _, err := c.Search(cancelled, "attention", 5); return err },
+	}
+	for name, call := range calls {
+		err := call()
+		if err == nil {
+			t.Fatalf("%s: no error from a closed server", name)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "OpenAlex is unreachable") || strings.Contains(msg, key) || strings.Contains(msg, "api_key") {
+			t.Errorf("%s: error = %q", name, msg)
+		}
 	}
 }
