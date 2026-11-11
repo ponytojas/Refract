@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,19 +73,31 @@ func (s *Service) Checkpoint(ctx context.Context, id, message string) (bool, err
 // gets the context of whoever committed, so it acts as them: their user, not
 // their request's deadline.
 func (s *Service) committed(ctx context.Context, id string) {
-	if s.OnCommit != nil {
-		s.bg.Add(1)
-		go func() {
-			defer s.bg.Done()
-			s.OnCommit(context.WithoutCancel(ctx), id)
-		}()
+	if s.OnCommit == nil {
+		return
 	}
+	s.bgMu.Lock()
+	defer s.bgMu.Unlock()
+	if s.stopping {
+		// The database is about to close; the next commit pushes this one too.
+		slog.Warn("auto-push skipped: shutting down", "project", id)
+		return
+	}
+	s.bg.Add(1)
+	go func() {
+		defer s.bg.Done()
+		s.OnCommit(context.WithoutCancel(ctx), id)
+	}()
 }
 
-// Wait waits up to timeout for the OnCommit calls still running, and reports
-// whether they all finished. Shutdown calls it before closing the database,
-// which they read.
-func (s *Service) Wait(timeout time.Duration) bool {
+// Drain stops starting OnCommit calls, waits up to timeout for those still
+// running, and reports whether they all finished. Shutdown calls it before
+// closing the database, which they read. A commit after Drain started skips
+// its auto-push: requests can outlive shutdown's wait for them.
+func (s *Service) Drain(timeout time.Duration) bool {
+	s.bgMu.Lock()
+	s.stopping = true // after this, no bg.Add: the wait below can't race one
+	s.bgMu.Unlock()
 	done := make(chan struct{})
 	go func() {
 		s.bg.Wait()

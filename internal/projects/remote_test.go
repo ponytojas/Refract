@@ -165,7 +165,7 @@ func TestOnCommitFires(t *testing.T) {
 }
 
 // Shutdown waits for auto-pushes in progress before closing the database.
-func TestWaitForOnCommit(t *testing.T) {
+func TestDrainWaitsForOnCommit(t *testing.T) {
 	s, id := newTurnProject(t)
 	started, release := make(chan struct{}), make(chan struct{})
 	s.OnCommit = func(ctx context.Context, id string) {
@@ -181,12 +181,12 @@ func TestWaitForOnCommit(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("OnCommit not called")
 	}
-	if s.Wait(50 * time.Millisecond) {
-		t.Fatal("Wait returned true while OnCommit was running")
+	if s.Drain(50 * time.Millisecond) {
+		t.Fatal("Drain returned true while OnCommit was running")
 	}
 	close(release)
-	if !s.Wait(2 * time.Second) {
-		t.Fatal("Wait timed out after OnCommit finished")
+	if !s.Drain(2 * time.Second) {
+		t.Fatal("Drain timed out after OnCommit finished")
 	}
 }
 

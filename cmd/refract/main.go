@@ -239,7 +239,7 @@ func run() error {
 		return err
 	}
 	// Auto-pushes started by the last commits still read the database.
-	if !pa.svc.Wait(5 * time.Second) {
+	if !pa.svc.Drain(5 * time.Second) {
 		slog.Warn("shutdown: an auto-push is still running")
 	}
 	return nil
