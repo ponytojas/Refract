@@ -73,7 +73,28 @@ func (s *Service) Checkpoint(ctx context.Context, id, message string) (bool, err
 // their request's deadline.
 func (s *Service) committed(ctx context.Context, id string) {
 	if s.OnCommit != nil {
-		go s.OnCommit(context.WithoutCancel(ctx), id)
+		s.bg.Add(1)
+		go func() {
+			defer s.bg.Done()
+			s.OnCommit(context.WithoutCancel(ctx), id)
+		}()
+	}
+}
+
+// Wait waits up to timeout for the OnCommit calls still running, and reports
+// whether they all finished. Shutdown calls it before closing the database,
+// which they read.
+func (s *Service) Wait(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		s.bg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
 	}
 }
 

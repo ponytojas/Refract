@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -51,6 +52,8 @@ type Service struct {
 	OnCommit func(ctx context.Context, id string) // called (in its own goroutine, as the committing user) after commits on the main branch
 	// GitHubToken returns the GitHub token of a user (a project's owner), for remotes that use their account.
 	GitHubToken func(ctx context.Context, owner string) (string, error)
+
+	bg sync.WaitGroup // OnCommit calls still running; see Wait
 }
 
 // Path returns a project's directory.
