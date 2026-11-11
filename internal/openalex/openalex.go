@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -78,12 +79,13 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, v any) erro
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+path+q.Encode(), nil)
 	if err != nil {
-		return err
+		// Never err itself: it quotes the URL, and the URL carries the key.
+		return errors.New("OpenAlex: the request could not be built")
 	}
 	req.Header.Set("User-Agent", "Refract (https://github.com/ponytojas/Refract)")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("OpenAlex is unreachable: %w", err)
+		return keyless("OpenAlex is unreachable"+reason(err), err)
 	}
 	defer resp.Body.Close()
 	switch {
@@ -94,7 +96,36 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, v any) erro
 	case resp.StatusCode != http.StatusOK:
 		return fmt.Errorf("OpenAlex answered HTTP %d", resp.StatusCode)
 	}
-	return json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(v)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(v); err != nil {
+		return keyless("OpenAlex sent an answer Refract could not read"+reason(err), err)
+	}
+	return nil
+}
+
+// The request URL carries the key, and errors from a request may quote it:
+// *url.Error prints the URL, a bad redirect prints its Location, which can
+// repeat the query string. So the text of an error from a request is fixed
+// here and never taken from the cause; errors.Is and errors.As still see it.
+type keylessError struct {
+	msg string
+	err error
+}
+
+func (e *keylessError) Error() string { return e.msg }
+func (e *keylessError) Unwrap() error { return e.err }
+
+func keyless(msg string, err error) error { return &keylessError{msg, err} }
+
+// reason names the few causes worth telling the user, in fixed words.
+func reason(err error) string {
+	var ne net.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		return ": the request was cancelled"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
+		return ": the request timed out"
+	}
+	return ""
 }
 
 type raw struct {

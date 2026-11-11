@@ -164,6 +164,32 @@ func TestOnCommitFires(t *testing.T) {
 	}
 }
 
+// Shutdown waits for auto-pushes in progress before closing the database.
+func TestDrainWaitsForOnCommit(t *testing.T) {
+	s, id := newTurnProject(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	s.OnCommit = func(ctx context.Context, id string) {
+		close(started)
+		<-release
+	}
+	os.WriteFile(filepath.Join(s.Path(id), "main.tex"), []byte("x\n"), 0o644)
+	if _, err := s.Checkpoint(ownerCtx, id, "c"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnCommit not called")
+	}
+	if s.Drain(50 * time.Millisecond) {
+		t.Fatal("Drain returned true while OnCommit was running")
+	}
+	close(release)
+	if !s.Drain(2 * time.Second) {
+		t.Fatal("Drain timed out after OnCommit finished")
+	}
+}
+
 // Remote operations act with the acting user's credentials, so they only run
 // on that user's own project: the token is never someone else's.
 func TestRemoteActsAsItsUser(t *testing.T) {

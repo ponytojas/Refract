@@ -16,10 +16,13 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - When no file loads a bibliography yet, the setup hint after citing (in the editor and from the assistant) names the `.bib` relative to the main file's folder, as `\bibliography` resolves it.
 - Citing ignores a commented-out `\bibliography` or `\addbibresource`, uses the first usable name of a list such as `\bibliography{a,b}`, and drops spaces from `\bibliography` names as LaTeX does (`{my refs}` is `myrefs.bib`).
 - When no file loads a bibliography yet and the main file is in a subfolder, citations go to a `.bib` in that folder if there is one, before any other `.bib` in the project.
+- Stopping the server waits for requests in flight (up to 10 s) and for auto-pushes in progress, and lets running assistant turns record that they were stopped, instead of closing the database under them. Give Docker time for it with `docker run --stop-timeout 30`.
 
 ### Security
 
 - Every API route that touches a project, chat, turn or file goes through one authorization check, declared with the route; without a signed-in user nothing is reachable. Auto-push and assistant turns check again, as the user who started them, before they write. Projects left without an owner after the first account was created stay unreachable.
+- A failed request to OpenAlex no longer includes the server's OpenAlex key in the error shown to the user or sent to the assistant's model.
+- Built with Go 1.27.4, which fixes a crash of the HTTP server in Go's `net/http` (GO-2026-6859).
 
 ## [0.1.2] - 2026-10-27
 

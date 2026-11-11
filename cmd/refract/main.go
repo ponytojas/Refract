@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -227,19 +229,54 @@ func run() error {
 	}
 	mux.Handle("/", guard(people.Middleware(auth.RequireCSRFHeader(app))))
 
-	srv := &http.Server{Addr: addr, Handler: securityHeaders(mux), ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		srv.Shutdown(shutdownCtx)
-	}()
-
-	slog.Info("listening", "addr", addr, "data_dir", dataDir)
-	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+	srv := &http.Server{Handler: securityHeaders(mux), ReadHeaderTimeout: 10 * time.Second}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
 		return err
 	}
-	return nil
+	slog.Info("listening", "addr", addr, "data_dir", dataDir)
+	err = serve(ctx, srv, ln, 10*time.Second, 5*time.Second)
+	// Auto-pushes started by the last commits still read the database.
+	if !pa.svc.Drain(5 * time.Second) {
+		slog.Warn("shutdown: an auto-push is still running")
+	}
+	return err
+}
+
+// serve runs srv on ln until ctx is cancelled or the listener fails, and
+// returns that failure, if any. Either way it then stops accepting
+// connections and gives requests in flight drain to finish. What is still
+// open after that (assistant streams) is closed, which cancels those
+// requests, and serve waits up to settle for their handlers to record what
+// happened. Only then may the caller close the database.
+func serve(ctx context.Context, srv *http.Server, ln net.Listener, drain, settle time.Duration) error {
+	var inflight atomic.Int64
+	next := srv.Handler
+	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inflight.Add(1)
+		defer inflight.Add(-1)
+		next.ServeHTTP(w, r)
+	})
+	failed := make(chan error, 1)
+	go func() { failed <- srv.Serve(ln) }()
+	var serveErr error
+	select {
+	case serveErr = <-failed: // requests may still be running: wait for them too
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), drain)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		srv.Close()
+	}
+	deadline := time.Now().Add(settle)
+	for inflight.Load() > 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := inflight.Load(); n > 0 {
+		slog.Warn("shutdown: requests still running", "count", n)
+	}
+	return serveErr
 }
 
 // authMiddleware picks the web UI guard from REFRACT_AUTH. It fails closed:

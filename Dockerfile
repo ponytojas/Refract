@@ -10,7 +10,7 @@ COPY web/ ./
 RUN npm run build
 
 # --- Go binary (cross-compiled, no CGO) ---
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24 AS go
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine3.24 AS go
 ARG TARGETOS TARGETARCH
 # Shown by `refract version`; the release workflow passes the tag.
 ARG VERSION=dev
