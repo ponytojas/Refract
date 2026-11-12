@@ -1,4 +1,4 @@
-import type { Model, ModelUsage } from '../api'
+import type { Allowance, Model, ModelUsage } from '../api'
 
 /** The first instant of the month containing now, in the browser's time zone, as Unix seconds. */
 export function monthStart(now: Date): number {
@@ -24,3 +24,17 @@ export function modelLabel(slug: string, models: Model[]): { name: string; provi
 
 /** Input plus output tokens: cached and reasoning tokens are parts of them, not additions. */
 export const totalTokens = (u: ModelUsage) => u.input_tokens + u.output_tokens
+
+/** The share of the included AI left this month, as a whole percentage from 0 to 100. */
+export function allowanceLeft(a: Allowance): number {
+  if (a.limit_usd <= 0) return 0
+  return Math.round(Math.min(1, Math.max(0, 1 - a.spent_usd / a.limit_usd)) * 100)
+}
+
+/** The day the included AI renews, for people: "1 December" in English, "1 de diciembre" in Spanish. */
+export function renewalDate(a: Allowance, lang: string): string {
+  return new Date(a.resets_at * 1000).toLocaleDateString(lang, { day: 'numeric', month: 'long' })
+}
+
+/** The calls made with the account's own keys or ChatGPT plan: everything but the included AI. */
+export const ownUsage = (rows: ModelUsage[]) => rows.filter((u) => !u.included)

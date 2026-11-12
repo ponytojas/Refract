@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/chatcn/settings-panel'
 import { getPrefs, openSettings, setPref, usePrefs, useSettingsSection, type Prefs } from '@/lib/prefs'
 import { lang, t, tn } from '@/lib/i18n'
-import { compact, modelLabel, totalTokens } from '@/lib/usage'
+import { compact, modelLabel, ownUsage, totalTokens } from '@/lib/usage'
 import { useMonthUsage } from '@/components/useMonthUsage'
 import { shortcutGroups } from '@/lib/shortcuts'
 import { setTheme, useTheme, type Theme } from '@/lib/theme'
@@ -400,7 +400,8 @@ const blank = (kind: Kind, taken: string[]): Draft => {
 // What the account's model calls used this month, per model, as recorded by
 // the server (GET /api/usage). Tokens only: prices change and differ by plan.
 function Usage() {
-  const { since, usage, error, models } = useMonthUsage()
+  const { since, usage: all, error, models } = useMonthUsage()
+  const usage = all && ownUsage(all) // the included AI (S1) shows as a share of its allowance, not here
   useEffect(() => {
     if (error) toast.error(error)
   }, [error])

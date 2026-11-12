@@ -234,4 +234,11 @@ export default {
   'No AI requests yet': 'Aún no hay peticiones a la IA',
   'By model, as each provider reported it': 'Por modelo, según lo informa cada proveedor',
   'Details in Settings': 'Detalles en Ajustes',
+  'With your own keys': 'Con tus claves',
+  'Refract AI': 'IA de Refract',
+  'Used up this month': 'Agotada este mes',
+  '{n}% left': 'Queda un {n} %',
+  'Renews {date}': 'Se renueva el {date}',
+  'Included AI left this month': 'IA incluida restante este mes',
+  'Add your own API key': 'Añadir tu propia clave de API',
 } as Record<string, string>
