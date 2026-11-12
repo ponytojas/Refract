@@ -20,6 +20,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - When no file loads a bibliography yet and the main file is in a subfolder, citations go to a `.bib` in that folder if there is one, before any other `.bib` in the project.
 - Stopping the server waits for requests in flight (up to 10 s) and for auto-pushes in progress, and lets running assistant turns record that they were stopped, instead of closing the database under them. Give Docker time for it with `docker run --stop-timeout 30`.
 - Starting Refract for the first time while a `refract users` command runs no longer fails with "database is locked".
+- Compiling, accepting assistant changes, restoring history, pulling and auto-push no longer fail at random when they touch the same project at the same moment, and a turn can't be accepted and rejected at once.
 
 ### Security
 

@@ -79,8 +79,29 @@ type Service struct {
 	Provider func(context.Context) ai.Provider             // the request user's provider; nil keeps Agent.Provider
 	Access   *access.Checker                               // rechecks the user after a long turn, before writing
 
-	mu      sync.Mutex
-	running map[string]bool // project id → a turn is running
+	mu        sync.Mutex
+	running   map[string]bool // project id → a turn is running
+	reviewing map[string]bool // turn id → an accept or reject is in progress
+}
+
+// review reserves a turn for one accept or reject at a time: both read the
+// turn, act on the repository and save it, and two at once (a double click,
+// two tabs) would save over each other.
+func (s *Service) review(turnID string) (release func(), err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reviewing == nil {
+		s.reviewing = map[string]bool{}
+	}
+	if s.reviewing[turnID] {
+		return nil, ErrBusy
+	}
+	s.reviewing[turnID] = true
+	return func() {
+		s.mu.Lock()
+		delete(s.reviewing, turnID)
+		s.mu.Unlock()
+	}, nil
 }
 
 const maxHistoryTurns = 10
@@ -418,6 +439,11 @@ func (s *Service) Diff(ctx context.Context, turnID string) ([]FileDiff, error) {
 // Accept applies files (all pending if empty). On conflict nothing is applied
 // and the conflicting files are returned.
 func (s *Service) Accept(ctx context.Context, turnID string, files []string) (*Turn, []string, error) {
+	release, err := s.review(turnID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
 	t, c, err := s.turn(ctx, turnID)
 	if err != nil {
 		return nil, nil, err
@@ -458,6 +484,11 @@ func (s *Service) Accept(ctx context.Context, turnID string, files []string) (*T
 
 // Reject discards the turn's pending changes.
 func (s *Service) Reject(ctx context.Context, turnID string) (*Turn, error) {
+	release, err := s.review(turnID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	t, c, err := s.turn(ctx, turnID)
 	if err != nil {
 		return nil, err

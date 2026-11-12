@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -66,7 +67,21 @@ func initRepo(ctx context.Context, dir, message string) error {
 
 // Checkpoint commits the working tree if anything changed, and reports whether it did.
 func (s *Service) Checkpoint(ctx context.Context, id, message string) (bool, error) {
+	defer lockRepo(id)()
 	return s.checkpoint(ctx, id, message, true)
+}
+
+var repoLocks sync.Map // project id → *sync.Mutex
+
+// lockRepo makes git operations on a project's repository wait for each
+// other: git fails at once when another process holds .git/index.lock.
+// Exported methods take it; checkpoint and commitIfChanged run under it and
+// never take it themselves. Remote operations take lockRemote first, then
+// this, never the other way round, and never hold this during network I/O.
+func lockRepo(id string) func() {
+	m, _ := repoLocks.LoadOrStore(id, &sync.Mutex{})
+	m.(*sync.Mutex).Lock()
+	return m.(*sync.Mutex).Unlock
 }
 
 // committed tells OnCommit (auto-push) that the project's history grew. It
