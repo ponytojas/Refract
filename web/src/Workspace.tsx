@@ -25,6 +25,7 @@ import {
   PanelLeft,
   Play,
   Plus,
+  ScrollText,
   Sparkles,
   Upload,
   X,
@@ -39,6 +40,7 @@ import {
   mkdir,
   move,
   readFile,
+  RequestError,
   removeFile,
   writeFile,
   type ChatGPTStatus,
@@ -100,6 +102,7 @@ import { cn } from '@/lib/utils'
 import { buildOutline, currentHeading, emptyOutline, OutlineCache, type Outline as OutlineData } from '@/lib/outline'
 import Outline from './Outline'
 import { t, tn } from '@/lib/i18n'
+import { forQuickAction, INSTRUCTIONS_FILE, instructionsTemplate } from '@/lib/instructions'
 
 // Saved panel layouts; storage can be unavailable (private windows, blocked site data).
 const layoutStorage: LayoutStorage = {
@@ -617,6 +620,41 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     })
   }
 
+  // REFRACT.md as saved on the server, or undefined when there is none. The
+  // file list can be stale (another tab, the assistant), so this asks.
+  async function savedInstructions(): Promise<string | undefined> {
+    try {
+      const f = await readFile(id, INSTRUCTIONS_FILE)
+      return f.text ? f.content : ''
+    } catch (e) {
+      if (e instanceof RequestError && e.status === 404) return undefined
+      throw e
+    }
+  }
+
+  // Project instructions: open REFRACT.md, creating it from the template the first time.
+  async function openInstructions() {
+    try {
+      if ((await savedInstructions()) === undefined) {
+        await writeFile(id, INSTRUCTIONS_FILE, instructionsTemplate(t))
+        await loadFiles()
+      }
+      await open(INSTRUCTIONS_FILE)
+    } catch (e) {
+      toast.error(errorText(e))
+    }
+  }
+
+  // What quick actions send: the editor's live text when REFRACT.md is open,
+  // the saved one otherwise, read every time: the file list can be stale when
+  // REFRACT.md was created elsewhere. A failed read fails the action rather than
+  // run it without the author's instructions.
+  async function quickInstructions() {
+    const live = states.current.get(INSTRUCTIONS_FILE)
+    if (live) return forQuickAction(live.doc.toString())
+    return forQuickAction(await savedInstructions())
+  }
+
   function rename(from: string) {
     askFor({
       title: t('Rename or move'),
@@ -730,6 +768,14 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
       label: t('Upload files'),
       icon: Upload,
       run: () => uploadInput.current?.click(),
+    },
+    {
+      id: 'ws:instructions',
+      group: 'Actions',
+      label: t('Project instructions'),
+      icon: ScrollText,
+      keywords: 'refract.md assistant rules style remember',
+      run: openInstructions,
     },
     {
       id: 'ws:git',
@@ -909,6 +955,9 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                 <DropdownMenuContent align="start" className="w-64">
                   <DropdownMenuItem render={<Link to="/" />}>
                     <ChevronLeft /> {t('All projects')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={openInstructions}>
+                    <ScrollText /> {t('Project instructions')}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setGitOpen(true)}>
                     <GitBranch /> {t('Git remote…')}
@@ -1270,6 +1319,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                   insert={insert}
                   onInserted={() => setInsert(undefined)}
                   onCite={(target, suggest) => setCiting({ target, suggest })}
+                  instructions={quickInstructions}
                   proposal={proposal}
                   onProposed={(ok) => {
                     setProposal(undefined)

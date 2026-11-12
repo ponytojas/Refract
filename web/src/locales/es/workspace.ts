@@ -239,4 +239,12 @@ export default {
   'Go to section…': 'Ir a la sección…',
   'Set a main file to see its outline.': 'Elige un archivo principal para ver su esquema.',
   'No sections yet.': 'Aún no hay secciones.',
+  // Project instructions (REFRACT.md)
+  'Project instructions': 'Instrucciones del proyecto',
+  'Instructions the assistant always follows in this project: journal style, spelling, notation, what it must not change.':
+    'Instrucciones que el asistente sigue siempre en este proyecto: estilo de la revista, ortografía, notación, lo que no debe cambiar.',
+  'Write them below as plain sentences. Text inside these comment marks is ignored.':
+    'Escríbelas debajo como frases normales. El texto dentro de estas marcas de comentario se ignora.',
+  'You can also ask the assistant to remember something: it proposes an edit to this file.':
+    'También puedes pedir al asistente que recuerde algo: propondrá un cambio en este archivo.',
 } as Record<string, string>

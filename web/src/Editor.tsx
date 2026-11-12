@@ -54,6 +54,7 @@ type Props = {
   onInserted?: () => void
   quick?: boolean // show the quick-actions toolbar on selections (AI available)
   onCite?: (target: CiteTarget, suggest: boolean) => void // find/add a reference for the selection
+  instructions?: () => Promise<string | undefined> // REFRACT.md for quick actions
   proposal?: { path: string; from: number; to: number; original: string; text: string } // show as an inline diff
   onProposed?: (ok: boolean) => void // false: the text there changed meanwhile
   symbols: RefObject<ProjectSymbols> // what completion offers; a ref, so a refresh doesn't render
@@ -80,6 +81,7 @@ export default function Editor({
   onInserted,
   quick,
   onCite,
+  instructions,
   proposal,
   onProposed,
   symbols,
@@ -452,6 +454,7 @@ export default function Editor({
             onCount={onWordCount}
             target={limitTarget}
             onClose={() => setLimitTarget(null)}
+            instructions={instructions}
           />
         )}
         {quick && mounted && (
@@ -461,6 +464,7 @@ export default function Editor({
             dragging={dragging}
             handle={quickRef}
             onCite={onCite ? () => cite(true) : undefined}
+            instructions={instructions}
           />
         )}
       </div>

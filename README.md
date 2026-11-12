@@ -68,6 +68,7 @@ For a font that Google Fonts does not supply, include its licensed font files in
 - Changes arrive as a review: a diff per file, accepted or rejected all at once or file by file. Accepting creates one commit; rejecting leaves no trace.
 - Shows the model's reasoning while it thinks, when the model provides it, folded away once it answers.
 - Each chat remembers the model and reasoning level it used.
+- **Project instructions**: a `REFRACT.md` at the project root (project menu → **Project instructions** creates it) tells the assistant what to always respect in this project: journal style, spelling, notation, what not to touch. It is an ordinary file, versioned with the project and included in exports. The assistant reads its first 8 KB on every turn, and quick actions read its first 2 KB; text inside `<!-- -->` comments is ignored. Ask the assistant to remember something and it proposes an edit to the file, which you review like any other change. The file can't override the assistant's own rules, such as never inventing citations.
 
 ### Quick actions
 

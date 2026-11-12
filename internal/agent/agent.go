@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/cite"
 	"github.com/ponytojas/Refract/internal/compile"
+	"github.com/ponytojas/Refract/internal/quick"
 )
 
 // Agent runs one assistant turn.
@@ -58,6 +61,7 @@ Rules:
 - Read files before editing them. Use edit_file for changes to existing files; old_text must match exactly once.
 - After non-trivial edits, compile and fix any errors you introduced. Don't try to fix pre-existing problems unless asked.
 - Your changes are proposed to the user as a diff; they decide whether to apply them.
+- When the user asks you to remember something for this project, propose an edit to REFRACT.md at the project root (create it with write_file if it doesn't exist). Never store it anywhere else.
 - Finish with a short summary of what you changed and why. Reply in the language the user writes in.
 
 The project's main file is %s.
@@ -76,6 +80,9 @@ func (a *Agent) Run(ctx context.Context, in Input, emit func(Event)) (string, er
 		Model:        a.Model,
 		Instructions: fmt.Sprintf(instructions, cmpOr(in.MainFile, "(not set)"), tree),
 		Tools:        tools.Definitions(),
+	}
+	if pi := projectInstructions(in.Dir); pi != "" {
+		req.Instructions += quick.InstructionsHeading + pi
 	}
 	if a.Effort != "" {
 		req.Reasoning = &ai.Reasoning{Effort: a.Effort, Summary: "auto"}
@@ -128,6 +135,29 @@ func (a *Agent) Run(ctx context.Context, in Input, emit func(Event)) (string, er
 		}
 	}
 	return reply.String(), ErrTooManySteps
+}
+
+// MaxInstructions caps how much of REFRACT.md goes into a turn's prompt.
+const MaxInstructions = 8 << 10
+
+// projectInstructions reads REFRACT.md from the worktree, confined to it so a
+// symlink can't pull in files from elsewhere. Missing or unreadable means none.
+func projectInstructions(dir string) string {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return ""
+	}
+	defer root.Close()
+	f, err := root.Open(quick.InstructionsFile)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, 1<<20))
+	if err != nil {
+		return ""
+	}
+	return quick.ProjectInstructions(string(b), MaxInstructions)
 }
 
 func cmpOr(a, b string) string {

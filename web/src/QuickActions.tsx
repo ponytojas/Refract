@@ -60,11 +60,12 @@ type Props = {
   dragging: boolean
   handle: Ref<QuickHandle>
   onCite?: () => void // open "Add a reference" for the selection
+  instructions?: () => Promise<string | undefined> // the project's REFRACT.md, as sent to the server
 }
 
 // Floating toolbar over the editor selection: one-shot AI edits (§4.7), shown
 // as an inline diff to accept (Tab) or reject (Esc).
-export default function QuickActions({ view, path, dragging, handle, onCite }: Props) {
+export default function QuickActions({ view, path, dragging, handle, onCite, instructions }: Props) {
   const [job, setJob] = useState<Job | null>(null) // running, or finished with an error/explanation
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
@@ -99,16 +100,19 @@ export default function QuickActions({ view, path, dragging, handle, onCite }: P
     const doc = view.state.doc
     const j = { from, to, action, instruction: text }
     abort.current?.abort()
-    abort.current = new AbortController()
+    const controller = new AbortController() // this run's own: a newer run replaces abort.current
+    abort.current = controller
     setJob(j)
     setRunning(true)
     setError('')
     setExplanation('')
     setAsking(false)
     try {
+      const projectInstructions = await instructions?.()
+      if (controller.signal.aborted) return // cancelled or replaced while reading them
       const res = await api<{ text: string }>('/api/quick', {
         method: 'POST',
-        signal: abort.current.signal,
+        signal: controller.signal,
         body: {
           action,
           instruction: text,
@@ -116,6 +120,7 @@ export default function QuickActions({ view, path, dragging, handle, onCite }: P
           before: doc.sliceString(Math.max(0, from - CONTEXT), from),
           after: doc.sliceString(to, Math.min(doc.length, to + CONTEXT)),
           file: path,
+          projectInstructions,
           model: getPrefs().model,
         },
       })
@@ -129,10 +134,11 @@ export default function QuickActions({ view, path, dragging, handle, onCite }: P
         view.focus()
       }
     } catch (e) {
+      if (controller.signal.aborted && abort.current !== controller) return // a newer run owns the state
       if ((e as Error).name !== 'AbortError') setError(errorText(e))
       else setJob(null)
     } finally {
-      setRunning(false)
+      if (abort.current === controller) setRunning(false)
     }
   }
 
