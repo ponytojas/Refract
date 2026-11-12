@@ -646,12 +646,12 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   }
 
   // What quick actions send: the editor's live text when REFRACT.md is open,
-  // the saved one otherwise. A failed read fails the action rather than run it
-  // without the author's instructions.
+  // the saved one otherwise, read every time: the file list can be stale when
+  // REFRACT.md was created elsewhere. A failed read fails the action rather than
+  // run it without the author's instructions.
   async function quickInstructions() {
     const live = states.current.get(INSTRUCTIONS_FILE)
     if (live) return forQuickAction(live.doc.toString())
-    if (!files.some((f) => f.path === INSTRUCTIONS_FILE)) return undefined
     return forQuickAction(await savedInstructions())
   }
 
