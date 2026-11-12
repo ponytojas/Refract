@@ -571,7 +571,11 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    /* An app, not a page: no rubber-band bounce or scroll chaining. */
+  }
+  /* An app, not a page: no rubber-band bounce or scroll chaining. Only on boxes that scroll:
+     Chrome also puts overflow: hidden boxes (truncated labels) in the scroll chain, and with
+     `none` there a wheel over a label scrolls nothing, freezing the file tree and outline. */
+  :where(html, body, .overflow-auto, .overflow-y-auto, .overflow-x-auto, .cm-scroller) {
     overscroll-behavior: none;
   }
   html,
