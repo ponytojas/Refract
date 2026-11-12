@@ -323,6 +323,7 @@ Add providers in **Settings → Assistant → API providers**. **Test** checks t
 - For endpoints that can't list their models, type the model ids in the provider's settings.
 - Base URLs must be reachable from the Refract server: from inside Docker, a local Ollama is usually `http://host.docker.internal:11434`. Private and loopback addresses are allowed; link-local addresses (cloud metadata services) are refused. With `REFRACT_MODE=saas`, base URLs must be public `https://` addresses and local models (Ollama) aren't offered.
 - Refract sets no spending limits. Usage is between you and the provider.
+- Refract records how many tokens each model call uses (per account and model, never the text), as the basis for usage reports and limits.
 
 `REFRACT_MODEL_AGENT` and `REFRACT_MODEL_QUICK` set default models for the assistant and for quick actions and citations, used until a user picks one.
 

@@ -18,6 +18,7 @@ import (
 	"github.com/ponytojas/Refract/internal/providers"
 	"github.com/ponytojas/Refract/internal/quick"
 	"github.com/ponytojas/Refract/internal/siwc"
+	"github.com/ponytojas/Refract/internal/usage"
 )
 
 type api struct {
@@ -30,6 +31,7 @@ type api struct {
 
 	providers *providers.Store // users' API-key providers
 	outbound  *http.Client     // for those providers (see providers.HTTPClient)
+	usage     *usage.Recorder  // what each model call used; nil records nothing
 
 	users sync.Map // user id → *userAI
 }
@@ -61,6 +63,18 @@ func (a *api) forUser(ctx context.Context) *userAI {
 // providerFor is the request user's AI: their ChatGPT plan or API providers,
 // by model.
 func (a *api) providerFor(ctx context.Context) ai.Provider { return a.forUser(ctx).router }
+
+// metered is providerFor for calls that reach a model: what they use is
+// recorded under kind (agent, quick or cite).
+func (a *api) metered(kind string) func(context.Context) ai.Provider {
+	return func(ctx context.Context) ai.Provider {
+		p := a.providerFor(ctx)
+		if a.usage == nil {
+			return p
+		}
+		return &usage.Meter{Inner: p, Rec: a.usage, Kind: kind}
+	}
+}
 
 func (a *api) routes(rt *router) {
 	rt.user("GET /api/me", func(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +213,7 @@ func (a *api) quickAction(w http.ResponseWriter, r *http.Request) {
 	c, err := a.choose(r.Context(), assistant.Choice{Model: in.Model, Effort: "low"}, a.quick)
 	if err == nil {
 		var text string
-		if text, err = quick.Run(r.Context(), a.providerFor(r.Context()), c.Model, c.Effort, in.Request); err == nil {
+		if text, err = quick.Run(r.Context(), a.metered("quick")(r.Context()), c.Model, c.Effort, in.Request); err == nil {
 			writeJSON(w, map[string]string{"text": text})
 			return
 		}

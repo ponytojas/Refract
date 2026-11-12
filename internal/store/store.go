@@ -74,6 +74,20 @@ var migrations = []string{
 		since INTEGER NOT NULL -- first failure of the window
 	);
 	CREATE INDEX login_failures_since ON login_failures(since)`,
+	// One row per model call: who, when, which model and how many tokens.
+	// Never the text.
+	`CREATE TABLE ai_usage (
+		id               INTEGER PRIMARY KEY,
+		at               INTEGER NOT NULL,
+		user_id          TEXT NOT NULL,
+		kind             TEXT NOT NULL,    -- agent | quick | cite
+		model            TEXT NOT NULL,
+		input_tokens     INTEGER NOT NULL,
+		cached_tokens    INTEGER NOT NULL, -- part of input_tokens read from the provider's cache
+		output_tokens    INTEGER NOT NULL,
+		reasoning_tokens INTEGER NOT NULL  -- part of output_tokens spent reasoning
+	);
+	CREATE INDEX ai_usage_user ON ai_usage(user_id, at)`,
 }
 
 // Open opens (creating if needed) the database at path and applies pending migrations.

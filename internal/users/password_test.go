@@ -269,6 +269,11 @@ func TestSignOutAndDelete(t *testing.T) {
 
 	s.DB.Exec(`INSERT INTO settings (key, value) VALUES (?, 'x'), (?, 'y')`, "user/"+u.ID+"/providers", "user/"+other.ID+"/providers")
 	s.DB.Exec(`INSERT INTO projects (id, name, created_at, updated_at, owner) VALUES ('p1', 'Paper', 0, 0, ?)`, u.ID)
+	for _, id := range []string{u.ID, other.ID} {
+		if _, err := s.DB.Exec(`INSERT INTO ai_usage (at, user_id, kind, model, input_tokens, cached_tokens, output_tokens, reasoning_tokens) VALUES (1, ?, 'agent', 'm', 1, 0, 1, 0)`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := s.Delete(ctx, "ana@example.com"); err == nil {
 		t.Fatal("deleted an account that still owns projects")
 	}
@@ -280,6 +285,12 @@ func TestSignOutAndDelete(t *testing.T) {
 	s.DB.QueryRow(`SELECT count(*) FROM settings WHERE key LIKE 'user/%'`).Scan(&settings)
 	if exists, _ := s.Exists(ctx, "ana@example.com"); exists || settings != 1 {
 		t.Fatalf("exists=%v, settings left=%d", exists, settings)
+	}
+	var usageRows int
+	var usageUser string
+	s.DB.QueryRow(`SELECT count(*), coalesce(max(user_id), '') FROM ai_usage`).Scan(&usageRows, &usageUser)
+	if usageRows != 1 || usageUser != other.ID {
+		t.Fatalf("usage left: %d rows, user %q; want only %s's", usageRows, usageUser, other.ID)
 	}
 	if err := s.Delete(ctx, "ana@example.com"); err == nil {
 		t.Fatal("deleted a missing account")

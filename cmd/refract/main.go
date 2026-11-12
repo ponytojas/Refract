@@ -34,6 +34,7 @@ import (
 	"github.com/ponytojas/Refract/internal/providers"
 	"github.com/ponytojas/Refract/internal/siwc"
 	"github.com/ponytojas/Refract/internal/store"
+	"github.com/ponytojas/Refract/internal/usage"
 	"github.com/ponytojas/Refract/internal/users"
 	"github.com/ponytojas/Refract/web"
 )
@@ -41,7 +42,7 @@ import (
 // version is set at build time: -ldflags "-X main.version=v1.2.3".
 var version = "dev"
 
-const usage = `Refract, a private AI-assisted LaTeX workspace.
+const helpText = `Refract, a private AI-assisted LaTeX workspace.
 
 Usage:
   refract            run the server (configured with REFRACT_* environment variables)
@@ -70,7 +71,7 @@ func main() {
 			fmt.Println("refract", version)
 			return
 		case "help", "--help", "-h":
-			fmt.Print(usage)
+			fmt.Print(helpText)
 			return
 		}
 	}
@@ -152,6 +153,7 @@ func run() error {
 
 		providers: &providers.Store{DB: db, Key: key},
 		outbound:  providers.HTTPClient(deployment.PrivateNetwork()),
+		usage:     &usage.Recorder{DB: db},
 	}
 
 	pa := &projectsAPI{
@@ -191,7 +193,7 @@ func run() error {
 			Papers:        papers,
 			Timeout:       15 * time.Minute,
 		},
-		Provider: a.providerFor,
+		Provider: a.metered("agent"),
 		ModelFor: func(ctx context.Context, want assistant.Choice) (assistant.Choice, error) {
 			return a.choose(ctx, want, a.model)
 		},
@@ -208,7 +210,7 @@ func run() error {
 	}
 	pa.svc.OnCommit = ra.AutoPush
 	pa.svc.GitHubToken = ra.Token
-	pp := &papersAPI{papers: papers, projects: pa.svc, provider: a.providerFor, choose: func(ctx context.Context, want assistant.Choice) (assistant.Choice, error) {
+	pp := &papersAPI{papers: papers, projects: pa.svc, provider: a.metered("cite"), choose: func(ctx context.Context, want assistant.Choice) (assistant.Choice, error) {
 		return a.choose(ctx, want, a.quick)
 	}}
 

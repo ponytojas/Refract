@@ -175,7 +175,7 @@ func (p *Provider) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event,
 			}
 		}
 		u := res.TotalUsage
-		send(ai.Event{Type: ai.EventCompleted, Usage: &ai.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.TotalTokens}})
+		send(ai.Event{Type: ai.EventCompleted, Usage: &ai.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.TotalTokens, CachedTokens: u.CacheReadTokens, ReasoningTokens: u.ReasoningTokens}})
 	}()
 	return ch, nil
 }
