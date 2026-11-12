@@ -190,7 +190,10 @@ export function latexWords(source: string, rules: CountRules = defaultRules): Wo
       continue
     }
     if (/^(?:newcommand|renewcommand|providecommand|DeclareRobustCommand)$/.test(command)) {
-      arg()
+      options()
+      const name = source.slice(i).match(/^\\[a-zA-Z@]+/)
+      if (name) i += name[0].length
+      else skipGroup()
       options()
       skipGroup()
       space()
@@ -221,7 +224,10 @@ export function latexWords(source: string, rules: CountRules = defaultRules): Wo
       continue
     }
     if (silent.test(command)) {
-      arg()
+      if (command === 'input' && !/^\s*\{/.test(source.slice(i))) {
+        ws()
+        while (i < source.length && !/[\s{}%\\]/.test(source[i])) i++
+      } else arg()
       space()
       continue
     }

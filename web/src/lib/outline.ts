@@ -1,4 +1,4 @@
-import { latexWords, maskForSections } from './wordcount.ts'
+import { latexWords, maskForSections, type CountRules } from './wordcount.ts'
 
 // The document outline: the headings of the main file and of the files it
 // \input or \include, in reading order.
@@ -12,7 +12,11 @@ export type Heading = {
 // Where, in a file, the outline stands: from `line` on, the heading at `index`
 // (-1: none yet) is the one containing the text.
 export type Mark = { line: number; index: number }
-export type Outline = { headings: Heading[]; marks: Record<string, Mark[]> }
+export type Outline = {
+  headings: Heading[]
+  marks: Record<string, Mark[]>
+  counts?: { total: number; sections: number[]; incomplete: boolean }
+}
 
 export const emptyOutline: Outline = { headings: [], marks: {} }
 
@@ -53,8 +57,10 @@ function lineAt(source: string, offset: number): number {
 
 // Headings and includes of one file, in source order. Comments, verbatim and
 // macro definitions are masked like the word counter does.
-function scan(source: string): Item[] {
-  const clean = maskForSections(source)
+function scan(source: string): { items: Item[]; end: number } {
+  const masked = maskForSections(source)
+  const end = masked.search(/\\end\s*\{document\}/)
+  const clean = end < 0 ? masked : masked.slice(0, end)
   const items: Item[] = []
   for (const m of clean.matchAll(heading)) {
     const open = m.index + m[0].length - 1
@@ -71,12 +77,12 @@ function scan(source: string): Item[] {
     const name = (m[1] ?? m[2]).trim()
     if (name) items.push({ at: m.index, include: name })
   }
-  return items.sort((a, b) => a.at - b.at)
+  return { items: items.sort((a, b) => a.at - b.at), end: end < 0 ? source.length : end }
 }
 
 export function headingsIn(source: string, path: string): Heading[] {
   return scan(source)
-    .filter((i) => i.heading)
+    .items.filter((i) => i.heading)
     .map((i) => ({ ...i.heading!, path, line: lineAt(source, i.at) }))
 }
 
@@ -106,20 +112,47 @@ const maxDepth = 16
  * Builds the outline from mainFile, following \input and \include. Each file
  * is expanded once (no cycles); files read returns null for are skipped.
  */
-export async function buildOutline(mainFile: string, read: (path: string) => Promise<string | null>): Promise<Outline> {
+export async function buildOutline(
+  mainFile: string,
+  read: (path: string) => Promise<string | null>,
+  rules?: CountRules,
+): Promise<Outline> {
   const out: Outline = { headings: [], marks: {} }
+  if (rules) out.counts = { total: 0, sections: [], incomplete: false }
   const seen = new Set<string>()
+  const parents: number[] = []
   async function walk(path: string, depth: number) {
-    if (seen.has(path) || depth > maxDepth) return
+    if (seen.has(path) || depth > maxDepth) {
+      if (out.counts) out.counts.incomplete = true
+      return
+    }
     seen.add(path)
     const source = await read(path)
-    if (source == null) return
+    if (source == null) {
+      if (out.counts) out.counts.incomplete = true
+      return
+    }
+    const scanned = scan(source)
+    const words = rules ? latexWords(source.slice(0, scanned.end), rules) : []
+    let cursor = 0
+    const countUntil = (end: number) => {
+      const start = cursor
+      while (cursor < words.length && words[cursor].from < end) cursor++
+      if (!out.counts) return
+      const count = cursor - start
+      out.counts.total += count
+      for (const i of parents) out.counts.sections[i] += count
+    }
     const marks: Mark[] = [{ line: 1, index: out.headings.length - 1 }]
     out.marks[path] = marks
-    for (const item of scan(source)) {
+    for (const item of scanned.items) {
+      countUntil(item.at)
       const line = lineAt(source, item.at)
       if (item.heading) {
+        while (parents.length && out.headings[parents[parents.length - 1]].level >= item.heading.level) parents.pop()
         out.headings.push({ ...item.heading, path, line })
+        parents.push(out.headings.length - 1)
+        out.counts?.sections.push(0)
         marks.push({ line, index: out.headings.length - 1 })
       } else if (item.include) {
         const target = resolveInclude(mainFile, item.include)
@@ -129,6 +162,7 @@ export async function buildOutline(mainFile: string, read: (path: string) => Pro
         marks.push({ line: line + 1, index: out.headings.length - 1 })
       }
     }
+    countUntil(source.length)
   }
   await walk(mainFile, 0)
   return out

@@ -59,6 +59,7 @@ import { Link, navigate, pageReady, useBeforeLeave } from '@/lib/router'
 import CompileStatus, { type CompileResult, type Problem } from './CompileStatus'
 import Editor from './Editor'
 import { moveLimits } from '@/lib/wordlimits'
+import { defaultRules } from '@/lib/wordcount'
 import FileTree from './FileTree'
 import PdfViewer, { type Highlight } from './PdfViewer'
 import AccountMenu from '@/components/AccountMenu'
@@ -264,7 +265,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
         if (!exists.has(p)) return null
         return outlineCache.current!.read(p)
       }
-      buildOutline(main, read)
+      buildOutline(main, read, countEnabled ? { ...defaultRules, titles: prefs.wordCountTitles } : undefined)
         .then((o) => {
           if (request === outlineRequest.current) setOutline(o)
         })
@@ -274,7 +275,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   useEffect(() => {
     outlineCache.current!.clear()
     refreshOutline.current()
-  }, [files, project?.main_file])
+  }, [files, project?.main_file, countEnabled, prefs.wordCountTitles])
   useEffect(() => {
     if (sideTab === 'files' && outlineOpen) refreshOutline.current()
   }, [sideTab, outlineOpen])
@@ -1112,6 +1113,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                         current={active ? currentHeading(outline, active, cursorLine) : -1}
                         mainFile={project?.main_file}
                         onJump={jumpTo}
+                        countEnabled={countEnabled}
                       />
                     )}
                   </div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { t } from '@/lib/i18n'
+import { t, tn } from '@/lib/i18n'
 import { depths, type Outline as OutlineData } from '@/lib/outline'
 import { cn } from '@/lib/utils'
 
@@ -11,11 +11,13 @@ export default function Outline({
   current,
   mainFile,
   onJump,
+  countEnabled,
 }: {
   outline: OutlineData
   current: number // index of the heading containing the cursor, -1 for none
   mainFile?: string
   onJump: (path: string, line: number) => void
+  countEnabled: boolean
 }) {
   const list = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -29,7 +31,7 @@ export default function Outline({
       </p>
     )
   const { headings } = outline
-  if (!headings.length)
+  if (!headings.length && !countEnabled)
     return (
       <p id="outline-list" className="flex-1 px-4 py-2 text-xs text-muted-foreground">
         {t('No sections yet.')}
@@ -38,6 +40,13 @@ export default function Outline({
   const depth = depths(headings)
   return (
     <nav ref={list} id="outline-list" className="min-h-0 flex-1 overflow-auto px-2 pb-2" aria-label={t('Outline')}>
+      {countEnabled && outline.counts && (
+        <div className="mb-1 border-b px-2 py-2 text-xs text-muted-foreground" aria-live="polite">
+          <p className="tabular-nums">{tn(outline.counts.total, 'Document: {n} word', 'Document: {n} words')}</p>
+          {outline.counts.incomplete && <p className="mt-1">{t('Some included files could not be counted.')}</p>}
+        </div>
+      )}
+      {!headings.length && <p className="px-2 py-1 text-xs text-muted-foreground">{t('No sections yet.')}</p>}
       {headings.map((h, i) => (
         <button
           key={`${h.path}:${h.line}:${i}`}
@@ -63,6 +72,11 @@ export default function Outline({
             />
           ))}
           <span className="min-w-0 flex-1 truncate">{h.title}</span>
+          {countEnabled && outline.counts && (
+            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+              {tn(outline.counts.sections[i], '{n} word', '{n} words')}
+            </span>
+          )}
           {h.path !== mainFile && (
             <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground" aria-hidden>
               {h.path.split('/').pop()}

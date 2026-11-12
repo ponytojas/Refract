@@ -4,6 +4,22 @@ import { defaultRules, findSections, latexWords, plainWords, selectedWords, sect
 
 const text = (source: string, rules = defaultRules) => latexWords(source, rules).map((w) => w.text)
 
+test('unbraced input filenames are not prose', () => {
+  assert.deepEqual(
+    text(String.raw`Start \input chapter.tex
+End.`),
+    ['Start', 'End'],
+  )
+})
+
+test('inline verbatim remains literal even when it contains math or comment syntax', () => {
+  assert.deepEqual(text(String.raw`Read \verb|$literal$ % example| now.`), ['Read', 'literal', 'example', 'now'])
+})
+
+test('unbraced command definitions do not contribute their stored text to totals', () => {
+  assert.deepEqual(text(String.raw`Before \newcommand\example[1][default]{Not visible #1} After.`), ['Before', 'After'])
+})
+
 test('plain text: whitespace, Unicode, punctuation, PDF ligatures and line-wrap hyphens', () => {
   assert.deepEqual(
     plainWords("  Hola\t mundo\n\n café — don't well-known 42 ﬂower inter-\nnational ").map((w) => w.text),
