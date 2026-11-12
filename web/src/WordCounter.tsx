@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import { t } from '@/lib/i18n'
 import { latexWords, selectedWords } from '@/lib/wordcount'
-import { limitAt, setLimits, wordLimits, type WordLimit } from '@/lib/wordlimits'
+import { limitAt, setLimits, shortenRequest, wordLimits, type WordLimit } from '@/lib/wordlimits'
 import { getPrefs, openSettings } from '@/lib/prefs'
 import { accept, proposal, propose, reject } from '@/lib/proposal'
 
@@ -22,9 +22,10 @@ type Props = {
   onCount: (count: number | null) => void
   target: LimitTarget | null
   onClose: () => void
+  instructions?: () => Promise<string | undefined> // the project's REFRACT.md, as sent to the server
 }
 
-export default function WordCounter({ view, path, ai, enabled, onCount, target, onClose }: Props) {
+export default function WordCounter({ view, path, ai, enabled, onCount, target, onClose, instructions }: Props) {
   const source = view.state.doc.toString()
   const limits = view.state.field(wordLimits)
   const { from, to, empty } = view.state.selection.main
@@ -66,7 +67,6 @@ export default function WordCounter({ view, path, ai, enabled, onCount, target, 
 
   async function shorten(range: WordLimit) {
     const state = view.state
-    const original = state.sliceDoc(range.from, range.to)
     abort.current?.abort()
     const controller = new AbortController()
     abort.current = controller
@@ -74,18 +74,12 @@ export default function WordCounter({ view, path, ai, enabled, onCount, target, 
     setResult(null)
     const before = selectedWords(words, range.from, range.to).length
     try {
+      const projectInstructions = await instructions?.()
+      if (controller.signal.aborted) return // cancelled or replaced while reading them
       const response = await api<{ text: string }>('/api/quick', {
         method: 'POST',
         signal: controller.signal,
-        body: {
-          action: 'custom',
-          selection: original,
-          file: path,
-          model: getPrefs().model,
-          before: state.sliceDoc(Math.max(0, range.from - 800), range.from),
-          after: state.sliceDoc(range.to, Math.min(state.doc.length, range.to + 800)),
-          instruction: `Reduce this fragment to at most ${range.max} readable words (aim below the maximum). Preserve all essential ideas, facts, numbers, citations, language and valid LaTeX. Do not invent information. Counting includes these elements only when true: ${JSON.stringify(limits.rules)}. LaTeX commands, comments and mathematical expressions do not count. Return only the replacement fragment.`,
-        },
+        body: shortenRequest(state, range, limits.rules, path, getPrefs().model, projectInstructions),
       })
       if (controller.signal.aborted) return
       if (view.state.doc !== state.doc || view.state.field(wordLimits) !== limits)

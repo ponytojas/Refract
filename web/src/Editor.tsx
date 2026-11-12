@@ -454,6 +454,7 @@ export default function Editor({
             onCount={onWordCount}
             target={limitTarget}
             onClose={() => setLimitTarget(null)}
+            instructions={instructions}
           />
         )}
         {quick && mounted && (

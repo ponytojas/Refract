@@ -3,7 +3,16 @@ import assert from 'node:assert/strict'
 import { history, undo, redo } from '@codemirror/commands'
 import { EditorState, type Transaction } from '@codemirror/state'
 import { defaultRules, findSections } from './wordcount.ts'
-import { excessWords, limitAt, loadLimits, moveLimits, saveLimits, setLimits, wordLimits } from './wordlimits.ts'
+import {
+  excessWords,
+  limitAt,
+  loadLimits,
+  moveLimits,
+  saveLimits,
+  setLimits,
+  shortenRequest,
+  wordLimits,
+} from './wordlimits.ts'
 
 const limits = (state: EditorState) => state.field(wordLimits)
 const create = (source = 'one two three') => EditorState.create({ doc: source, extensions: [wordLimits, excessWords] })
@@ -209,4 +218,17 @@ test('a subsection within its own limit overrides its exceeded parent highlighti
   assert.deepEqual(marked(), [...introExcess, 'tiene', 'su', 'propio', 'texto'])
   state = state.update({ effects: setLimits.of({ rules: defaultRules, ranges: [ranges[0]] }) }).state
   assert.deepEqual(marked(), [...introExcess, 'Contexto', 'Esta', 'subseccion', 'tiene', 'su', 'propio', 'texto'])
+})
+
+test('shortening a limited range sends the project instructions like every quick action', () => {
+  const state = EditorState.create({ doc: 'Intro. ' + 'word '.repeat(20) + 'End.' })
+  const range = { id: 'r', name: 'Abstract', max: 10, from: 7, to: 107 }
+  const body = shortenRequest(state, range, defaultRules, 'main.tex', '', 'Use British spelling.')
+  assert.equal(body.projectInstructions, 'Use British spelling.')
+  assert.equal(body.action, 'custom')
+  assert.equal(body.selection, state.sliceDoc(7, 107))
+  assert.equal(body.before, 'Intro. ')
+  assert.equal(body.after, 'End.')
+  assert.match(body.instruction, /at most 10 readable words/)
+  assert.equal(shortenRequest(state, range, defaultRules, 'main.tex', '', undefined).projectInstructions, undefined)
 })

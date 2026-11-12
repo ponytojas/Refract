@@ -1,5 +1,5 @@
 import { invertedEffects } from '@codemirror/commands'
-import { Facet, StateEffect, StateField } from '@codemirror/state'
+import { Facet, StateEffect, StateField, type EditorState } from '@codemirror/state'
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
 import { defaultRules, findSections, latexWords, selectedWords, type CountRules } from './wordcount.ts'
 
@@ -60,6 +60,28 @@ export function limitAt(source: string, ranges: WordLimit[], from: number, to = 
         (from < to ? to <= range.to : from < range.to || (from === source.length && from === range.to)),
     )
     .sort((a, b) => a.range.to - a.start - (b.range.to - b.start))[0]?.range
+}
+
+// The /api/quick request that shortens a limited range, with the project's
+// REFRACT.md like every other quick action.
+export function shortenRequest(
+  state: EditorState,
+  range: WordLimit,
+  rules: CountRules,
+  file: string,
+  model: string,
+  projectInstructions: string | undefined,
+) {
+  return {
+    action: 'custom',
+    selection: state.sliceDoc(range.from, range.to),
+    file,
+    model,
+    projectInstructions,
+    before: state.sliceDoc(Math.max(0, range.from - 800), range.from),
+    after: state.sliceDoc(range.to, Math.min(state.doc.length, range.to + 800)),
+    instruction: `Reduce this fragment to at most ${range.max} readable words (aim below the maximum). Preserve all essential ideas, facts, numbers, citations, language and valid LaTeX. Do not invent information. Counting includes these elements only when true: ${JSON.stringify(rules)}. LaTeX commands, comments and mathematical expressions do not count. Return only the replacement fragment.`,
+  }
 }
 
 export const wordCountEnabled = Facet.define<boolean, boolean>({ combine: (values) => values[0] ?? true })
