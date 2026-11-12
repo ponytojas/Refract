@@ -9,6 +9,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - LaTeX completion in the editor: common commands and environments (`\begin{…}` closes itself), `\ref` and friends from the project's labels, `\cite` from its `.bib` files, and file paths in `\input`, `\include` and `\includegraphics`. Commands and environments show their arguments and a short description, the arguments stay in view while filling them in, and citations show the author, year and title of each work.
 - `REFRACT_MODE=selfhost|saas` says whether Refract runs as a self-hosted install (the default) or as the hosted service. The hosted service doesn't offer the ChatGPT plan: Settings → Assistant shows API providers only.
 - A document outline under the file tree: the sections of the main file and the files it `\input`s or `\include`s, indented by level. Click a heading to jump to it; the one containing the cursor is highlighted, and it refreshes on save. Headings are also in the command palette (<kbd>⌘K</kbd>, **Go to section…**).
+- Before an upgrade changes the database, Refract keeps a copy of it as `refract.db.pre-upgrade`, and an older Refract refuses to open a database a newer version has upgraded.
 
 ### Fixed
 
@@ -17,6 +18,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - Citing ignores a commented-out `\bibliography` or `\addbibresource`, uses the first usable name of a list such as `\bibliography{a,b}`, and drops spaces from `\bibliography` names as LaTeX does (`{my refs}` is `myrefs.bib`).
 - When no file loads a bibliography yet and the main file is in a subfolder, citations go to a `.bib` in that folder if there is one, before any other `.bib` in the project.
 - Stopping the server waits for requests in flight (up to 10 s) and for auto-pushes in progress, and lets running assistant turns record that they were stopped, instead of closing the database under them. Give Docker time for it with `docker run --stop-timeout 30`.
+- Starting Refract for the first time while a `refract users` command runs no longer fails with "database is locked".
 
 ### Security
 
