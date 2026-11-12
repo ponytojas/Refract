@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildOutline, currentHeading, depths, headingsIn, OutlineCache, resolveInclude } from './outline.ts'
+import { defaultRules } from './wordcount.ts'
 
 const reader = (files: Record<string, string>) => async (p: string) => files[p] ?? null
 const titles = (o: { headings: { title: string }[] }) => o.headings.map((h) => h.title)
@@ -177,4 +178,52 @@ test('a failed fetch reads as a missing file', async () => {
     throw new Error('offline')
   })
   assert.equal(await cache.read('x.tex'), null)
+})
+
+test('document and hierarchical section counts follow includes from the main directory', async () => {
+  const files = {
+    'paper/main.tex': String.raw`\documentclass{article}
+\begin{document}Opening words.
+\section{First}One two. \input{chapters/child} After child.
+\section{Last}Final.\end{document}`,
+    'paper/chapters/child.tex': String.raw`Before subsection.\subsection{Child}Three four. \input tail`,
+    'paper/tail.tex': String.raw`Five $ignored math$ six. % not counted
+\verb|seven eight|`,
+  }
+  const out = await buildOutline('paper/main.tex', reader(files), defaultRules)
+  assert.deepEqual(titles(out), ['First', 'Child', 'Last'])
+  assert.deepEqual(out.counts, { total: 18, sections: [14, 9, 2], incomplete: false })
+  const noTitles = await buildOutline('paper/main.tex', reader(files), { ...defaultRules, titles: false })
+  assert.deepEqual(noTitles.counts, { total: 15, sections: [12, 8, 1], incomplete: false })
+})
+
+test('unsectioned prose counts, and unreadable or cyclic includes mark the count as partial', async () => {
+  const out = await buildOutline('main.tex', reader({ 'main.tex': 'Just words.' }), defaultRules)
+  assert.deepEqual(out.counts, { total: 2, sections: [], incomplete: false })
+  const partial = await buildOutline(
+    'main.tex',
+    reader({ 'main.tex': String.raw`\section{One}Text.\input{missing}\input{main}` }),
+    defaultRules,
+  )
+  assert.deepEqual(partial.counts, { total: 2, sections: [2], incomplete: true })
+  assert.equal((await buildOutline('main.tex', reader({}))).counts, undefined)
+})
+
+test('headings and includes after the end of the document are ignored', async () => {
+  const out = await buildOutline(
+    'main.tex',
+    reader({
+      'main.tex': String.raw`\section{Real}One.\end{document}\section{Fake}\input{missing}`,
+    }),
+    defaultRules,
+  )
+  assert.deepEqual(titles(out), ['Real'])
+  assert.deepEqual(out.counts, { total: 2, sections: [2], incomplete: false })
+})
+
+test('absolute and outside-project includes mark counts as partial', async () => {
+  for (const include of ['/outside/chapter', '../outside']) {
+    const out = await buildOutline('main.tex', reader({ 'main.tex': `Text.\\input{${include}}` }), defaultRules)
+    assert.deepEqual(out.counts, { total: 1, sections: [], incomplete: true })
+  }
 })

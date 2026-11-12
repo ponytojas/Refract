@@ -1,4 +1,9 @@
 export default {
+  'Document: {n} word': 'Documento: {n} palabra',
+  'Document: {n} words': 'Documento: {n} palabras',
+  '{n} word': '{n} palabra',
+  '{n} words': '{n} palabras',
+  'Some included files could not be counted.': 'No se han podido contar algunos archivos incluidos.',
   'Count words': 'Contar palabras',
   'Include titles': 'Incluir los títulos',
   'Word count': 'Contador de palabras',

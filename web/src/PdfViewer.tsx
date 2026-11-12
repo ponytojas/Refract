@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Check,
@@ -27,6 +27,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { plainWords } from '@/lib/wordcount'
+import { emptyPdfMatches, type PdfMatch } from '@/lib/pdfsearch'
+import type { PdfScrollRequest } from '@/lib/pdfsearch-state'
+import { usePdfSearch } from './PdfSearch'
 import { t } from '@/lib/i18n'
 import * as pdfjs from 'pdfjs-dist'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
@@ -70,6 +73,12 @@ export default function PdfViewer({
   const [selection, setSelection] = useState('')
   const [message, setMessage] = useState('')
   const scroller = useRef<HTMLDivElement>(null)
+  const viewer = useRef<HTMLDivElement>(null)
+  const goTo = useCallback((n: number) => {
+    const p = scroller.current?.querySelector<HTMLElement>(`[data-page="${n}"]`)
+    if (p && scroller.current) scroller.current.scrollTop = p.offsetTop - 8
+  }, [])
+  const search = usePdfSearch(doc, goTo, () => viewer.current?.focus({ preventScroll: true }))
   const keep = useRef<{ top: number; left: number } | null>(null)
   const zoomAnchor = useRef<number | null>(null) // relative scroll to keep across zoom changes
   const task = useRef<PDFDocumentLoadingTask | null>(null) // owns the shown document
@@ -198,11 +207,6 @@ export default function PdfViewer({
     }
   }
 
-  function goTo(n: number) {
-    const p = scroller.current?.querySelector<HTMLElement>(`[data-page="${n}"]`)
-    if (p && scroller.current) scroller.current.scrollTop = p.offsetTop - 8
-  }
-
   // Right click: where on which page, for "Go to source here".
   const point = useRef<{ page: number; x: number; y: number } | null>(null)
   function rememberPoint(e: MouseEvent) {
@@ -241,6 +245,7 @@ export default function PdfViewer({
     <>
       {toolbar}
       <span className="flex-1" />
+      {search.button}
       <DropdownMenu>
         <DropdownMenuTrigger
           render={<Button variant="ghost" size="sm" className="gap-1 font-normal tabular-nums" disabled={!doc} />}
@@ -263,12 +268,29 @@ export default function PdfViewer({
     </>
   )
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      ref={viewer}
+      tabIndex={-1}
+      role="region"
+      aria-label={t('PDF preview')}
+      className="flex min-h-0 flex-1 flex-col outline-none"
+      onPointerDown={(e) => {
+        if (!(e.target as HTMLElement).closest('button, input, a')) viewer.current?.focus({ preventScroll: true })
+      }}
+      onKeyDown={(e) => {
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'f' && doc) {
+          e.preventDefault()
+          e.stopPropagation()
+          search.show()
+        }
+      }}
+    >
       {toolbarTarget ? (
         createPortal(<>{bar}</>, toolbarTarget)
       ) : (
         <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">{bar}</div>
       )}
+      {search.bar}
       <div className="relative min-h-0 flex-1">
         <WithContextMenu items={menu} className="absolute inset-0">
           <div
@@ -288,6 +310,9 @@ export default function PdfViewer({
                   scale={s}
                   highlight={highlight?.page === i + 1 ? highlight : undefined}
                   onInverse={onInverse}
+                  matches={search.byPage.get(i + 1) ?? emptyPdfMatches}
+                  activeMatch={search.active}
+                  scrollRequest={search.scrollRequest?.match.page === i + 1 ? search.scrollRequest : undefined}
                 />
               ))}
           </div>
@@ -358,6 +383,9 @@ function Page({
   scale,
   highlight,
   onInverse,
+  matches,
+  activeMatch,
+  scrollRequest,
 }: {
   doc: PDFDocumentProxy
   n: number
@@ -365,12 +393,23 @@ function Page({
   scale: number
   highlight?: Highlight
   onInverse: Props['onInverse']
+  matches: PdfMatch[]
+  activeMatch?: PdfMatch
+  scrollRequest?: PdfScrollRequest
 }) {
   const box = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
   const textHost = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
   const [flash, setFlash] = useState<Highlight | undefined>()
+  const [textLayer, setTextLayer] = useState<{
+    doc: PDFDocumentProxy
+    scale: number
+    layer: InstanceType<typeof pdfjs.TextLayer>
+  } | null>(null)
+  const [hits, setHits] = useState<{ left: number; top: number; width: number; height: number; match: PdfMatch }[]>([])
+  const hitLayer = useRef<HTMLDivElement>(null)
+  const lastScrolled = useRef<number | null>(null)
 
   useEffect(() => {
     const io = new IntersectionObserver(([e]) => setVisible(e.isIntersecting), { rootMargin: '600px 0px' })
@@ -421,6 +460,7 @@ function Page({
       host.append(container)
       layer = new pdfjs.TextLayer({ textContentSource: content, container, viewport: page.getViewport({ scale }) })
       await layer.render()
+      if (!cancelled) setTextLayer({ doc, scale, layer })
     })().catch((error) => {
       if (!cancelled) console.error('PDF text layer:', error)
     })
@@ -430,6 +470,51 @@ function Page({
       host.replaceChildren()
     }
   }, [doc, n, scale, visible])
+
+  // Rectangles live outside PDF.js's text spans, so searching never changes
+  // copy/selection behavior or the original extracted text.
+  useLayoutEffect(() => {
+    if (
+      !textLayer ||
+      textLayer.doc !== doc ||
+      textLayer.scale !== scale ||
+      !visible ||
+      !box.current ||
+      !matches.length
+    ) {
+      setHits((previous) => (previous.length ? [] : previous))
+      return
+    }
+    const bounds = box.current.getBoundingClientRect()
+    const rectangles: typeof hits = []
+    for (const match of matches) {
+      for (const segment of match.segments) {
+        const node = textLayer.layer.textDivs[segment.item]?.firstChild
+        if (!node || node.nodeType !== Node.TEXT_NODE || segment.to > (node.textContent?.length ?? 0)) continue
+        const range = document.createRange()
+        range.setStart(node, segment.from)
+        range.setEnd(node, segment.to)
+        for (const r of range.getClientRects()) {
+          if (r.width && r.height)
+            rectangles.push({
+              left: r.left - bounds.left,
+              top: r.top - bounds.top,
+              width: r.width,
+              height: r.height,
+              match,
+            })
+        }
+      }
+    }
+    setHits((previous) => (!rectangles.length && !previous.length ? previous : rectangles))
+  }, [textLayer, matches, doc, scale, visible])
+  useEffect(() => {
+    if (!scrollRequest || lastScrolled.current === scrollRequest.id) return
+    const target = hitLayer.current?.querySelector('[data-active="true"]')
+    if (!target) return // The requested page's text layer may still be loading.
+    lastScrolled.current = scrollRequest.id
+    target.scrollIntoView({ block: 'center', inline: 'nearest' })
+  }, [hits, scrollRequest])
 
   useEffect(() => {
     if (!highlight) return
@@ -455,6 +540,20 @@ function Page({
     >
       <canvas ref={canvas} className="block size-full" />
       <div ref={textHost} className="absolute inset-0 select-text" />
+      <div ref={hitLayer} className="pointer-events-none absolute inset-0" aria-hidden>
+        {hits.map((hit, i) => (
+          <div
+            key={i}
+            data-pdf-search-hit
+            data-active={hit.match === activeMatch}
+            className={cn(
+              'absolute bg-yellow-400/40 mix-blend-multiply',
+              hit.match === activeMatch && 'bg-orange-400/60 outline outline-orange-600',
+            )}
+            style={{ left: hit.left, top: hit.top, width: hit.width, height: hit.height }}
+          />
+        ))}
+      </div>
       {flash && (
         <div
           className="sync-highlight"
