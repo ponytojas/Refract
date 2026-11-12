@@ -233,3 +233,30 @@ func TestRemoteActsAsItsUser(t *testing.T) {
 		t.Errorf("tokens asked %v, commits %d → %d", asked, len(before), len(after))
 	}
 }
+
+// An edit saved while the pull fetches is committed before the merge: an
+// overlapping change elsewhere is reported as a conflict, not a git error,
+// and the edit is kept.
+func TestPullKeepsEditsSavedDuringFetch(t *testing.T) {
+	ctx := ownerCtx
+	s, id, bare := remoteProject(t)
+	if err := s.Push(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere(t, bare, "main.tex", "theirs\n")
+	r, err := s.Remote(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.gitRemote(ctx, s.Path(id), r, "fetch", "--no-tags", r.URL, "refs/heads/"+r.Branch); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(s.Path(id), "main.tex"), []byte("ours\n"), 0o644) // saved during the fetch
+	res, err := s.mergeFetched(ctx, id, r.Branch)
+	if err != nil || len(res.Conflicts) != 1 || res.Conflicts[0] != "main.tex" || read(t, s.Path(id), "main.tex") != "ours\n" {
+		t.Fatalf("pull = %+v, %v", res, err)
+	}
+	if out, _ := git(ctx, s.Path(id), "status", "--porcelain"); out != "" {
+		t.Errorf("edit not committed, or a merge left in progress: %q", out)
+	}
+}
