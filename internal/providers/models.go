@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ponytojas/Refract/internal/ai"
+	"github.com/ponytojas/Refract/internal/netguard"
 )
 
 var (
@@ -102,6 +104,9 @@ func fetchModels(ctx context.Context, hc *http.Client, c Config, k Kind) ([]list
 		}
 	}
 	resp, err := hc.Do(req)
+	if errors.Is(err, netguard.ErrPrivate) {
+		return nil, &ai.Error{Kind: ai.ErrOther, Message: k.Name + ": " + netguard.ErrPrivate.Error()}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%s is unreachable: %w", k.Name, err)
 	}

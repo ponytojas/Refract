@@ -53,6 +53,10 @@ type Service struct {
 	// GitHubToken returns the GitHub token of a user (a project's owner), for remotes that use their account.
 	GitHubToken func(ctx context.Context, owner string) (string, error)
 
+	// PublicRemotes (the hosted service): git remotes must resolve to public
+	// addresses only, and git connects to the address that was checked.
+	PublicRemotes bool
+
 	bgMu     sync.Mutex     // guards stopping, and orders bg.Add before bg.Wait
 	stopping bool           // Drain started: no new OnCommit calls
 	bg       sync.WaitGroup // OnCommit calls still running

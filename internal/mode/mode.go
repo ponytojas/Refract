@@ -28,3 +28,8 @@ func Parse(s string) (Mode, error) {
 // usage flow covers open-source and self-hosted apps; a hosted service needs
 // OpenAI's approval first, so it is self-hosted only.
 func (m Mode) ChatGPT() bool { return m == SelfHost }
+
+// PrivateNetwork reports whether user-supplied addresses (AI providers, git
+// remotes) may point at loopback and private networks. Self-hosted installs
+// need it for local models; the hosted service must not reach its own network.
+func (m Mode) PrivateNetwork() bool { return m == SelfHost }

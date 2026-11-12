@@ -27,3 +27,9 @@ func TestChatGPT(t *testing.T) {
 		t.Error("the ChatGPT plan must be available only when self-hosted")
 	}
 }
+
+func TestPrivateNetwork(t *testing.T) {
+	if !SelfHost.PrivateNetwork() || SaaS.PrivateNetwork() {
+		t.Error("private networks must be reachable only when self-hosted")
+	}
+}

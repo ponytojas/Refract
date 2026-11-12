@@ -10,6 +10,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - `REFRACT_MODE=selfhost|saas` says whether Refract runs as a self-hosted install (the default) or as the hosted service. The hosted service doesn't offer the ChatGPT plan: Settings → Assistant shows API providers only.
 - A document outline under the file tree: the sections of the main file and the files it `\input`s or `\include`s, indented by level. Click a heading to jump to it; the one containing the cursor is highlighted, and it refreshes on save. Headings are also in the command palette (<kbd>⌘K</kbd>, **Go to section…**).
 - Project instructions: a `REFRACT.md` at the project root that the assistant and quick actions always follow (style, spelling, notation, what not to touch). Open or create it from the project menu; ask the assistant to remember something and it proposes an edit to it.
+- Before an upgrade changes the database, Refract keeps a copy of it as `refract.db.pre-upgrade`, and an older Refract refuses to open a database a newer version has upgraded.
 
 ### Fixed
 
@@ -18,12 +19,15 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - Citing ignores a commented-out `\bibliography` or `\addbibresource`, uses the first usable name of a list such as `\bibliography{a,b}`, and drops spaces from `\bibliography` names as LaTeX does (`{my refs}` is `myrefs.bib`).
 - When no file loads a bibliography yet and the main file is in a subfolder, citations go to a `.bib` in that folder if there is one, before any other `.bib` in the project.
 - Stopping the server waits for requests in flight (up to 10 s) and for auto-pushes in progress, and lets running assistant turns record that they were stopped, instead of closing the database under them. Give Docker time for it with `docker run --stop-timeout 30`.
+- Starting Refract for the first time while a `refract users` command runs no longer fails with "database is locked".
 
 ### Security
 
 - Every API route that touches a project, chat, turn or file goes through one authorization check, declared with the route; without a signed-in user nothing is reachable. Auto-push and assistant turns check again, as the user who started them, before they write. Projects left without an owner after the first account was created stay unreachable.
 - A failed request to OpenAlex no longer includes the server's OpenAlex key in the error shown to the user or sent to the assistant's model.
 - Built with Go 1.27.4, which fixes a crash of the HTTP server in Go's `net/http` (GO-2026-6859).
+- With `REFRACT_MODE=saas`, Refract refuses to start without sign-in (`REFRACT_AUTH=none`) or without an https `REFRACT_PUBLIC_URL`.
+- With `REFRACT_MODE=saas`, AI providers and git remotes can only reach public addresses: loopback, private and metadata addresses are refused at every connection, Ollama isn't offered, base URLs must be https, and git connects only to the addresses it checked, without following redirects.
 
 ## [0.1.2] - 2026-10-27
 

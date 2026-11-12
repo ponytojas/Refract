@@ -109,6 +109,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := checkDeployment(deployment, cmp.Or(os.Getenv("REFRACT_AUTH"), "cloudflare"), os.Getenv("REFRACT_PUBLIC_URL")); err != nil {
+		return err
+	}
 
 	key, err := store.ParseKey(os.Getenv("REFRACT_SECRET_KEY"))
 	if err != nil {
@@ -148,11 +151,11 @@ func run() error {
 		canSignOut: login != nil,
 
 		providers: &providers.Store{DB: db, Key: key},
-		outbound:  providers.HTTPClient(),
+		outbound:  providers.HTTPClient(deployment.PrivateNetwork()),
 	}
 
 	pa := &projectsAPI{
-		svc: &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Limits: projects.DefaultLimits, Key: key},
+		svc: &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Limits: projects.DefaultLimits, Key: key, PublicRemotes: !deployment.PrivateNetwork()},
 		tmp: filepath.Join(dataDir, "tmp"),
 	}
 

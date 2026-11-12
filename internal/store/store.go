@@ -3,9 +3,14 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // migrations are applied in order; the schema version is PRAGMA user_version.
@@ -83,34 +88,97 @@ func Open(path string) (*sql.DB, error) {
 	}
 	db.SetMaxOpenConns(8)
 	db.SetMaxIdleConns(8)
-	if err := migrate(db); err != nil {
+	if err := migrate(db, path); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return db, nil
 }
 
-func migrate(db *sql.DB) error {
-	var version int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+// migrate brings the database to the latest schema, or refuses it. A database
+// newer than this binary was written by a later Refract, and serving it would
+// mean guessing at its schema. Before an upgrade a copy is kept beside the
+// database. The whole upgrade is one write transaction, so the database is
+// only ever at its old version or the latest one, and two processes opening
+// it together (the server and `refract users`) upgrade it once.
+func migrate(db *sql.DB, path string) error {
+	version, err := schemaVersion(db)
+	if err != nil {
 		return err
 	}
-	for i := version; i < len(migrations); i++ {
-		tx, err := db.Begin()
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(migrations[i]); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migration %d: %w", i+1, err)
-		}
-		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, i+1)); err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
+	if version > len(migrations) {
+		return newer(version)
+	}
+	if version == len(migrations) {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // no-op after Commit
+	// Read again: holding the write lock, nobody else can change it.
+	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version > len(migrations) {
+		return newer(version)
+	}
+	if version == len(migrations) {
+		return nil // another process upgraded it while this one waited
+	}
+	if version > 0 {
+		if err := snapshot(db, path); err != nil {
+			return fmt.Errorf("copying the database before upgrading it: %w", err)
 		}
 	}
-	return nil
+	for i := version; i < len(migrations); i++ {
+		if _, err := tx.Exec(migrations[i]); err != nil {
+			return fmt.Errorf("migration %d: %w", i+1, err)
+		}
+	}
+	if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, len(migrations))); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// schemaVersion makes the database's first query. It opens the first
+// connection, which switches a new database to WAL, and SQLite answers "busy"
+// to that at once, without waiting busy_timeout, while another process is
+// doing the same: two processes creating the database together. Wait for the
+// other as busy_timeout would.
+func schemaVersion(db *sql.DB) (int, error) {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var version int
+		err := db.QueryRow(`PRAGMA user_version`).Scan(&version)
+		var busy *sqlite.Error
+		if err == nil || !errors.As(err, &busy) || busy.Code()&0xff != sqlite3.SQLITE_BUSY || time.Now().After(deadline) {
+			return version, err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func newer(version int) error {
+	return fmt.Errorf("the database is at schema version %d and this Refract knows up to %d: a newer Refract wrote it. Run that version or a later one, or restore a backup from before the upgrade", version, len(migrations))
+}
+
+// snapshot writes a consistent copy of the database to path.pre-upgrade. The
+// caller holds the write lock and has changed nothing yet, so the copy, read
+// on another connection, is exactly what the upgrade starts from: no write
+// can land between the two. It is written under a name of its own and then
+// renamed, so the copy from an earlier upgrade is replaced whole or not at all.
+func snapshot(db *sql.DB, path string) error {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".pre-upgrade-*")
+	if err != nil {
+		return err
+	}
+	f.Close()                 // VACUUM INTO accepts an empty file as its target
+	defer os.Remove(f.Name()) // no-op once renamed
+	if _, err := db.Exec(`VACUUM INTO ?`, f.Name()); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path+".pre-upgrade")
 }
