@@ -164,8 +164,8 @@
 
 /* Dark: near-black frame, slightly lifted panels (Prism-like). */
 .dark {
-  --frame: oklch(0.155 0 0);
-  --background: oklch(0.205 0 0);
+  --frame: oklch(0.18 0 0);
+  --background: oklch(0.23 0 0);
   --foreground: oklch(0.93 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.93 0 0);
