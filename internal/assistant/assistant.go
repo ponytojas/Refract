@@ -24,9 +24,10 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("not found")
-	ErrBusy     = errors.New("the assistant is already working on this project")
-	ErrState    = errors.New("this turn is not waiting for review")
+	ErrNotFound  = errors.New("not found")
+	ErrBusy      = errors.New("the assistant is already working on this project")
+	ErrState     = errors.New("this turn is not waiting for review")
+	ErrReviewing = errors.New("this turn is already being accepted or rejected")
 )
 
 // Chat is a conversation within a project.
@@ -94,7 +95,7 @@ func (s *Service) review(turnID string) (release func(), err error) {
 		s.reviewing = map[string]bool{}
 	}
 	if s.reviewing[turnID] {
-		return nil, ErrBusy
+		return nil, ErrReviewing
 	}
 	s.reviewing[turnID] = true
 	return func() {

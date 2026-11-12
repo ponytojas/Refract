@@ -128,7 +128,8 @@ func assistantError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, assistant.ErrNotFound), errors.Is(err, projects.ErrNotFound):
 		httpError(w, err, http.StatusNotFound)
-	case errors.Is(err, assistant.ErrState), errors.Is(err, assistant.ErrBusy), errors.Is(err, projects.ErrConflict):
+	case errors.Is(err, assistant.ErrState), errors.Is(err, assistant.ErrBusy), errors.Is(err, assistant.ErrReviewing),
+		errors.Is(err, projects.ErrConflict):
 		httpError(w, err, http.StatusConflict)
 	default:
 		projectError(w, err)

@@ -14,7 +14,7 @@ func TestReviewIsExclusive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.review("t"); !errors.Is(err, ErrBusy) {
+	if _, err := s.review("t"); !errors.Is(err, ErrReviewing) {
 		t.Fatalf("second review of the same turn: %v", err)
 	}
 	other, err := s.review("u")
@@ -47,10 +47,10 @@ func TestSecondAcceptIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Accept(ctx, turn.ID, nil); !errors.Is(err, ErrBusy) {
+	if _, _, err := s.Accept(ctx, turn.ID, nil); !errors.Is(err, ErrReviewing) {
 		t.Fatalf("accept during another: %v", err)
 	}
-	if _, err := s.Reject(ctx, turn.ID); !errors.Is(err, ErrBusy) {
+	if _, err := s.Reject(ctx, turn.ID); !errors.Is(err, ErrReviewing) {
 		t.Fatalf("reject during an accept: %v", err)
 	}
 	turns, _ := (&Service{DB: s.DB, Projects: ps}).Turns(ctx, chat)
