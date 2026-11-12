@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, ChevronsUpDown, ExternalLink, LogOut, Monitor, Moon, Settings, Sun } from 'lucide-react'
+import { Check, ChevronsUpDown, ExternalLink, Gauge, LogOut, Monitor, Moon, Settings, Sun } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,13 +7,18 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { api, type ChatGPTStatus } from '@/api'
 import { openSettings } from '@/lib/prefs'
 import { setTheme, useTheme, type Theme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
-import { t } from '@/lib/i18n'
+import { lang, t } from '@/lib/i18n'
+import { compact, modelLabel, totalTokens } from '@/lib/usage'
+import { useMonthUsage } from './useMonthUsage'
 import { chatgptOffered } from '@/lib/mode'
 
 const themes: { value: Theme; label: string; icon: typeof Sun }[] = [
@@ -41,8 +46,9 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
   const chatgpt = chatgptOffered()
   const local = !me || me.email === 'local'
   const email = !local ? me.email : chatgpt && status?.status.signed_in ? status.status.email : undefined
+  const [open, setOpen] = useState(false)
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         aria-label={t('Account menu')}
         onMouseDown={(e) => e.preventDefault()}
@@ -71,6 +77,7 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-60">
+        {status?.ai_ready && <MonthUsage open={open} />}
         <DropdownMenuGroup>
           <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{t('Theme')}</DropdownMenuLabel>
           {themes.map((opt) => (
@@ -98,5 +105,64 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+// This month's tokens with the account's own AI (API keys or ChatGPT plan):
+// the total, and per model in a submenu that opens on hover or with the keyboard.
+function MonthUsage({ open }: { open: boolean }) {
+  const { usage, models } = useMonthUsage(open)
+  const n = (x: number) => compact(x, lang)
+  const total = usage?.reduce((sum, u) => sum + totalTokens(u), 0) ?? 0
+  return (
+    <>
+      <DropdownMenuGroup>
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          {t('Usage this month')}
+        </DropdownMenuLabel>
+        {!usage?.length ? (
+          <DropdownMenuItem onClick={() => openSettings('assistant')}>
+            <Gauge />
+            <span className="text-muted-foreground">{usage ? t('No AI requests yet') : t('Loading…')}</span>
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Gauge />
+              <span className="tabular-nums">{t('{n} tokens', { n: n(total) })}</span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-80">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                  {t('By model, as each provider reported it')}
+                </DropdownMenuLabel>
+                {usage.map((u) => {
+                  const { name, provider } = modelLabel(u.model, models)
+                  return (
+                    <div key={u.model} className="flex items-baseline gap-3 px-2 py-1.5 text-sm">
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline gap-1.5">
+                          <span className="truncate">{name}</span>
+                          {provider && <span className="truncate text-xs text-muted-foreground">{provider}</span>}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {t('{n} input', { n: n(u.input_tokens) })} · {t('{n} output', { n: n(u.output_tokens) })}
+                        </span>
+                      </span>
+                      <span className="shrink-0 tabular-nums">{n(totalTokens(u))}</span>
+                    </div>
+                  )
+                })}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => openSettings('assistant')}>
+                <Settings /> {t('Details in Settings')}
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
+      </DropdownMenuGroup>
+      <DropdownMenuSeparator />
+    </>
   )
 }

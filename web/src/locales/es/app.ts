@@ -230,4 +230,8 @@ export default {
   '{n} output': '{n} de salida',
   '{n} output ({reasoning} reasoning)': '{n} de salida ({reasoning} de razonamiento)',
   '{n} tokens': '{n} tokens',
+  'Usage this month': 'Uso este mes',
+  'No AI requests yet': 'Aún no hay peticiones a la IA',
+  'By model, as each provider reported it': 'Por modelo, según lo informa cada proveedor',
+  'Details in Settings': 'Detalles en Ajustes',
 } as Record<string, string>

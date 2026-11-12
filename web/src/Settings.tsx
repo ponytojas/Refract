@@ -16,16 +16,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import {
-  api,
-  describe,
-  errorText,
-  modelsChanged,
-  RequestError,
-  type ChatGPTStatus,
-  type Model,
-  type ModelUsage,
-} from './api'
+import { api, describe, errorText, modelsChanged, RequestError, type ChatGPTStatus } from './api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -42,7 +33,8 @@ import {
 } from '@/components/ui/chatcn/settings-panel'
 import { getPrefs, openSettings, setPref, usePrefs, useSettingsSection, type Prefs } from '@/lib/prefs'
 import { lang, t, tn } from '@/lib/i18n'
-import { compact, modelLabel, monthStart, totalTokens } from '@/lib/usage'
+import { compact, modelLabel, totalTokens } from '@/lib/usage'
+import { useMonthUsage } from '@/components/useMonthUsage'
 import { shortcutGroups } from '@/lib/shortcuts'
 import { setTheme, useTheme, type Theme } from '@/lib/theme'
 import PlanBadge from './PlanBadge'
@@ -408,17 +400,10 @@ const blank = (kind: Kind, taken: string[]): Draft => {
 // What the account's model calls used this month, per model, as recorded by
 // the server (GET /api/usage). Tokens only: prices change and differ by plan.
 function Usage() {
-  const [since] = useState(() => monthStart(new Date()))
-  const [usage, setUsage] = useState<ModelUsage[] | null>(null)
-  const [models, setModels] = useState<Model[]>([])
-
+  const { since, usage, error, models } = useMonthUsage()
   useEffect(() => {
-    api<{ models: ModelUsage[] }>(`/api/usage?since=${since}`).then(
-      (r) => setUsage(r.models),
-      (e) => toast.error(errorText(e)),
-    )
-    api<Model[]>('/api/models').then(setModels, () => {}) // names only; ids are the fallback
-  }, [since])
+    if (error) toast.error(error)
+  }, [error])
 
   const from = new Date(since * 1000).toLocaleDateString(lang, { day: 'numeric', month: 'long' })
   const n = (x: number) => compact(x, lang)
