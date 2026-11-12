@@ -88,27 +88,39 @@ type Meter struct {
 
 // Stream passes Inner's events through unchanged and records the call's usage
 // when it completes. A failure to record is logged and never fails the call.
+//
+// Like any ai.Provider stream, the caller reads until the channel closes or
+// cancels ctx: a caller that stops reading without cancelling leaves the meter
+// (and Inner) waiting to send, as Inner alone would.
 func (m *Meter) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, error) {
 	in, err := m.Inner.Stream(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	u, _ := auth.UserFrom(ctx)
+	// The call happened even if the caller has since stopped: record it
+	// without the caller's cancellation.
+	record := func(ev ai.Event) {
+		if ev.Type != ai.EventCompleted || ev.Usage == nil {
+			return
+		}
+		e := Entry{UserID: u.ID, Kind: m.Kind, Model: req.Model, Usage: *ev.Usage}
+		if err := m.Rec.Record(context.WithoutCancel(ctx), e); err != nil {
+			slog.Error("recording model usage", "err", err)
+		}
+	}
 	out := make(chan ai.Event)
 	go func() {
 		defer close(out)
 		for ev := range in {
-			if ev.Type == ai.EventCompleted && ev.Usage != nil {
-				// The call happened even if the user has since stopped the turn.
-				e := Entry{UserID: u.ID, Kind: m.Kind, Model: req.Model, Usage: *ev.Usage}
-				if err := m.Rec.Record(context.WithoutCancel(ctx), e); err != nil {
-					slog.Error("recording model usage", "err", err)
-				}
-			}
+			record(ev)
 			select {
 			case out <- ev:
 			case <-ctx.Done():
-				for range in { // let Inner finish: it stops on ctx too
+				// Nobody reads any more. Let Inner finish (it stops on ctx too),
+				// still recording a completion that was already on its way.
+				for ev := range in {
+					record(ev)
 				}
 				return
 			}

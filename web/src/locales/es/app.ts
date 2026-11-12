@@ -234,6 +234,7 @@ export default {
   'No AI requests yet': 'Aún no hay peticiones a la IA',
   'By model, as each provider reported it': 'Por modelo, según lo informa cada proveedor',
   'Details in Settings': 'Detalles en Ajustes',
+  "Couldn't load usage.": 'No se pudo cargar el consumo.',
   'With your own keys': 'Con tus claves',
   'Refract AI': 'IA de Refract',
   'Used up this month': 'Agotada este mes',

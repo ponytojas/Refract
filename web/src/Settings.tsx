@@ -400,11 +400,8 @@ const blank = (kind: Kind, taken: string[]): Draft => {
 // What the account's model calls used this month, per model, as recorded by
 // the server (GET /api/usage). Tokens only: prices change and differ by plan.
 function Usage() {
-  const { since, usage: all, error, models } = useMonthUsage()
+  const { since, usage: all, error, retry, models } = useMonthUsage()
   const usage = all && ownUsage(all) // the included AI (S1) shows as a share of its allowance, not here
-  useEffect(() => {
-    if (error) toast.error(error)
-  }, [error])
 
   const from = new Date(since * 1000).toLocaleDateString(lang, { day: 'numeric', month: 'long' })
   const n = (x: number) => compact(x, lang)
@@ -416,7 +413,13 @@ function Usage() {
         { date: from },
       )}
     >
-      {!usage ? (
+      {error ? (
+        <SettingsRow label={t("Couldn't load usage.")} description={error}>
+          <Button size="sm" variant="secondary" onClick={retry}>
+            {t('Retry')}
+          </Button>
+        </SettingsRow>
+      ) : !usage ? (
         <SettingsRow label={t('Loading…')} />
       ) : usage.length === 0 ? (
         <SettingsRow label={t('No AI requests this month.')} />

@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Check, ChevronsUpDown, ExternalLink, Gauge, LogOut, Monitor, Moon, Settings, Sun } from 'lucide-react'
+import {
+  AlertCircle,
+  Check,
+  ChevronsUpDown,
+  ExternalLink,
+  Gauge,
+  LogOut,
+  Monitor,
+  Moon,
+  Settings,
+  Sun,
+} from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,7 +58,7 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
   const local = !me || me.email === 'local'
   const email = !local ? me.email : chatgpt && status?.status.signed_in ? status.status.email : undefined
   const [open, setOpen] = useState(false)
-  const { usage, allowance, models } = useMonthUsage(open)
+  const { usage, allowance, error, retry, models } = useMonthUsage(open)
   const own = usage && ownUsage(usage)
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -82,7 +93,13 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
         {allowance && <IncludedAllowance allowance={allowance} />}
         {/* With the included AI, the account's own keys show only once they have been used. */}
         {status?.ai_ready && (!allowance || !!own?.length) && (
-          <MonthUsage usage={own} models={models} label={allowance ? t('With your own keys') : undefined} />
+          <MonthUsage
+            usage={own}
+            error={error}
+            retry={retry}
+            models={models}
+            label={allowance ? t('With your own keys') : undefined}
+          />
         )}
         <DropdownMenuGroup>
           <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{t('Theme')}</DropdownMenuLabel>
@@ -116,7 +133,19 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
 
 // This month's tokens with the account's own AI (API keys or ChatGPT plan):
 // the total, and per model in a submenu that opens on hover or with the keyboard.
-function MonthUsage({ usage, models, label }: { usage: ModelUsage[] | null; models: Model[]; label?: string }) {
+function MonthUsage({
+  usage,
+  error,
+  retry,
+  models,
+  label,
+}: {
+  usage: ModelUsage[] | null
+  error: string
+  retry: () => void
+  models: Model[]
+  label?: string
+}) {
   const n = (x: number) => compact(x, lang)
   const total = usage?.reduce((sum, u) => sum + totalTokens(u), 0) ?? 0
   return (
@@ -125,7 +154,14 @@ function MonthUsage({ usage, models, label }: { usage: ModelUsage[] | null; mode
         <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
           {label ?? t('Usage this month')}
         </DropdownMenuLabel>
-        {!usage?.length ? (
+        {error ? (
+          // Stays open: retrying shows the result here.
+          <DropdownMenuItem closeOnClick={false} onClick={retry} title={error}>
+            <AlertCircle className="text-destructive" />
+            <span className="text-muted-foreground">{t("Couldn't load usage.")}</span>
+            <span className="ml-auto text-xs">{t('Retry')}</span>
+          </DropdownMenuItem>
+        ) : !usage?.length ? (
           <DropdownMenuItem onClick={() => openSettings('assistant')}>
             <Gauge />
             <span className="text-muted-foreground">{usage ? t('No AI requests yet') : t('Loading…')}</span>

@@ -215,3 +215,25 @@ func TestCompleteThroughMeter(t *testing.T) {
 		t.Fatalf("rows = %+v, want one quick row", got)
 	}
 }
+
+// A call that completes while the caller is gone (cancelled before reading the
+// text that came first) is still recorded.
+func TestMeterRecordsCompletionAfterUnreadEvents(t *testing.T) {
+	rec := newRecorder(t)
+	ctx, cancel := context.WithCancel(ana())
+	cancel()
+	inner := replay{{Type: ai.EventText, Text: "hi"}, {Type: ai.EventCompleted, Usage: &used}}
+	ch, err := (&Meter{Inner: inner, Rec: rec, Kind: "agent"}).Stream(ctx, ai.Request{Model: "m1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Don't read yet: with nobody reading, the meter can only take the cancel path.
+	deadline := time.Now().Add(2 * time.Second)
+	for len(rows(t, rec.DB)) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	drain(ch)
+	if got := rows(t, rec.DB); len(got) != 1 {
+		t.Fatalf("rows = %+v, want one", got)
+	}
+}
