@@ -145,6 +145,34 @@ func TestRefusesNewerDatabase(t *testing.T) {
 	}
 }
 
+func TestTemplateMigrationPreservesExistingProjects(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "refract.db")
+	old := at(t, path, len(migrations)-1)
+	if _, err := old.Exec(`INSERT INTO projects (id, name, main_file, created_at, updated_at, owner) VALUES ('paper', 'Tesis ñ', 'paper/main.tex', 123, 456, 'owner')`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var name, main, owner string
+	var created, updated, flag int
+	if err := db.QueryRow(`SELECT name, main_file, created_at, updated_at, owner, is_template FROM projects WHERE id = 'paper'`).Scan(&name, &main, &created, &updated, &owner, &flag); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Tesis ñ" || main != "paper/main.tex" || owner != "owner" || created != 123 || updated != 456 || flag != 0 {
+		t.Fatalf("project changed: %q %q %q %d %d %d", name, main, owner, created, updated, flag)
+	}
+	if got := versionOf(t, path+".pre-upgrade"); got != len(migrations)-1 {
+		t.Fatalf("wrong backup version: %d", got)
+	}
+	if _, err := db.Exec(`UPDATE projects SET is_template = 2 WHERE id = 'paper'`); err == nil {
+		t.Fatal("accepted an invalid template flag")
+	}
+}
+
 // seed puts one row in every table a database at schema version n has. A
 // migration that adds a table adds its row here: TestUpgradeKeepsData fails
 // for a table left empty.

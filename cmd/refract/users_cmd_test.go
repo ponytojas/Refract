@@ -45,6 +45,14 @@ func TestUsersRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	theirs, _ := ps.Create(auth.WithUser(ctx, bob), "Poster")
+	mineTemplate, err := ps.SaveTemplate(auth.WithUser(ctx, ana), mine.ID, "Thesis starter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirTemplate, err := ps.SaveTemplate(auth.WithUser(ctx, bob), theirs.ID, "Poster starter")
+	if err != nil {
+		t.Fatal(err)
+	}
 	db.Exec(`INSERT INTO chats (id, project_id, title, created_at, updated_at) VALUES ('c1', ?, 'chat', 0, 0)`, mine.ID)
 	token, _ := people.NewSession(ctx, ana.ID)
 
@@ -72,11 +80,17 @@ func TestUsersRemove(t *testing.T) {
 	if _, err := os.Stat(ps.Path(mine.ID)); !os.IsNotExist(err) || chats != 0 || rows != 0 {
 		t.Fatalf("left behind: dir err %v, chats %d, rows %d", err, chats, rows)
 	}
+	if _, err := os.Stat(ps.Path(mineTemplate.ID)); !os.IsNotExist(err) {
+		t.Fatal("private template left behind")
+	}
 	if exists, _ := people.Exists(ctx, "ana@example.com"); exists {
 		t.Fatal("account left")
 	}
 	if _, err := os.Stat(ps.Path(theirs.ID)); err != nil {
 		t.Fatal("another user's project was deleted")
+	}
+	if _, err := os.Stat(ps.Path(theirTemplate.ID)); err != nil {
+		t.Fatal("another user's template was deleted")
 	}
 	if _, err := run("remove", "nobody@example.com", "--yes"); err == nil {
 		t.Fatal("removed a missing account")

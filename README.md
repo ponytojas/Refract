@@ -85,6 +85,8 @@ Select text and a toolbar offers **Improve**, **Shorten**, **Fix grammar**, **Ta
 ### Projects, history and sync
 
 - Create a blank project, or import a Prism export (.zip) or a folder. Imports are checked: up to 200 MB and 5,000 files, nothing outside the project, no symlinks.
+- **New → From a template…** starts a project from an article, thesis, Beamer presentation, letter or CV. All five compile with Tectonic; its standard TeX packages may download on first use. You can still choose **Blank project** in the same picker.
+- **Save as template…** in a project's menu (or its row in the project list) keeps a private copy of its current source files and selected main file. Open editor changes are saved first. Your templates appear in the new-project picker, are visible only to you, and can be deleted there. Each project created from one has independent files and a fresh history; chats, remote connections and build output are not copied. Editing or deleting the original or template does not change projects already created from it.
 - Every project is a git repository. Compiling, accepting AI changes and restoring old versions all create commits. The history view shows each version's diff and restores a file or the whole project, as a new commit.
 - Push and pull to any https git remote with a token, or connect a GitHub account and pick or create repositories from Refract. Optional auto-push after each commit. On the hosted service (`REFRACT_MODE=saas`), remotes must be public addresses and redirects aren't followed: a renamed repository needs its new URL.
 - Export any project as a .zip at any time.

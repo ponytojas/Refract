@@ -27,12 +27,13 @@ var ErrNotFound = errors.New("project not found")
 
 // Project is a project's metadata.
 type Project struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	MainFile  string    `json:"main_file"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Owner     string    `json:"-"` // user id
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	MainFile   string    `json:"main_file"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	Owner      string    `json:"-"` // user id
+	IsTemplate bool      `json:"is_template,omitempty"`
 }
 
 // ImportResult is what the UI shows after an import.
@@ -65,7 +66,7 @@ type Service struct {
 // Path returns a project's directory.
 func (s *Service) Path(id string) string { return filepath.Join(s.Dir, id) }
 
-const projectCols = `id, name, main_file, created_at, updated_at, owner`
+const projectCols = `id, name, main_file, created_at, updated_at, owner, is_template`
 
 // List returns the request user's projects; none without a user.
 func (s *Service) List(ctx context.Context) ([]Project, error) {
@@ -73,7 +74,7 @@ func (s *Service) List(ctx context.Context) ([]Project, error) {
 	if err != nil {
 		return []Project{}, nil
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+projectCols+` FROM projects WHERE owner = ? ORDER BY updated_at DESC`, u.ID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+projectCols+` FROM projects WHERE owner = ? AND is_template = 0 ORDER BY updated_at DESC`, u.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -131,6 +132,15 @@ func (s *Service) ImportZip(ctx context.Context, name, zipPath string) (*ImportR
 // create builds the project in a temp dir and only moves it into place and
 // registers it once everything succeeded, so a failed import leaves nothing.
 func (s *Service) create(ctx context.Context, name string, fill func(dir string) ([]string, error), message string) (*ImportResult, error) {
+	return s.createWith(ctx, name, fill, message, creation{})
+}
+
+type creation struct {
+	template bool
+	mainFile *string // nil: detect it, otherwise preserve the selected main file
+}
+
+func (s *Service) createWith(ctx context.Context, name string, fill func(dir string) ([]string, error), message string, opts creation) (*ImportResult, error) {
 	u, err := access.UserFrom(ctx) // a project nobody owns would be unreachable
 	if err != nil {
 		return nil, err
@@ -156,6 +166,9 @@ func (s *Service) create(ctx context.Context, name string, fill func(dir string)
 	if err != nil {
 		return nil, err
 	}
+	if opts.mainFile != nil {
+		main, candidates = *opts.mainFile, nil
+	}
 	warnings, err := Check(tmp)
 	if err != nil {
 		return nil, err
@@ -169,9 +182,9 @@ func (s *Service) create(ctx context.Context, name string, fill func(dir string)
 		return nil, err
 	}
 	now := time.Now()
-	p := &Project{ID: id, Name: name, MainFile: main, CreatedAt: now, UpdatedAt: now, Owner: u.ID}
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO projects (id, name, main_file, created_at, updated_at, owner) VALUES (?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.MainFile, now.Unix(), now.Unix(), p.Owner); err != nil {
+	p := &Project{ID: id, Name: name, MainFile: main, CreatedAt: now, UpdatedAt: now, Owner: u.ID, IsTemplate: opts.template}
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO projects (id, name, main_file, created_at, updated_at, owner, is_template) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.MainFile, now.Unix(), now.Unix(), p.Owner, p.IsTemplate); err != nil {
 		os.RemoveAll(s.Path(id))
 		return nil, err
 	}
@@ -301,7 +314,7 @@ type scanner interface{ Scan(...any) error }
 func scan(row scanner) (*Project, error) {
 	var p Project
 	var created, updated int64
-	if err := row.Scan(&p.ID, &p.Name, &p.MainFile, &created, &updated, &p.Owner); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.MainFile, &created, &updated, &p.Owner, &p.IsTemplate); err != nil {
 		return nil, err
 	}
 	p.CreatedAt, p.UpdatedAt = time.Unix(created, 0), time.Unix(updated, 0)
