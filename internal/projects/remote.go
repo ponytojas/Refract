@@ -1,17 +1,22 @@
 package projects
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/ponytojas/Refract/internal/access"
+	"github.com/ponytojas/Refract/internal/netguard"
 	"github.com/ponytojas/Refract/internal/store"
 )
 
@@ -31,10 +36,64 @@ var (
 	ErrBadRemote = errors.New("the remote must be an https:// URL, without a user name or password in it (put the token in its own field)")
 	ErrBehind    = errors.New("the remote has commits this project doesn't: pull first")
 	branchName   = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
+
+	ErrPrivateRemote = errors.New("the remote's address is on a private network, which the hosted service can't reach")
 )
 
 // allowFileRemotes lets tests use local bare repositories.
 var allowFileRemotes = false
+
+// lookupIP resolves remote hosts; tests replace it.
+var lookupIP = net.DefaultResolver.LookupNetIP
+
+// pinRemote checks, with PublicRemotes, that the remote's host is a public
+// address, and returns the git options that make git connect to exactly the
+// addresses checked (no second lookup, so no DNS rebinding) and refuse
+// redirects (they would lead to a host nobody checked). Without
+// PublicRemotes it returns nothing.
+func (s *Service) pinRemote(ctx context.Context, raw string) ([]string, error) {
+	if !s.PublicRemotes {
+		return nil, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, ErrBadRemote
+	}
+	if allowFileRemotes && u.Scheme == "file" {
+		return nil, nil
+	}
+	host := u.Hostname()
+	if host == "" || strings.HasSuffix(host, ".") {
+		return nil, ErrBadRemote // a trailing dot wouldn't match the pinned name
+	}
+	opts := []string{"-c", "http.followRedirects=false"}
+	if a, err := netip.ParseAddr(host); err == nil {
+		if !netguard.Allowed(a) {
+			return nil, ErrPrivateRemote
+		}
+		return opts, nil
+	}
+	addrs, err := lookupIP(ctx, "ip", host)
+	if err != nil || len(addrs) == 0 {
+		return nil, fmt.Errorf("can't find the host %s", host)
+	}
+	var pinned []string
+	for _, a := range addrs {
+		a = a.Unmap().WithZone("")
+		if !netguard.Allowed(a) {
+			return nil, ErrPrivateRemote
+		}
+		p := a.String()
+		if a.Is6() {
+			p = "[" + p + "]"
+		}
+		if !slices.Contains(pinned, p) {
+			pinned = append(pinned, p)
+		}
+	}
+	port := cmp.Or(u.Port(), "443")
+	return append(opts, "-c", "http.curloptResolve="+host+":"+port+":"+strings.Join(pinned, ",")), nil
+}
 
 func checkRemote(r Remote) error {
 	u, err := url.Parse(r.URL)
@@ -106,6 +165,11 @@ func (s *Service) SetRemote(ctx context.Context, id string, r Remote, keepToken 
 	if err := checkRemote(r); err != nil {
 		return err
 	}
+	// An early, friendly error; every push and pull checks again. A host that
+	// can't be found yet is saved anyway, as without PublicRemotes.
+	if _, err := s.pinRemote(ctx, r.URL); errors.Is(err, ErrPrivateRemote) || errors.Is(err, ErrBadRemote) {
+		return err
+	}
 	if r.GitHub {
 		r.Token = "" // the account's token is looked up on use, never copied
 	} else if r.Token == "" && keepToken {
@@ -123,9 +187,15 @@ func (s *Service) SetRemote(ctx context.Context, id string, r Remote, keepToken 
 
 // gitRemote runs a network git command against r. The token travels in an
 // environment-only config entry: never on the command line, never on disk.
-// Only https (and file, in tests) transports are allowed.
-func gitRemote(ctx context.Context, dir string, r *Remote, args ...string) (string, error) {
-	allow := []string{"-c", "protocol.allow=never", "-c", "protocol.https.allow=always"}
+// Only https (and file, in tests) transports are allowed. With
+// PublicRemotes, git connects only to the public addresses pinRemote checked,
+// directly: a proxy would resolve the host itself.
+func (s *Service) gitRemote(ctx context.Context, dir string, r *Remote, args ...string) (string, error) {
+	pin, err := s.pinRemote(ctx, r.URL)
+	if err != nil {
+		return "", err
+	}
+	allow := append(pin, "-c", "protocol.allow=never", "-c", "protocol.https.allow=always")
 	if allowFileRemotes {
 		allow = append(allow, "-c", "protocol.file.allow=always")
 	}
@@ -133,6 +203,9 @@ func gitRemote(ctx context.Context, dir string, r *Remote, args ...string) (stri
 	if r.Token != "" {
 		basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + r.Token))
 		env = []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + basic}
+	}
+	if s.PublicRemotes {
+		env = append(env, "NO_PROXY=*", "no_proxy=*")
 	}
 	out, err := gitEnv(ctx, dir, env, append(allow, args...)...)
 	if err != nil && r.Token != "" {
@@ -162,7 +235,7 @@ func (s *Service) Push(ctx context.Context, id string) error {
 	if _, err := s.checkpoint(ctx, id, "Checkpoint before push", false); err != nil {
 		return err
 	}
-	_, err = gitRemote(ctx, s.Path(id), r, "push", "--porcelain", r.URL, "HEAD:refs/heads/"+r.Branch)
+	_, err = s.gitRemote(ctx, s.Path(id), r, "push", "--porcelain", r.URL, "HEAD:refs/heads/"+r.Branch)
 	if err != nil && (strings.Contains(err.Error(), "rejected") || strings.Contains(err.Error(), "non-fast-forward")) {
 		return ErrBehind
 	}
@@ -189,7 +262,7 @@ func (s *Service) Pull(ctx context.Context, id string) (*PullResult, error) {
 		return nil, err
 	}
 	dir := s.Path(id)
-	if _, err := gitRemote(ctx, dir, r, "fetch", "--no-tags", r.URL, "refs/heads/"+r.Branch); err != nil {
+	if _, err := s.gitRemote(ctx, dir, r, "fetch", "--no-tags", r.URL, "refs/heads/"+r.Branch); err != nil {
 		if strings.Contains(err.Error(), "couldn't find remote ref") {
 			return &PullResult{Empty: true, Changed: []string{}, Conflicts: []string{}}, nil
 		}

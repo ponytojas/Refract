@@ -23,6 +23,7 @@ import (
 	"github.com/zendev-sh/goai/provider/xai"
 
 	"github.com/ponytojas/Refract/internal/ai"
+	"github.com/ponytojas/Refract/internal/netguard"
 )
 
 // Provider calls one configured provider. It implements ai.Provider; model
@@ -270,6 +271,8 @@ func mapError(err error, c Config) *ai.Error {
 	switch {
 	case errors.Is(err, context.Canceled):
 		return &ai.Error{Kind: ai.ErrOther, Message: "stopped"}
+	case errors.Is(err, netguard.ErrPrivate):
+		return &ai.Error{Kind: ai.ErrOther, Message: k.Name + ": " + netguard.ErrPrivate.Error()}
 	case errors.As(err, &overflow):
 		return &ai.Error{Kind: ai.ErrOther, Message: "The conversation is too long for this model: start a new chat."}
 	case errors.As(err, &api):

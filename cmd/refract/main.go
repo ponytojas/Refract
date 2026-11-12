@@ -151,11 +151,11 @@ func run() error {
 		canSignOut: login != nil,
 
 		providers: &providers.Store{DB: db, Key: key},
-		outbound:  providers.HTTPClient(),
+		outbound:  providers.HTTPClient(deployment.PrivateNetwork()),
 	}
 
 	pa := &projectsAPI{
-		svc: &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Limits: projects.DefaultLimits, Key: key},
+		svc: &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Limits: projects.DefaultLimits, Key: key, PublicRemotes: !deployment.PrivateNetwork()},
 		tmp: filepath.Join(dataDir, "tmp"),
 	}
 

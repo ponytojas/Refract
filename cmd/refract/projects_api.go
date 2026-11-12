@@ -325,7 +325,7 @@ func projectError(w http.ResponseWriter, err error) {
 		httpError(w, err, http.StatusNotFound)
 	case errors.Is(err, projects.ErrBehind):
 		httpError(w, err, http.StatusConflict)
-	case errors.Is(err, projects.ErrBadRemote):
+	case errors.Is(err, projects.ErrBadRemote), errors.Is(err, projects.ErrPrivateRemote):
 		httpError(w, err, http.StatusBadRequest)
 	case errors.Is(err, fs.ErrExist):
 		httpError(w, err, http.StatusConflict)

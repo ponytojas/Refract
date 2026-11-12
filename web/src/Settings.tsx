@@ -471,24 +471,26 @@ function Providers({ onChange }: { onChange: () => void }) {
           <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => test(c.id)}>
             {busy === c.id ? <Loader2 className="animate-spin" /> : null} {t('Test')}
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={!!busy}
-            onClick={() =>
-              setDraft({
-                id: c.id,
-                kind: c.kind,
-                name: c.name,
-                api_key: '',
-                base_url: c.base_url ?? '',
-                models: (c.models ?? []).join(', '),
-                editing: true,
-              })
-            }
-          >
-            {t('Edit')}
-          </Button>
+          {kindOf(c.kind) ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!!busy}
+              onClick={() =>
+                setDraft({
+                  id: c.id,
+                  kind: c.kind,
+                  name: c.name,
+                  api_key: '',
+                  base_url: c.base_url ?? '',
+                  models: (c.models ?? []).join(', '),
+                  editing: true,
+                })
+              }
+            >
+              {t('Edit')}
+            </Button>
+          ) : null}
           <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => remove(c.id)}>
             {t('Remove')}
           </Button>
