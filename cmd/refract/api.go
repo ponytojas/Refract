@@ -9,7 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/assistant"
@@ -93,6 +96,37 @@ func (a *api) routes(rt *router) {
 	rt.user("DELETE /api/providers/{id}", a.deleteProvider)
 	rt.user("POST /api/providers/{id}/test", a.testProvider)
 	rt.user("POST /api/quick", a.quickAction)
+	rt.user("GET /api/usage", a.usageSince)
+}
+
+// usageSince is the signed-in account's token usage per model from ?since=
+// (Unix seconds; the client sends the start of its month), most used first.
+func (a *api) usageSince(w http.ResponseWriter, r *http.Request) {
+	since, err := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+	if err != nil || since < 0 {
+		httpError(w, errors.New("since must be a Unix time in seconds"), http.StatusBadRequest)
+		return
+	}
+	type model struct {
+		Model string `json:"model"`
+		usage.Totals
+	}
+	out := []model{}
+	if a.usage != nil {
+		u, _ := auth.UserFrom(r.Context())
+		totals, err := a.usage.Since(r.Context(), u.ID, time.Unix(since, 0))
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		for m, t := range totals {
+			out = append(out, model{m, t})
+		}
+	}
+	slices.SortFunc(out, func(x, y model) int {
+		return cmp.Or(cmp.Compare(y.InputTokens+y.OutputTokens, x.InputTokens+x.OutputTokens), cmp.Compare(x.Model, y.Model))
+	})
+	writeJSON(w, map[string]any{"models": out})
 }
 
 func (a *api) status(w http.ResponseWriter, r *http.Request) {

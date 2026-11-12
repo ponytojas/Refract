@@ -219,4 +219,15 @@ export default {
   'Local account': 'Cuenta local',
   'No AI connected': 'No hay IA conectada',
   Sections: 'Secciones',
+  'Token usage': 'Uso de tokens',
+  "Tokens used since {date}, by model, as each provider reported them. One assistant reply can take several calls. Your provider's bill is the reference.":
+    'Tokens usados desde el {date}, por modelo, según los informa cada proveedor. Una respuesta del asistente puede hacer varias llamadas. La referencia es la factura de tu proveedor.',
+  'No AI requests this month.': 'Ninguna petición a la IA este mes.',
+  '{n} call': '{n} llamada',
+  '{n} calls': '{n} llamadas',
+  '{n} input': '{n} de entrada',
+  '{n} input ({cached} cached)': '{n} de entrada ({cached} en caché)',
+  '{n} output': '{n} de salida',
+  '{n} output ({reasoning} reasoning)': '{n} de salida ({reasoning} de razonamiento)',
+  '{n} tokens': '{n} tokens',
 } as Record<string, string>

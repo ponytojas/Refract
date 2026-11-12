@@ -72,6 +72,16 @@ export type Model = {
   provider_name?: string
 }
 
+/** One model's token usage over a period (GET /api/usage). Cached and reasoning tokens are parts of input and output. */
+export type ModelUsage = {
+  model: string
+  calls: number
+  input_tokens: number
+  cached_tokens: number
+  output_tokens: number
+  reasoning_tokens: number
+}
+
 export type ChatGPTStatus = {
   status: { provider: string; signed_in: boolean; plan_granted: boolean; email?: string; limit_reached: boolean }
   ai_ready: boolean // ChatGPT plan or at least one API provider

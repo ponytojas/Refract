@@ -51,7 +51,11 @@ func (r *Recorder) Record(ctx context.Context, e Entry) error {
 // Totals sums a user's calls to one model. CachedTokens is part of
 // InputTokens and ReasoningTokens part of OutputTokens, not additions to them.
 type Totals struct {
-	Calls, InputTokens, CachedTokens, OutputTokens, ReasoningTokens int
+	Calls           int `json:"calls"`
+	InputTokens     int `json:"input_tokens"`
+	CachedTokens    int `json:"cached_tokens"`
+	OutputTokens    int `json:"output_tokens"`
+	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
 // Since returns a user's totals per model for the calls made at or after since.

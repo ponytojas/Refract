@@ -11,7 +11,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - A document outline under the file tree: the sections of the main file and the files it `\input`s or `\include`s, indented by level. Click a heading to jump to it; the one containing the cursor is highlighted, and it refreshes on save. Headings are also in the command palette (<kbd>⌘K</kbd>, **Go to section…**).
 - Project instructions: a `REFRACT.md` at the project root that the assistant and quick actions always follow (style, spelling, notation, what not to touch). Open or create it from the project menu; ask the assistant to remember something and it proposes an edit to it.
 - Before an upgrade changes the database, Refract keeps a copy of it as `refract.db.pre-upgrade`, and an older Refract refuses to open a database a newer version has upgraded.
-- Refract records the tokens each model call uses, per account and model (never the text). Nothing shows them yet: usage reports and limits build on it.
+- Refract records the tokens each model call uses, per account and model (never the text), and **Settings → Assistant → Token usage** shows this month's totals by model.
 
 ### Fixed
 
