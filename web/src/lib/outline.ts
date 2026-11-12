@@ -156,7 +156,10 @@ export async function buildOutline(
         marks.push({ line, index: out.headings.length - 1 })
       } else if (item.include) {
         const target = resolveInclude(mainFile, item.include)
-        if (!target) continue
+        if (!target) {
+          if (out.counts) out.counts.incomplete = true
+          continue
+        }
         await walk(target, depth + 1)
         // After the \input line, the last heading it brought in contains the text.
         marks.push({ line: line + 1, index: out.headings.length - 1 })

@@ -27,7 +27,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { plainWords } from '@/lib/wordcount'
-import type { PdfMatch } from '@/lib/pdfsearch'
+import { emptyPdfMatches, type PdfMatch } from '@/lib/pdfsearch'
+import type { PdfScrollRequest } from '@/lib/pdfsearch-state'
 import { usePdfSearch } from './PdfSearch'
 import { t } from '@/lib/i18n'
 import * as pdfjs from 'pdfjs-dist'
@@ -309,8 +310,9 @@ export default function PdfViewer({
                   scale={s}
                   highlight={highlight?.page === i + 1 ? highlight : undefined}
                   onInverse={onInverse}
-                  matches={search.matches.filter((m) => m.page === i + 1)}
+                  matches={search.byPage.get(i + 1) ?? emptyPdfMatches}
                   activeMatch={search.active}
+                  scrollRequest={search.scrollRequest?.match.page === i + 1 ? search.scrollRequest : undefined}
                 />
               ))}
           </div>
@@ -383,6 +385,7 @@ function Page({
   onInverse,
   matches,
   activeMatch,
+  scrollRequest,
 }: {
   doc: PDFDocumentProxy
   n: number
@@ -392,6 +395,7 @@ function Page({
   onInverse: Props['onInverse']
   matches: PdfMatch[]
   activeMatch?: PdfMatch
+  scrollRequest?: PdfScrollRequest
 }) {
   const box = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -403,8 +407,9 @@ function Page({
     scale: number
     layer: InstanceType<typeof pdfjs.TextLayer>
   } | null>(null)
-  const [hits, setHits] = useState<{ left: number; top: number; width: number; height: number; active: boolean }[]>([])
+  const [hits, setHits] = useState<{ left: number; top: number; width: number; height: number; match: PdfMatch }[]>([])
   const hitLayer = useRef<HTMLDivElement>(null)
+  const lastScrolled = useRef<number | null>(null)
 
   useEffect(() => {
     const io = new IntersectionObserver(([e]) => setVisible(e.isIntersecting), { rootMargin: '600px 0px' })
@@ -477,7 +482,7 @@ function Page({
       !box.current ||
       !matches.length
     ) {
-      setHits([])
+      setHits((previous) => (previous.length ? [] : previous))
       return
     }
     const bounds = box.current.getBoundingClientRect()
@@ -496,16 +501,20 @@ function Page({
               top: r.top - bounds.top,
               width: r.width,
               height: r.height,
-              active: match === activeMatch,
+              match,
             })
         }
       }
     }
-    setHits(rectangles)
-  }, [textLayer, matches, activeMatch, doc, scale, visible])
+    setHits((previous) => (!rectangles.length && !previous.length ? previous : rectangles))
+  }, [textLayer, matches, doc, scale, visible])
   useEffect(() => {
-    hitLayer.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'center', inline: 'nearest' })
-  }, [hits])
+    if (!scrollRequest || lastScrolled.current === scrollRequest.id) return
+    const target = hitLayer.current?.querySelector('[data-active="true"]')
+    if (!target) return // The requested page's text layer may still be loading.
+    lastScrolled.current = scrollRequest.id
+    target.scrollIntoView({ block: 'center', inline: 'nearest' })
+  }, [hits, scrollRequest])
 
   useEffect(() => {
     if (!highlight) return
@@ -536,10 +545,10 @@ function Page({
           <div
             key={i}
             data-pdf-search-hit
-            data-active={hit.active}
+            data-active={hit.match === activeMatch}
             className={cn(
               'absolute bg-yellow-400/40 mix-blend-multiply',
-              hit.active && 'bg-orange-400/60 outline outline-orange-600',
+              hit.match === activeMatch && 'bg-orange-400/60 outline outline-orange-600',
             )}
             style={{ left: hit.left, top: hit.top, width: hit.width, height: hit.height }}
           />

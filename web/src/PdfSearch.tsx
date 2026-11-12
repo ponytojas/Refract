@@ -1,19 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react'
 import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { t } from '@/lib/i18n'
 import { mod } from '@/lib/shortcuts'
-import { findPdfMatches, indexPdfText, type PdfTextIndex } from '@/lib/pdfsearch'
+import { groupPdfMatches, indexPdfPages } from '@/lib/pdfsearch'
+import { initialPdfSearch, pdfSearchMatches, pdfSearchReducer, pdfScrollRequest } from '@/lib/pdfsearch-state'
 
 export function usePdfSearch(doc: PDFDocumentProxy | null, goTo: (page: number) => void, focusViewer: () => void) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<{ doc: PDFDocumentProxy | null; index: number }>({ doc: null, index: 0 })
-  const current = selected.doc === doc ? selected.index : 0
-  const [indexed, setIndexed] = useState<{ doc: PDFDocumentProxy; pages: PdfTextIndex[] } | null>(null)
-  const [failedDoc, setFailedDoc] = useState<PDFDocumentProxy | null>(null)
+  const [state, dispatch] = useReducer(pdfSearchReducer, initialPdfSearch)
+  const { open, query, current, indexed, failedDoc } = state
   const failed = doc !== null && failedDoc === doc && indexed?.doc !== doc
   const busy = open && doc !== null && indexed?.doc !== doc && !failed
   const input = useRef<HTMLInputElement>(null)
@@ -22,51 +19,55 @@ export function usePdfSearch(doc: PDFDocumentProxy | null, goTo: (page: number) 
     if (!doc || !open || indexed?.doc === doc) return
     let cancelled = false
     ;(async () => {
-      const pages: PdfTextIndex[] = []
-      for (let n = 1; n <= doc.numPages; n++) {
-        if (cancelled) return
-        const content = await (await doc.getPage(n)).getTextContent()
-        pages.push(indexPdfText(content.items.filter((item) => 'str' in item)))
-      }
-      if (!cancelled) setIndexed({ doc, pages })
+      const pages = await indexPdfPages(
+        doc.numPages,
+        async (n) => {
+          const content = await (await doc.getPage(n)).getTextContent()
+          return content.items.filter((item) => 'str' in item)
+        },
+        () => cancelled,
+      )
+      if (pages && !cancelled) dispatch({ type: 'loaded', doc, pages })
     })().catch(() => {
-      if (!cancelled) setFailedDoc(doc)
+      if (!cancelled) dispatch({ type: 'failed', doc })
     })
     return () => {
       cancelled = true
     }
   }, [doc, open, indexed?.doc])
 
-  const matches = useMemo(
-    () => (open && indexed?.doc === doc ? findPdfMatches(indexed.pages, query) : []),
-    [open, indexed, doc, query],
-  )
-  const active = matches[Math.min(current, Math.max(0, matches.length - 1))]
-  useEffect(() => {
-    if (active) goTo(active.page)
-  }, [active, goTo])
+  const matches = pdfSearchMatches(state, doc)
+  const byPage = useMemo(() => groupPdfMatches(matches), [matches])
+  const active = matches[current]
+  const scrollRequest = useMemo(() => pdfScrollRequest(state, doc), [state, doc])
+  useLayoutEffect(() => {
+    if (scrollRequest) goTo(scrollRequest.match.page)
+  }, [scrollRequest, goTo])
   useEffect(() => {
     if (open) input.current?.focus()
   }, [open])
 
   function show() {
-    setOpen(true)
+    if (!doc) return
+    dispatch({ type: 'show', doc })
     input.current?.focus()
     input.current?.select()
   }
   function close() {
-    setOpen(false)
-    setFailedDoc(null)
+    dispatch({ type: 'close' })
     focusViewer()
   }
   function step(direction: number) {
-    if (matches.length) setSelected({ doc, index: (current + direction + matches.length) % matches.length })
+    if (doc && matches.length)
+      dispatch({ type: 'select', doc, index: (current + direction + matches.length) % matches.length })
   }
 
   return {
     show,
     matches,
+    byPage,
     active,
+    scrollRequest,
     button: (
       <Button
         variant="ghost"
@@ -85,12 +86,13 @@ export function usePdfSearch(doc: PDFDocumentProxy | null, goTo: (page: number) 
         aria-label={t('Search PDF')}
         className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5"
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return
           if (e.key === 'Escape') {
             e.preventDefault()
             e.stopPropagation()
             close()
           }
-          if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') {
+          if (e.target === input.current && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter')) {
             e.preventDefault()
             e.stopPropagation()
             step(e.key === 'ArrowUp' || (e.key === 'Enter' && e.shiftKey) ? -1 : 1)
@@ -104,8 +106,7 @@ export function usePdfSearch(doc: PDFDocumentProxy | null, goTo: (page: number) 
           aria-label={t('Find in PDF')}
           placeholder={t('Find in PDF')}
           onChange={(e) => {
-            setSelected({ doc, index: 0 })
-            setQuery(e.target.value)
+            dispatch({ type: 'query', doc, query: e.target.value })
           }}
           className="h-8"
         />

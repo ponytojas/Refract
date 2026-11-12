@@ -4,6 +4,43 @@ export type PdfTextItem = { str: string; hasEOL?: boolean }
 type Position = { item: number; from: number; to: number }
 export type PdfTextIndex = { text: string; positions: (Position | null)[] }
 export type PdfMatch = { page: number; segments: Position[] }
+export const emptyPdfMatches: PdfMatch[] = []
+
+export function groupPdfMatches(matches: PdfMatch[]): Map<number, PdfMatch[]> {
+  const pages = new Map<number, PdfMatch[]>()
+  for (const match of matches) {
+    const group = pages.get(match.page)
+    if (group) group.push(match)
+    else pages.set(match.page, [match])
+  }
+  return pages
+}
+
+// Bound the work in flight so closing search stops queuing a long document.
+// Results retain page order even when worker replies arrive out of order.
+export async function indexPdfPages(
+  count: number,
+  read: (page: number) => Promise<PdfTextItem[]>,
+  cancelled: () => boolean,
+): Promise<PdfTextIndex[] | null> {
+  const pages: PdfTextIndex[] = []
+  let next = 0
+  let stopped = false
+  async function worker() {
+    while (!stopped && !cancelled() && next < count) {
+      const index = next++
+      const items = await read(index + 1)
+      if (!cancelled()) pages[index] = indexPdfText(items)
+    }
+  }
+  try {
+    await Promise.all(Array.from({ length: Math.min(8, count) }, worker))
+  } catch (error) {
+    stopped = true
+    throw error
+  }
+  return cancelled() ? null : pages
+}
 
 export function indexPdfText(items: PdfTextItem[]): PdfTextIndex {
   const chars: { char: string; position: Position | null }[] = []

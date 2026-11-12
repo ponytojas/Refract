@@ -84,6 +84,24 @@ Needle final page.
   await search.getByRole('button', { name: 'Next match', exact: true }).click()
   await expect(search.getByRole('status')).toHaveText('2 of 3')
   await expect(viewer.locator('[data-page="2"] [data-pdf-search-hit][data-active="true"]').first()).toBeInViewport()
+  const previous = search.getByRole('button', { name: 'Previous match', exact: true })
+  await previous.focus()
+  await previous.press('Enter')
+  await expect(search.getByRole('status')).toHaveText('1 of 3')
+  const next = search.getByRole('button', { name: 'Next match', exact: true })
+  await next.focus()
+  await next.press('Space')
+  await expect(search.getByRole('status')).toHaveText('2 of 3')
+  await input.dispatchEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true })
+  await expect(search.getByRole('status')).toHaveText('2 of 3')
+  // Reading a different page must not snap back to the selected search hit.
+  const scroller = viewer.locator('.overflow-auto')
+  await scroller.evaluate((el) => {
+    el.scrollTop = 0
+  })
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBe(0)
+  await page.waitForTimeout(300)
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(0)
   await input.focus()
   await input.press('Enter')
   await expect(search.getByRole('status')).toHaveText('3 of 3')
@@ -114,17 +132,94 @@ Needle final page.
   await expect(search.getByRole('status')).toHaveText('1 of 3')
   await input.press('Shift+Enter')
   await expect(search.getByRole('status')).toHaveText('3 of 3')
+  await expect(viewer.locator('[data-page="3"] [data-pdf-search-hit][data-active="true"]').first()).toBeInViewport()
+  const beforeCompile = await scroller.evaluate((el) => el.scrollTop)
   await request.put(`/api/projects/${p.id}/file?path=main.tex`, {
     headers,
     data: source.replace('Needle final', 'Other final'),
   })
   await page.getByRole('button', { name: 'Compile', exact: true }).click()
-  await expect(search.getByRole('status')).toHaveText('1 of 2', { timeout: 90_000 })
-  await expect(viewer.locator('[data-page="1"] [data-pdf-search-hit][data-active="true"]').first()).toBeInViewport()
+  await expect(search.getByRole('status')).toHaveText('2 of 2', { timeout: 90_000 })
+  await expect
+    .poll(async () => Math.abs((await scroller.evaluate((el) => el.scrollTop)) - beforeCompile))
+    .toBeLessThan(3)
   await page.screenshot({ path: test.info().outputPath('pdf-search.png'), animations: 'disabled' })
-  await input.press('Escape')
+  const close = search.getByRole('button', { name: 'Close PDF search', exact: true })
+  await close.focus()
+  await close.press('Enter')
   await expect(search).toHaveCount(0)
   await expect(viewer.locator('[data-pdf-search-hit]')).toHaveCount(0)
   await page.keyboard.press('ControlOrMeta+f')
   await expect(input).toBeFocused()
+})
+
+test('search scrolls within a page once, without moving selection or zoom back', async ({ page, request }) => {
+  await project(page, request, {
+    'main.tex': String.raw`\documentclass{article}
+\begin{document}
+Needle top.\par\vspace{14cm}
+Needle bottom.
+\end{document}`,
+  })
+  await page.getByRole('button', { name: 'Compile', exact: true }).click()
+  const viewer = page.getByRole('region', { name: 'PDF preview', exact: true })
+  await expect(viewer.getByRole('button', { name: 'Search PDF', exact: true })).toBeEnabled({ timeout: 90_000 })
+  await viewer.getByRole('button', { name: 'Fit', exact: true }).click()
+  await page.getByRole('menuitem', { name: '150%', exact: true }).click()
+  await viewer.getByRole('button', { name: 'Search PDF', exact: true }).click()
+  const input = viewer.getByRole('textbox', { name: 'Find in PDF', exact: true })
+  await input.fill('needle')
+  await expect(viewer.getByRole('status')).toHaveText('1 of 2')
+  await input.press('ArrowDown')
+  const active = viewer.locator('[data-pdf-search-hit][data-active="true"]').first()
+  await expect(active).toBeInViewport()
+  const scroller = viewer.locator('.overflow-auto')
+  await scroller.evaluate((el) => {
+    el.scrollTop = 0
+  })
+  await page.waitForTimeout(300)
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(0)
+  await viewer
+    .locator('.textLayer span')
+    .first()
+    .evaluate((span) => {
+      const range = document.createRange()
+      range.selectNodeContents(span)
+      window.getSelection()!.removeAllRanges()
+      window.getSelection()!.addRange(range)
+    })
+  await page.waitForTimeout(300)
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(0)
+  await viewer.getByRole('button', { name: 'Zoom in', exact: true }).click()
+  await page.waitForTimeout(300)
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBeLessThan(3)
+  await input.press('ArrowDown')
+  await input.press('ArrowDown')
+  await expect(active).toBeInViewport()
+})
+
+test('word count preferences reuse cached included files', async ({ page, request }) => {
+  let reads = 0
+  page.on('request', (req) => {
+    const url = new URL(req.url())
+    if (req.method() === 'GET' && url.pathname.endsWith('/file') && url.searchParams.get('path') === 'body.tex') reads++
+  })
+  await project(page, request, {
+    'main.tex': String.raw`\documentclass{article}\begin{document}\section{Title}One.\input{body}\end{document}`,
+    'body.tex': 'Two three.',
+  })
+  const outline = page.getByRole('navigation', { name: 'Outline', exact: true })
+  await expect(outline.getByText('Document: 4 words', { exact: true })).toBeVisible()
+  const initialReads = reads
+  expect(initialReads).toBeGreaterThan(0)
+  await page.keyboard.press('ControlOrMeta+Shift+m')
+  await expect(outline.getByText(/Document:/)).toHaveCount(0)
+  await page.keyboard.press('ControlOrMeta+Shift+m')
+  await expect(outline.getByText('Document: 4 words', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Account menu', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
+  await page.getByRole('tab', { name: 'Editor', exact: true }).click()
+  await page.getByRole('switch', { name: 'Include titles', exact: true }).click()
+  await expect(outline.getByText('Document: 3 words', { exact: true })).toBeAttached()
+  expect(reads).toBe(initialReads)
 })

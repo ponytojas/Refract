@@ -220,3 +220,10 @@ test('headings and includes after the end of the document are ignored', async ()
   assert.deepEqual(titles(out), ['Real'])
   assert.deepEqual(out.counts, { total: 2, sections: [2], incomplete: false })
 })
+
+test('absolute and outside-project includes mark counts as partial', async () => {
+  for (const include of ['/outside/chapter', '../outside']) {
+    const out = await buildOutline('main.tex', reader({ 'main.tex': `Text.\\input{${include}}` }), defaultRules)
+    assert.deepEqual(out.counts, { total: 1, sections: [], incomplete: true })
+  }
+})

@@ -275,7 +275,10 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   useEffect(() => {
     outlineCache.current!.clear()
     refreshOutline.current()
-  }, [files, project?.main_file, countEnabled, prefs.wordCountTitles])
+  }, [files, project?.main_file])
+  useEffect(() => {
+    refreshOutline.current()
+  }, [countEnabled, prefs.wordCountTitles])
   useEffect(() => {
     if (sideTab === 'files' && outlineOpen) refreshOutline.current()
   }, [sideTab, outlineOpen])
