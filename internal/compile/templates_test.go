@@ -5,6 +5,7 @@ import (
 	"context"
 	"image"
 	"image/png"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,6 +41,21 @@ func TestBuiltInTemplatesCompile(t *testing.T) {
 			result, err := tc.Compile(ctx, s.Path(p.ID), p.MainFile)
 			if err != nil || !result.OK || result.PDF == "" {
 				t.Fatalf("template compile: %+v %v", result, err)
+			}
+			// A successful compile can still hide clipped text or broken links.
+			log, err := os.ReadFile(filepath.Join(s.Path(p.ID), BuildDir, "main.log"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, warning := range []string{"Overfull", "undefined references", "Citation `", "Reference `"} {
+				if strings.Contains(string(log), warning) {
+					t.Fatalf("template layout or reference warning %q", warning)
+				}
+			}
+			if template.ID == "cv" || template.ID == "letter" {
+				if pages := pdfPages(t, filepath.Join(s.Path(p.ID), result.PDF)); pages != 1 {
+					t.Fatalf("%s should fit one page, got %d", template.ID, pages)
+				}
 			}
 		})
 	}

@@ -54,7 +54,7 @@ test('a failed project creation preserves the selected template and can be retri
   await dialog.getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page).toHaveURL(/\/p\/[^/]+$/)
   await page.getByRole('button', { name: 'main.tex', exact: true }).first().click()
-  await expect(page.locator('.cm-content')).toContainText('\\documentclass[11pt]{letter}')
+  await expect(page.locator('.cm-content')).toContainText('Subject of your letter')
   expect(attempts).toBe(2)
 })
 

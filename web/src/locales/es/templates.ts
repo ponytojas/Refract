@@ -5,11 +5,15 @@ export default {
   Presentation: 'Presentación',
   Letter: 'Carta',
   CV: 'CV',
-  'Abstract, methods, results and discussion.': 'Resumen, métodos, resultados y discusión.',
-  'Chapters, contents and an appendix.': 'Capítulos, índice y un apéndice.',
-  'Beamer slides with the Madrid theme.': 'Diapositivas Beamer con el tema Madrid.',
-  'Sender, recipient and a formal closing.': 'Remitente, destinatario y una despedida formal.',
-  'Profile, education, experience and skills.': 'Perfil, formación, experiencia y habilidades.',
+  'Editorial layout, equations, results table and references.':
+    'Diseño editorial, ecuaciones, tabla de resultados y referencias.',
+  'Cover, contents, research chapters, references and appendix.':
+    'Portada, índice, capítulos de investigación, referencias y apéndice.',
+  'Wide slides with a study outline, results and takeaways.':
+    'Diapositivas panorámicas con esquema del estudio, resultados y conclusiones.',
+  'Personal letterhead, subject, signature and enclosures.': 'Membrete personal, asunto, firma y documentos adjuntos.',
+  'One-page layout with experience, projects and skills.':
+    'Diseño de una página con experiencia, proyectos y habilidades.',
   'Project templates': 'Plantillas de proyectos',
   'From a template…': 'Desde una plantilla…',
   'Save as template…': 'Guardar como plantilla…',

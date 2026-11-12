@@ -137,6 +137,11 @@ export default {
   'Zoom out': 'Alejar',
   'Zoom in': 'Acercar',
   'Cmd/Ctrl+click: go to source': 'Cmd/Ctrl+clic: ir al código fuente',
+  'Go to linked location in PDF': 'Ir al destino del enlace en el PDF',
+  'Could not follow this PDF link.': 'No se ha podido abrir este enlace del PDF.',
+  'Return to citation on page {page}': 'Volver a la cita de la página {page}',
+  'Show {n} citations of this reference': 'Ver las {n} citas de esta referencia',
+  'Citation {n} · page {page}': 'Cita {n} · página {page}',
 
   // CompileStatus
   '{n} overfull/underfull box': '{n} caja overfull/underfull',

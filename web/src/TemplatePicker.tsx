@@ -18,11 +18,11 @@ import {
 export type ProjectTemplate = { id: string; name: string; builtin: boolean }
 
 const starters: Record<string, { name: string; description: string }> = {
-  article: { name: t('Article'), description: t('Abstract, methods, results and discussion.') },
-  thesis: { name: t('Thesis'), description: t('Chapters, contents and an appendix.') },
-  beamer: { name: t('Presentation'), description: t('Beamer slides with the Madrid theme.') },
-  letter: { name: t('Letter'), description: t('Sender, recipient and a formal closing.') },
-  cv: { name: t('CV'), description: t('Profile, education, experience and skills.') },
+  article: { name: t('Article'), description: t('Editorial layout, equations, results table and references.') },
+  thesis: { name: t('Thesis'), description: t('Cover, contents, research chapters, references and appendix.') },
+  beamer: { name: t('Presentation'), description: t('Wide slides with a study outline, results and takeaways.') },
+  letter: { name: t('Letter'), description: t('Personal letterhead, subject, signature and enclosures.') },
+  cv: { name: t('CV'), description: t('One-page layout with experience, projects and skills.') },
 }
 
 export default function TemplatePicker({
