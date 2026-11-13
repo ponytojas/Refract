@@ -82,11 +82,42 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"`
 }
 
-// Usage is token accounting from response.completed.
+// Usage is token accounting from response.completed. CachedTokens is the
+// part of InputTokens served from the provider's cache, and ReasoningTokens
+// the part of OutputTokens spent reasoning; both are 0 when unknown.
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens     int `json:"input_tokens"`
+	OutputTokens    int `json:"output_tokens"`
+	TotalTokens     int `json:"total_tokens"`
+	CachedTokens    int `json:"cached_tokens"`
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+// UnmarshalJSON reads the Responses API's usage object, where the two
+// details are nested.
+func (u *Usage) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+		In           struct {
+			Cached int `json:"cached_tokens"`
+		} `json:"input_tokens_details"`
+		Out struct {
+			Reasoning int `json:"reasoning_tokens"`
+		} `json:"output_tokens_details"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	*u = Usage{
+		InputTokens:     raw.InputTokens,
+		OutputTokens:    raw.OutputTokens,
+		TotalTokens:     raw.TotalTokens,
+		CachedTokens:    raw.In.Cached,
+		ReasoningTokens: raw.Out.Reasoning,
+	}
+	return nil
 }
 
 // Status is what the UI shows about a provider.

@@ -161,6 +161,7 @@ func seed(t *testing.T, db *sql.DB, n int) {
 		{4, `INSERT INTO users (id, email, created_at) VALUES ('u', 'u@example.com', 1)`},
 		{5, `INSERT INTO sessions (id, user_id, expires_at) VALUES ('s', 'u', 1)`},
 		{7, `INSERT INTO login_failures (key, count, since) VALUES ('ip:1', 1, 1)`},
+		{8, `INSERT INTO ai_usage (at, user_id, kind, model, input_tokens, cached_tokens, output_tokens, reasoning_tokens) VALUES (1, 'u', 'agent', 'm', 1, 0, 1, 0)`},
 	}
 	for _, r := range rows {
 		if r.since > n {

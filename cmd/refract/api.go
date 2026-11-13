@@ -9,7 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/assistant"
@@ -18,6 +21,7 @@ import (
 	"github.com/ponytojas/Refract/internal/providers"
 	"github.com/ponytojas/Refract/internal/quick"
 	"github.com/ponytojas/Refract/internal/siwc"
+	"github.com/ponytojas/Refract/internal/usage"
 )
 
 type api struct {
@@ -30,6 +34,7 @@ type api struct {
 
 	providers *providers.Store // users' API-key providers
 	outbound  *http.Client     // for those providers (see providers.HTTPClient)
+	usage     *usage.Recorder  // what each model call used; nil records nothing
 
 	users sync.Map // user id → *userAI
 }
@@ -62,6 +67,18 @@ func (a *api) forUser(ctx context.Context) *userAI {
 // by model.
 func (a *api) providerFor(ctx context.Context) ai.Provider { return a.forUser(ctx).router }
 
+// metered is providerFor for calls that reach a model: what they use is
+// recorded under kind (agent, quick or cite).
+func (a *api) metered(kind string) func(context.Context) ai.Provider {
+	return func(ctx context.Context) ai.Provider {
+		p := a.providerFor(ctx)
+		if a.usage == nil {
+			return p
+		}
+		return &usage.Meter{Inner: p, Rec: a.usage, Kind: kind}
+	}
+}
+
 func (a *api) routes(rt *router) {
 	rt.user("GET /api/me", func(w http.ResponseWriter, r *http.Request) {
 		u, _ := auth.UserFrom(r.Context())
@@ -79,6 +96,37 @@ func (a *api) routes(rt *router) {
 	rt.user("DELETE /api/providers/{id}", a.deleteProvider)
 	rt.user("POST /api/providers/{id}/test", a.testProvider)
 	rt.user("POST /api/quick", a.quickAction)
+	rt.user("GET /api/usage", a.usageSince)
+}
+
+// usageSince is the signed-in account's token usage per model from ?since=
+// (Unix seconds; the client sends the start of its month), most used first.
+func (a *api) usageSince(w http.ResponseWriter, r *http.Request) {
+	since, err := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+	if err != nil || since < 0 {
+		httpError(w, errors.New("since must be a Unix time in seconds"), http.StatusBadRequest)
+		return
+	}
+	type model struct {
+		Model string `json:"model"`
+		usage.Totals
+	}
+	out := []model{}
+	if a.usage != nil {
+		u, _ := auth.UserFrom(r.Context())
+		totals, err := a.usage.Since(r.Context(), u.ID, time.Unix(since, 0))
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		for m, t := range totals {
+			out = append(out, model{m, t})
+		}
+	}
+	slices.SortFunc(out, func(x, y model) int {
+		return cmp.Or(cmp.Compare(y.InputTokens+y.OutputTokens, x.InputTokens+x.OutputTokens), cmp.Compare(x.Model, y.Model))
+	})
+	writeJSON(w, map[string]any{"models": out})
 }
 
 func (a *api) status(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +247,7 @@ func (a *api) quickAction(w http.ResponseWriter, r *http.Request) {
 	c, err := a.choose(r.Context(), assistant.Choice{Model: in.Model, Effort: "low"}, a.quick)
 	if err == nil {
 		var text string
-		if text, err = quick.Run(r.Context(), a.providerFor(r.Context()), c.Model, c.Effort, in.Request); err == nil {
+		if text, err = quick.Run(r.Context(), a.metered("quick")(r.Context()), c.Model, c.Effort, in.Request); err == nil {
 			writeJSON(w, map[string]string{"text": text})
 			return
 		}

@@ -72,6 +72,23 @@ export type Model = {
   provider_name?: string
 }
 
+/** One model's token usage over a period (GET /api/usage). Cached and reasoning tokens are parts of input and output. */
+export type ModelUsage = {
+  model: string
+  calls: number
+  input_tokens: number
+  cached_tokens: number
+  output_tokens: number
+  reasoning_tokens: number
+  included?: boolean // made with the included AI (S1), not the account's own keys
+}
+
+/** This month's included AI (S1): its limit and what is spent, in USD; resets_at in Unix seconds. */
+export type Allowance = { limit_usd: number; spent_usd: number; resets_at: number }
+
+/** GET /api/usage. allowance is set only for accounts with the included AI. */
+export type UsageReport = { models: ModelUsage[]; allowance?: Allowance }
+
 export type ChatGPTStatus = {
   status: { provider: string; signed_in: boolean; plan_granted: boolean; email?: string; limit_reached: boolean }
   ai_ready: boolean // ChatGPT plan or at least one API provider

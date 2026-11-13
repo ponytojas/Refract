@@ -32,7 +32,9 @@ import {
   SettingsSwitch,
 } from '@/components/ui/chatcn/settings-panel'
 import { getPrefs, openSettings, setPref, usePrefs, useSettingsSection, type Prefs } from '@/lib/prefs'
-import { t, tn } from '@/lib/i18n'
+import { lang, t, tn } from '@/lib/i18n'
+import { compact, modelLabel, ownUsage, totalTokens } from '@/lib/usage'
+import { useMonthUsage } from '@/components/useMonthUsage'
 import { shortcutGroups } from '@/lib/shortcuts'
 import { setTheme, useTheme, type Theme } from '@/lib/theme'
 import PlanBadge from './PlanBadge'
@@ -270,6 +272,7 @@ function AssistantPane({ status, onChange }: Props) {
         </SettingsGroup>
       )}
       <Providers onChange={() => api<ChatGPTStatus>('/api/chatgpt/status').then(onChange, () => {})} />
+      <Usage />
       <SettingsGroup title={t('Chat')}>
         <SettingsRow
           label={t('When collapsed')}
@@ -394,6 +397,63 @@ const blank = (kind: Kind, taken: string[]): Draft => {
 
 // API-key providers (OpenAI, Anthropic, Gemini, OpenRouter, Ollama…). Keys go
 // to the server, sealed; the browser only learns that one is saved.
+// What the account's model calls used this month, per model, as recorded by
+// the server (GET /api/usage). Tokens only: prices change and differ by plan.
+function Usage() {
+  const { since, usage: all, error, retry, models } = useMonthUsage()
+  const usage = all && ownUsage(all) // the included AI (S1) shows as a share of its allowance, not here
+
+  const from = new Date(since * 1000).toLocaleDateString(lang, { day: 'numeric', month: 'long' })
+  const n = (x: number) => compact(x, lang)
+  return (
+    <SettingsGroup
+      title={t('Token usage')}
+      description={t(
+        "Tokens used since {date}, by model, as each provider reported them. One assistant reply can take several calls. Your provider's bill is the reference.",
+        { date: from },
+      )}
+    >
+      {error ? (
+        <SettingsRow label={t("Couldn't load usage.")} description={error}>
+          <Button size="sm" variant="secondary" onClick={retry}>
+            {t('Retry')}
+          </Button>
+        </SettingsRow>
+      ) : !usage ? (
+        <SettingsRow label={t('Loading…')} />
+      ) : usage.length === 0 ? (
+        <SettingsRow label={t('No AI requests this month.')} />
+      ) : (
+        usage.map((u) => {
+          const { name, provider } = modelLabel(u.model, models)
+          const input = u.cached_tokens
+            ? t('{n} input ({cached} cached)', { n: n(u.input_tokens), cached: n(u.cached_tokens) })
+            : t('{n} input', { n: n(u.input_tokens) })
+          const output = u.reasoning_tokens
+            ? t('{n} output ({reasoning} reasoning)', { n: n(u.output_tokens), reasoning: n(u.reasoning_tokens) })
+            : t('{n} output', { n: n(u.output_tokens) })
+          return (
+            <SettingsRow
+              key={u.model}
+              label={
+                <span className="flex items-baseline gap-2">
+                  {name}
+                  {provider && <span className="text-xs font-normal text-muted-foreground">{provider}</span>}
+                </span>
+              }
+              description={[tn(u.calls, '{n} call', '{n} calls'), input, output].join(' · ')}
+            >
+              <span className="text-sm tabular-nums" title={totalTokens(u).toLocaleString(lang)}>
+                {t('{n} tokens', { n: n(totalTokens(u)) })}
+              </span>
+            </SettingsRow>
+          )
+        })
+      )}
+    </SettingsGroup>
+  )
+}
+
 function Providers({ onChange }: { onChange: () => void }) {
   const [state, setState] = useState<ProvidersState | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)

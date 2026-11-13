@@ -291,3 +291,21 @@ func TestReasoningSummary(t *testing.T) {
 		t.Fatalf("requests %q", bodies)
 	}
 }
+
+// The Responses API nests cached and reasoning tokens in details objects.
+func TestUsageReadsNestedDetails(t *testing.T) {
+	var u Usage
+	if err := json.Unmarshal([]byte(`{"input_tokens":100,"output_tokens":40,"total_tokens":140,"input_tokens_details":{"cached_tokens":60},"output_tokens_details":{"reasoning_tokens":25}}`), &u); err != nil {
+		t.Fatal(err)
+	}
+	if want := (Usage{InputTokens: 100, OutputTokens: 40, TotalTokens: 140, CachedTokens: 60, ReasoningTokens: 25}); u != want {
+		t.Fatalf("usage = %+v, want %+v", u, want)
+	}
+	u = Usage{}
+	if err := json.Unmarshal([]byte(`{"input_tokens":1,"output_tokens":2,"total_tokens":3}`), &u); err != nil {
+		t.Fatal(err)
+	}
+	if want := (Usage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3}); u != want {
+		t.Fatalf("usage = %+v, want %+v", u, want)
+	}
+}

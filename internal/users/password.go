@@ -261,6 +261,9 @@ func (s *Service) Delete(ctx context.Context, email string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE substr(key, 1, length(?)) = ?`, prefix, prefix); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ai_usage WHERE user_id = ?`, id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id); err != nil {
 		return err
 	}
