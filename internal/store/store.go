@@ -88,6 +88,8 @@ var migrations = []string{
 		reasoning_tokens INTEGER NOT NULL  -- part of output_tokens spent reasoning
 	);
 	CREATE INDEX ai_usage_user ON ai_usage(user_id, at)`,
+	// Private saved templates reuse the project file store and ownership checks.
+	`ALTER TABLE projects ADD COLUMN is_template INTEGER NOT NULL DEFAULT 0 CHECK (is_template IN (0, 1))`,
 }
 
 // Open opens (creating if needed) the database at path and applies pending migrations.

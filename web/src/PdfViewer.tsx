@@ -30,6 +30,16 @@ import { plainWords } from '@/lib/wordcount'
 import { emptyPdfMatches, type PdfMatch } from '@/lib/pdfsearch'
 import type { PdfScrollRequest } from '@/lib/pdfsearch-state'
 import { usePdfSearch } from './PdfSearch'
+import {
+  groupPdfLinkLines,
+  pdfLinkUrl,
+  resolvePdfDestination,
+  type PdfBacklink,
+  type PdfCitation,
+  type PdfDestination,
+  type PdfLocation,
+} from '@/lib/pdflinks'
+import PdfCitationLinks, { usePdfCitationLinks } from './PdfCitationLinks'
 import { t } from '@/lib/i18n'
 import * as pdfjs from 'pdfjs-dist'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
@@ -67,6 +77,12 @@ export default function PdfViewer({
   toolbarTarget,
 }: Props) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
+  const citationLinks = usePdfCitationLinks(doc)
+  const [citationFlash, setCitationFlash] = useState<{
+    doc: PDFDocumentProxy
+    highlight: Highlight
+    sync: Props['highlight']
+  } | null>(null)
   const [sizes, setSizes] = useState<Size[]>([])
   const [scale, setScale] = useState<number | 'fit'>('fit')
   const [current, setCurrent] = useState(1)
@@ -82,6 +98,7 @@ export default function PdfViewer({
   const keep = useRef<{ top: number; left: number } | null>(null)
   const zoomAnchor = useRef<number | null>(null) // relative scroll to keep across zoom changes
   const task = useRef<PDFDocumentLoadingTask | null>(null) // owns the shown document
+  const linkNavigation = useRef(0)
 
   useEffect(() => {
     const update = () => {
@@ -207,6 +224,44 @@ export default function PdfViewer({
     }
   }
 
+  async function followLink(destination: PdfDestination) {
+    if (!doc) return
+    const sourceTask = task.current
+    const request = ++linkNavigation.current
+    try {
+      const target = await resolvePdfDestination(doc, destination)
+      const displayed = await task.current?.promise
+      // A recompile or a newer click can supersede this asynchronous lookup.
+      if (!target || displayed !== doc || request !== linkNavigation.current) return
+      scrollToLocation(target)
+    } catch {
+      if (request === linkNavigation.current && sourceTask === task.current)
+        toast.error(t('Could not follow this PDF link.'))
+    }
+  }
+
+  function scrollToLocation(target: PdfLocation) {
+    const el = scroller.current
+    const page = el?.querySelector<HTMLElement>(`[data-page="${target.page}"]`)
+    if (!el || !page) return
+    const scale = page.getBoundingClientRect().width / sizes[target.page - 1].w
+    el.scrollTop = page.offsetTop + target.top * scale - 16
+    // Leave room for the return control in the bibliography's left margin.
+    el.scrollLeft = page.offsetLeft + target.left * scale - 44
+  }
+
+  function returnToCitation(citation: PdfCitation) {
+    if (!doc) return
+    const n = ++linkNavigation.current
+    scrollToLocation(citation)
+    scroller.current?.focus({ preventScroll: true })
+    setCitationFlash({
+      doc,
+      sync: highlight,
+      highlight: { page: citation.page, x: citation.left, y: citation.top, w: citation.width, h: citation.height, n },
+    })
+  }
+
   // Right click: where on which page, for "Go to source here".
   const point = useRef<{ page: number; x: number; y: number } | null>(null)
   function rememberPoint(e: MouseEvent) {
@@ -296,6 +351,7 @@ export default function PdfViewer({
           <div
             className="absolute inset-0 overflow-auto bg-pdf p-4"
             ref={scroller}
+            tabIndex={-1}
             onScroll={onScroll}
             onContextMenu={rememberPoint}
           >
@@ -308,11 +364,22 @@ export default function PdfViewer({
                   n={i + 1}
                   size={size}
                   scale={s}
-                  highlight={highlight?.page === i + 1 ? highlight : undefined}
+                  highlight={
+                    citationFlash?.doc === doc &&
+                    citationFlash.sync === highlight &&
+                    citationFlash.highlight.page === i + 1
+                      ? citationFlash.highlight
+                      : highlight?.page === i + 1
+                        ? highlight
+                        : undefined
+                  }
                   onInverse={onInverse}
                   matches={search.byPage.get(i + 1) ?? emptyPdfMatches}
                   activeMatch={search.active}
                   scrollRequest={search.scrollRequest?.match.page === i + 1 ? search.scrollRequest : undefined}
+                  onLink={followLink}
+                  backlinks={citationLinks.get(i + 1)}
+                  onCitation={returnToCitation}
                 />
               ))}
           </div>
@@ -386,6 +453,9 @@ function Page({
   matches,
   activeMatch,
   scrollRequest,
+  onLink,
+  backlinks,
+  onCitation,
 }: {
   doc: PDFDocumentProxy
   n: number
@@ -396,6 +466,9 @@ function Page({
   matches: PdfMatch[]
   activeMatch?: PdfMatch
   scrollRequest?: PdfScrollRequest
+  onLink: (destination: PdfDestination) => void
+  backlinks?: PdfBacklink[]
+  onCitation: (citation: PdfCitation) => void
 }) {
   const box = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -410,6 +483,22 @@ function Page({
   const [hits, setHits] = useState<{ left: number; top: number; width: number; height: number; match: PdfMatch }[]>([])
   const hitLayer = useRef<HTMLDivElement>(null)
   const lastScrolled = useRef<number | null>(null)
+  const [hoveredLink, setHoveredLink] = useState<string | null>(null)
+  const [focusedLink, setFocusedLink] = useState<string | null>(null)
+  const [annotations, setAnnotations] = useState<{
+    doc: PDFDocumentProxy
+    links: {
+      id: string
+      group: string
+      left: number
+      top: number
+      width: number
+      height: number
+      dest?: PdfDestination
+      url?: string
+      label: string
+    }[]
+  } | null>(null)
 
   useEffect(() => {
     const io = new IntersectionObserver(([e]) => setVisible(e.isIntersecting), { rootMargin: '600px 0px' })
@@ -443,6 +532,51 @@ function Page({
       task?.cancel()
     }
   }, [doc, n, scale, visible])
+
+  useEffect(() => {
+    if (!visible) return
+    let cancelled = false
+    ;(async () => {
+      const page = await doc.getPage(n)
+      const viewport = page.getViewport({ scale: 1 })
+      const links: Omit<NonNullable<typeof annotations>['links'][number], 'group'>[] = []
+      for (const annotation of await page.getAnnotations({ intent: 'display' })) {
+        if (annotation.annotationType !== pdfjs.AnnotationType.LINK) continue
+        const dest = typeof annotation.dest === 'string' || Array.isArray(annotation.dest) ? annotation.dest : undefined
+        const url = pdfLinkUrl(annotation.url)
+        if (
+          (!dest && !url) ||
+          !Array.isArray(annotation.rect) ||
+          annotation.rect.length !== 4 ||
+          !annotation.rect.every(Number.isFinite)
+        )
+          continue
+        const rect = [
+          ...viewport.convertToViewportPoint(annotation.rect[0], annotation.rect[1]),
+          ...viewport.convertToViewportPoint(annotation.rect[2], annotation.rect[3]),
+        ]
+        const width = (Math.abs(rect[2] - rect[0]) / viewport.width) * 100
+        const height = (Math.abs(rect[3] - rect[1]) / viewport.height) * 100
+        if (!width || !height) continue
+        links.push({
+          id: annotation.id,
+          left: (Math.min(rect[0], rect[2]) / viewport.width) * 100,
+          top: (Math.min(rect[1], rect[3]) / viewport.height) * 100,
+          width,
+          height,
+          dest,
+          url,
+          label: annotation.overlaidText || annotation.contentsObj?.str || url || t('Go to linked location in PDF'),
+        })
+      }
+      if (!cancelled) setAnnotations({ doc, links: groupPdfLinkLines(links) })
+    })().catch((error) => {
+      if (!cancelled) console.error('PDF links:', error)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [doc, n, visible])
 
   useEffect(() => {
     if (!visible) return
@@ -531,7 +665,7 @@ function Page({
 
   return (
     <div
-      className="relative mx-auto mb-4 bg-white shadow-[0_1px_3px_rgb(0_0_0/0.12),0_0_0_1px_rgb(0_0_0/0.04)]"
+      className="relative isolate mx-auto mb-4 bg-white shadow-[0_1px_3px_rgb(0_0_0/0.12),0_0_0_1px_rgb(0_0_0/0.04)]"
       data-page={n}
       ref={box}
       style={{ width: size.w * scale, height: size.h * scale }}
@@ -553,6 +687,42 @@ function Page({
             style={{ left: hit.left, top: hit.top, width: hit.width, height: hit.height }}
           />
         ))}
+      </div>
+      <PdfCitationLinks entries={backlinks} scale={scale} onSelect={onCitation} />
+      <div className="pointer-events-none absolute inset-0 z-10">
+        {annotations?.doc === doc &&
+          annotations.links.map((link) => (
+            <a
+              key={link.id}
+              href={link.url ?? '#'}
+              target={link.url ? '_blank' : undefined}
+              rel={link.url ? 'noopener noreferrer' : undefined}
+              aria-label={link.label}
+              title={link.label}
+              data-pdf-destination={typeof link.dest === 'string' ? link.dest : undefined}
+              className={cn(
+                'pointer-events-auto absolute rounded-sm focus-visible:outline-2 focus-visible:outline-blue-600',
+                (hoveredLink === link.group || focusedLink === link.group) && 'bg-sky-400/15',
+              )}
+              onPointerEnter={() => setHoveredLink(link.group)}
+              onPointerLeave={() => setHoveredLink(null)}
+              onFocus={() => setFocusedLink(link.group)}
+              onBlur={() => setFocusedLink(null)}
+              style={{ left: `${link.left}%`, top: `${link.top}%`, width: `${link.width}%`, height: `${link.height}%` }}
+              onClick={(e) => {
+                // Keep Cmd/Ctrl+click available for inverse SyncTeX.
+                if (e.metaKey || e.ctrlKey) {
+                  e.preventDefault()
+                  return
+                }
+                e.stopPropagation()
+                if (link.dest && !link.url) {
+                  e.preventDefault()
+                  onLink(link.dest)
+                }
+              }}
+            />
+          ))}
       </div>
       {flash && (
         <div

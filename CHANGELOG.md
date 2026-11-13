@@ -8,6 +8,8 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 
 - Document and hierarchical section word counts in the outline, following included files and the existing counter/title preferences.
 - PDF search with highlighted matches, previous/next navigation, keyboard controls and parallel page indexing. Reading and zooming preserve your position, recompiling keeps the selected match number, and search buttons work with the keyboard.
+- Return links beside cited PDF bibliography entries, with a choice of occurrences for references cited multiple times.
+- Project templates: styled article, thesis, widescreen Beamer presentation, letter and one-page CV starters with editable metadata, structured sample content and examples of tables and references; save private templates from your projects and reuse independent copies with their selected main file.
 - LaTeX completion in the editor: common commands and environments (`\begin{…}` closes itself), `\ref` and friends from the project's labels, `\cite` from its `.bib` files, and file paths in `\input`, `\include` and `\includegraphics`. Commands and environments show their arguments and a short description, the arguments stay in view while filling them in, and citations show the author, year and title of each work.
 - `REFRACT_MODE=selfhost|saas` says whether Refract runs as a self-hosted install (the default) or as the hosted service. The hosted service doesn't offer the ChatGPT plan: Settings → Assistant shows API providers only.
 - A document outline under the file tree: the sections of the main file and the files it `\input`s or `\include`s, indented by level. Click a heading to jump to it; the one containing the cursor is highlighted, and it refreshes on save. Headings are also in the command palette (<kbd>⌘K</kbd>, **Go to section…**).
@@ -17,6 +19,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- PDF contents, citations and cross-references now navigate to their destination in the preview; website and email links are clickable too.
 - Citations added from Refract go to the bibliography next to the main file when it is in a subfolder, so they reach the PDF (#13).
 - When no file loads a bibliography yet, the setup hint after citing (in the editor and from the assistant) names the `.bib` relative to the main file's folder, as `\bibliography` resolves it.
 - Citing ignores a commented-out `\bibliography` or `\addbibresource`, uses the first usable name of a list such as `\bibliography{a,b}`, and drops spaces from `\bibliography` names as LaTeX does (`{my refs}` is `myrefs.bib`).

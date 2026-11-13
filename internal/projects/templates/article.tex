@@ -1,0 +1,108 @@
+% EDIT HERE: title, author, affiliation, accent colour, then the sample content.
+% All examples are self-contained: no images or bibliography tools are needed.
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{tgpagella}
+\usepackage[margin=25mm]{geometry}
+\usepackage{microtype,amsmath,amssymb,graphicx,booktabs,tabularx}
+\usepackage{xcolor,titlesec,fancyhdr,enumitem}
+\definecolor{accent}{HTML}{245C61}
+\definecolor{muted}{HTML}{58666B}
+\usepackage[colorlinks=true,allcolors=accent]{hyperref}
+\newcommand{\articletitle}{Article title}
+\newcommand{\authorname}{Your name}
+\newcommand{\affiliation}{Department / Institution}
+\hypersetup{pdftitle={\articletitle},pdfauthor={\authorname}}
+\titleformat{\section}{\large\bfseries\color{accent}}{\thesection}{0.7em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.7em}{}
+\titlespacing*{\section}{0pt}{18pt}{7pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\setlist[itemize]{leftmargin=*,itemsep=2pt,topsep=3pt}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small\color{muted}\authorname}
+\fancyhead[R]{\small\color{muted}Research article}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\setlength{\headheight}{15pt}
+
+\begin{document}
+\thispagestyle{plain}
+{\small\sffamily\color{accent}RESEARCH ARTICLE}\par
+\vspace{8pt}
+{\LARGE\bfseries\articletitle\par}
+\vspace{7pt}
+{\large\authorname}\par
+{\small\color{muted}\affiliation\quad /\quad \today}\par
+\vspace{6pt}{\color{accent}\hrule height 1.2pt}\vspace{10pt}
+\textbf{Abstract}\quad
+State the problem, the approach and the main finding in a single paragraph.
+This example describes an evaluation of a research workflow: a baseline process
+is compared with a revised process using completion time and error rate.
+Replace this summary with the contribution of your own study and its implications.
+
+{\small\textbf{Keywords:} research design; evaluation; reproducibility}
+\section{Introduction}
+Open with the problem and explain who is affected by it. Establish what prior
+work already tells us, what remains uncertain and why resolving that gap matters.
+Use a reference where a claim needs support, for example \cite{example}.
+
+The objective of this study is to evaluate whether a revised workflow improves
+performance without sacrificing accuracy. The example numbers below illustrate
+the layout; they are not research findings.
+\subsection{Research question and contribution}
+\begin{itemize}
+\item \textbf{Question:} How does the revised workflow compare with the baseline?
+\item \textbf{Contribution:} A reproducible comparison using two explicit metrics.
+\item \textbf{Scope:} One task, two conditions and a clearly defined sample.
+\end{itemize}
+\section{Methods}
+\subsection{Study design}
+Describe the participants or materials, the procedure and the comparison groups.
+Specify inclusion criteria and explain how you selected the sample. Report enough
+detail for another researcher to repeat the work.
+\subsection{Measures and analysis}
+Define your primary outcome before presenting results. For example, the relative
+improvement in completion time is
+\begin{equation}
+\Delta_t = \frac{t_{\mathrm{baseline}}-t_{\mathrm{revised}}}{t_{\mathrm{baseline}}}\times100\%.
+\label{eq:improvement}
+\end{equation}
+Report uncertainty alongside averages and state how missing observations were
+handled. Separate planned analyses from exploratory ones.
+\section{Results}
+Table~\ref{tab:results} shows an example comparison. Replace the illustrative values,
+units and measures with your own results. Equation~\ref{eq:improvement} gives a
+relative reduction of 25\% for the example completion times.
+\begin{table}[htbp]
+\centering
+\caption{Illustrative outcomes; replace with measured data.}
+\label{tab:results}
+\begin{tabularx}{\linewidth}{@{}Xrr@{}}
+\toprule
+\textbf{Measure} & \textbf{Baseline} & \textbf{Revised}\\
+\midrule
+Completion time (minutes) & 24.0 & 18.0\\
+Error rate (\%) & 8.0 & 5.0\\
+Completed tasks & 40 & 40\\
+\bottomrule
+\end{tabularx}
+\end{table}
+\section{Discussion}
+Interpret the finding in relation to the research question rather than repeating
+the table. Compare it with prior work and explain which mechanisms could account
+for the observed difference.
+\subsection{Limitations}
+Discuss sample size, measurement assumptions and threats to validity. Explain
+which settings the result may generalize to and where further evidence is needed.
+\section{Conclusion}
+Give a direct answer to the research question, state the main contribution and
+identify one concrete next step. Avoid introducing new evidence here.
+\section*{Data and acknowledgements}
+Describe where materials and analysis code can be found, any access restrictions,
+funding and contributions that do not meet the authorship criteria.
+\begin{thebibliography}{9}
+\bibitem{example} A. Author. \textit{Title of a relevant work}. Publisher, 2025.
+% Replace this illustrative entry with a real source. Add entries with \bibitem.
+\end{thebibliography}
+\end{document}

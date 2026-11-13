@@ -1,0 +1,68 @@
+% EDIT HERE: contact details, accent colour, then your own experience.
+% Keep bullets short and use measurable outcomes. This layout fits one A4 page.
+\documentclass[10pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{tgheros}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage[margin=19mm]{geometry}
+\usepackage{xcolor,titlesec,enumitem,tabularx}
+\definecolor{accent}{HTML}{245C61}
+\definecolor{muted}{HTML}{59676B}
+\usepackage[colorlinks=true,allcolors=accent]{hyperref}
+\newcommand{\yourname}{Your name}
+\newcommand{\yourrole}{Researcher / Your professional title}
+\newcommand{\youremail}{you@example.com}
+\hypersetup{pdftitle={\yourname\space -- CV},pdfauthor={\yourname}}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+\titleformat{\section}{\small\bfseries\color{accent}}{}{0pt}{}[\vspace{3pt}\titlerule]
+\titlespacing*{\section}{0pt}{13pt}{6pt}
+\setlist[itemize]{leftmargin=1.2em,itemsep=2pt,topsep=3pt,parsep=0pt}
+\newcommand{\entry}[4]{\textbf{#1}\hfill{\small #2}\\{\small\color{muted}#3\hfill #4}\par}
+
+\begin{document}
+{\Huge\bfseries\yourname}\par
+\vspace{3pt}{\large\color{accent}\yourrole}\par
+\vspace{5pt}
+{\small City, Country\quad /\quad\href{mailto:\youremail}{\youremail}\quad /\quad +00 123 456 789\\
+\href{https://example.com}{example.com}\quad /\quad\href{https://github.com/yourname}{github.com/yourname}}
+\vspace{9pt}{\color{accent}\hrule height 1.5pt}
+\section{PROFILE}
+Write two or three lines connecting your background to the role you want.
+Name your specialism, the kind of problems you solve and the value you bring.
+Replace every example below with your own experience and evidence.
+\section{EXPERIENCE}
+\entry{Current role / Research position}{2023 -- Present}{Organization or laboratory}{City, Country}
+\begin{itemize}
+\item Led a project from research question to delivery; state its scope and the outcome.
+\item Built a reproducible analysis workflow; describe the time saved or quality improvement.
+\item Collaborated with a cross-functional team and communicated findings to stakeholders.
+\end{itemize}
+\vspace{3pt}
+\entry{Previous role / Internship}{2021 -- 2023}{Organization}{City, Country}
+\begin{itemize}
+\item Improved a process or service; give a specific result and your contribution.
+\item Developed a tool, report or experiment used by a clearly identified audience.
+\end{itemize}
+\section{EDUCATION}
+\entry{Degree title / Field of study}{2019 -- 2021}{University or institution}{City, Country}
+{\small Thesis: \textit{Your thesis title}. Relevant coursework or distinction.}\par
+\vspace{4pt}
+\entry{Previous degree}{2015 -- 2019}{University or institution}{City, Country}
+\section{SELECTED PROJECTS AND PUBLICATIONS}
+\textbf{Project or publication title}\hfill{\small 2025}\\
+Describe the problem, your contribution and the result in one or two lines.
+Add a \href{https://example.com}{project link, repository or DOI}.\par
+\vspace{3pt}
+\textbf{Second selected contribution}\hfill{\small 2024}\\
+Explain why this work is relevant to the position. Credit collaborators where appropriate.
+\section{SKILLS AND LANGUAGES}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\textbf{Technical} & Python, R, SQL, LaTeX; replace with tools you use confidently.\\[3pt]
+\textbf{Methods} & Experimental design, data analysis, technical writing.\\[3pt]
+\textbf{Languages} & English (level), Spanish (level).\\
+\end{tabularx}
+\section{SERVICE AND RECOGNITION}
+Award, scholarship, volunteering or community contribution\hfill{\small Year}
+\end{document}

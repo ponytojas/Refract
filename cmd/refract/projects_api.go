@@ -26,6 +26,8 @@ type projectsAPI struct {
 func (a *projectsAPI) routes(rt *router) {
 	rt.user("GET /api/projects", a.list)
 	rt.user("POST /api/projects", a.create)
+	rt.user("GET /api/templates", a.templates)
+	rt.project("POST /api/projects/{id}/template", access.Owner, a.saveTemplate)
 	rt.user("POST /api/projects/import", a.importZip)
 	rt.user("POST /api/projects/import-folder", a.importFolder)
 	rt.project("GET /api/projects/{id}", access.Owner, a.get)
@@ -198,17 +200,55 @@ func (a *projectsAPI) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *projectsAPI) create(w http.ResponseWriter, r *http.Request) {
-	var in struct{ Name string }
+	var in struct {
+		Name     string `json:"name"`
+		Template string `json:"template"`
+	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	p, err := a.svc.Create(r.Context(), in.Name)
+	var p *projects.Project
+	var err error
+	if in.Template != "" {
+		p, err = a.svc.CreateFromTemplate(r.Context(), in.Name, in.Template)
+	} else {
+		p, err = a.svc.Create(r.Context(), in.Name)
+	}
 	if err != nil {
 		projectError(w, err)
 		return
 	}
 	writeJSON(w, p)
+}
+
+func (a *projectsAPI) templates(w http.ResponseWriter, r *http.Request) {
+	templates, err := a.svc.Templates(r.Context())
+	if err != nil {
+		projectError(w, err)
+		return
+	}
+	writeJSON(w, templates)
+}
+
+func (a *projectsAPI) saveTemplate(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		httpError(w, errors.New("template name required"), http.StatusBadRequest)
+		return
+	}
+	template, err := a.svc.SaveTemplate(r.Context(), r.PathValue("id"), in.Name)
+	if err != nil {
+		projectError(w, err)
+		return
+	}
+	writeJSON(w, template)
 }
 
 // importZip takes the raw zip as the body; the project name comes from ?name=.

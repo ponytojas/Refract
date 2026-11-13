@@ -1,0 +1,197 @@
+% EDIT HERE: thesis metadata and accent colour. Then replace the sample chapters.
+% One self-contained source; chapters can later be moved into \input files.
+\documentclass[11pt,a4paper,oneside]{report}
+\usepackage[T1]{fontenc}
+\usepackage{tgpagella}
+\usepackage[inner=30mm,outer=25mm,top=27mm,bottom=27mm]{geometry}
+\usepackage{microtype,amsmath,amssymb,graphicx,booktabs,tabularx}
+\usepackage{xcolor,titlesec,fancyhdr,enumitem}
+\definecolor{accent}{HTML}{245C61}
+\definecolor{muted}{HTML}{59676B}
+\usepackage[colorlinks=true,allcolors=accent]{hyperref}
+\newcommand{\thesistitle}{Thesis title}
+\newcommand{\thesissubtitle}{A descriptive subtitle for your research}
+\newcommand{\authorname}{Your name}
+\newcommand{\university}{Your university}
+\newcommand{\department}{Department / Faculty}
+\newcommand{\degree}{Master's / Doctoral thesis}
+\newcommand{\supervisor}{Supervisor name}
+\hypersetup{pdftitle={\thesistitle},pdfauthor={\authorname}}
+\linespread{1.12}
+\setlength{\parindent}{0pt}\setlength{\parskip}{7pt}
+\setlist[itemize]{leftmargin=*,itemsep=3pt,topsep=4pt}
+\titleformat{\chapter}[display]{\bfseries\color{accent}}{\small\sffamily\MakeUppercase{\chaptertitlename}\ \thechapter}{8pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{0pt}{24pt}
+\titleformat{\section}{\large\bfseries\color{accent}}{\thesection}{0.7em}{}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small\color{muted}\nouppercase{\leftmark}}
+\fancyfoot[L]{\small\color{muted}\authorname}
+\fancyfoot[R]{\small\thepage}
+\renewcommand{\headrulewidth}{0pt}\setlength{\headheight}{16pt}
+
+\begin{document}
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\raggedright
+{\large\sffamily\color{accent}\university}\par
+{\small\department}\par
+\vspace{28mm}
+{\small\sffamily\color{muted}\MakeUppercase{\degree}}\par
+\vspace{8mm}
+{\Huge\bfseries\thesistitle\par}
+\vspace{6mm}
+{\Large\color{muted}\thesissubtitle\par}
+\vspace{12mm}{\color{accent}\hrule height 1.5pt}
+\vspace{14mm}
+{\large\authorname}\par
+\vfill
+\begin{tabular}{@{}ll@{}}
+\textbf{Supervisor} & \supervisor\\[5pt]
+\textbf{Programme} & Your programme\\[5pt]
+\textbf{Submitted} & \today
+\end{tabular}
+\end{titlepage}
+\pagenumbering{roman}
+\hypersetup{pageanchor=true}
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+Summarize the problem, the gap in existing knowledge and the main research
+question. Describe your method, state the principal result and explain the
+contribution. Write this section last so that it reflects the thesis you
+actually produced.
+
+This starter uses a study of research workflows as an illustrative thread.
+Replace all example material, including the table and reference, with your
+own evidence. Keep the abstract self-contained and follow your institution's
+word limit and submission requirements.
+
+\textbf{Keywords:} research question; methodology; evaluation; your field.
+\vspace{12mm}
+\section*{Acknowledgements}
+Recognize supervision, collaboration, funding and personal support. Check whether
+your institution requires a declaration of originality or other front matter.
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+\chapter{Introduction and background}
+\label{ch:introduction}
+\section{Context and motivation}
+Explain the problem in its broader setting. Identify who is affected, what is
+currently possible and which difficulty motivates the research. Support factual
+claims with appropriate sources, for example \cite{example}.
+
+Move from the broad context to a specific gap in knowledge. Distinguish between
+what earlier studies establish and what your thesis will investigate. Explain
+why this gap matters academically or practically.
+\section{Research question and objectives}
+\textbf{Research question:} How does a revised workflow affect completion time
+and accuracy compared with an existing process?
+\begin{itemize}
+\item Establish a defensible baseline and explicit evaluation criteria.
+\item Develop or select an approach that addresses the identified gap.
+\item Evaluate outcomes and discuss the limits of the evidence.
+\end{itemize}
+\section{Related work}
+Organize the literature by themes or competing approaches. Compare their
+assumptions, methods and findings rather than listing summaries. Conclude by
+showing how the present study follows from that comparison.
+\section{Scope and thesis structure}
+State the boundaries of the study: population, setting, materials and outcomes.
+Chapter~\ref{ch:methods} describes the method; Chapter~\ref{ch:findings} presents
+and discusses the findings. Appendix~\ref{app:materials} contains supporting material.
+
+\chapter{Research design and methods}
+\label{ch:methods}
+\section{Design and rationale}
+Explain why your design can answer the research question. Identify the unit of
+analysis, comparison conditions and controls. Where applicable, describe
+recruitment, sampling and inclusion or exclusion criteria.
+\section{Materials and procedure}
+Document the materials, tools and versions used. Describe each stage in enough
+detail for another researcher to reproduce it.
+\begin{table}[htbp]
+\centering
+\caption{Example study protocol; adapt to your research.}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+\textbf{Stage} & \textbf{Record and report}\\
+\midrule
+Preparation & Task specification, materials and selection criteria.\\
+Collection & Conditions, observations and any protocol deviations.\\
+Analysis & Metrics, uncertainty, exclusions and analysis code.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+\section{Measures and analysis plan}
+Define outcomes, units and the method of comparison before reporting results.
+For completion time, one possible summary is
+\begin{equation}
+\Delta_t = \frac{t_{\mathrm{baseline}}-t_{\mathrm{revised}}}{t_{\mathrm{baseline}}}\times100\%.
+\end{equation}
+Explain your choice of statistical or qualitative analysis and the treatment of
+missing observations. Distinguish confirmatory from exploratory analyses.
+\section{Ethics and reproducibility}
+Describe consent, privacy, data handling and any required approvals. State how
+materials, data and code will be shared, or explain legitimate access restrictions.
+
+\chapter{Findings, discussion and conclusions}
+\label{ch:findings}
+\section{Results}
+Present the evidence before interpreting it. Report sample characteristics,
+primary outcomes and uncertainty. Table~\ref{tab:outcomes} contains illustrative
+values only; replace them with your measured results.
+\begin{table}[htbp]
+\centering
+\caption{Illustrative comparison; these are not research findings.}
+\label{tab:outcomes}
+\begin{tabularx}{\linewidth}{@{}Xrr@{}}
+\toprule
+\textbf{Measure} & \textbf{Baseline} & \textbf{Revised}\\
+\midrule
+Completion time (minutes) & 24.0 & 18.0\\
+Error rate (\%) & 8.0 & 5.0\\
+\bottomrule
+\end{tabularx}
+\end{table}
+\section{Interpretation and contribution}
+Answer the research question directly. Explain how the evidence relates to the
+objectives in Chapter~\ref{ch:introduction}, how it compares with earlier work
+and what new understanding or capability follows from it.
+\section{Limitations and future work}
+Discuss threats to validity, sampling limitations and measurement assumptions.
+Separate claims supported by your data from plausible explanations that need
+further investigation. Propose concrete follow-up studies.
+\section{Conclusion}
+Summarize the answer, the contribution and its implications. This section should
+stand on its own without introducing new evidence or claims.
+
+\renewcommand{\bibname}{References}
+\cleardoublepage\phantomsection
+\addcontentsline{toc}{chapter}{References}
+\begin{thebibliography}{9}
+\bibitem{example} A. Author. \textit{Title of a relevant work}. Publisher, 2025.
+% Replace this illustrative entry with real references for your research.
+\end{thebibliography}
+\appendix
+\chapter{Supporting materials}
+\label{app:materials}
+\section{Reproduction checklist}
+Provide instruments, extended results, additional proofs or implementation
+details that support the main argument without interrupting it.
+\begin{itemize}
+\item Materials and instructions needed to repeat the study.
+\item Data dictionary, units and anonymization decisions.
+\item Software versions and analysis steps.
+\item Additional tables or observations referenced in the main text.
+\end{itemize}
+\section{Example data record}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+\textbf{Field} & \textbf{Meaning}\\
+\midrule
+Observation ID & Anonymous identifier for each recorded task.\\
+Condition & Baseline or revised workflow.\\
+Duration & Elapsed time, in minutes.\\
+\bottomrule
+\end{tabularx}
+\end{document}

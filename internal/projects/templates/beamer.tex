@@ -1,0 +1,154 @@
+% EDIT HERE: title, subtitle, author, institution and accent colour.
+% Self-contained 16:9 slides. The example diagram uses no external images.
+\documentclass[aspectratio=169,11pt]{beamer}
+\usepackage[T1]{fontenc}
+\usepackage{tgheros}
+\usepackage{booktabs}
+\definecolor{accent}{HTML}{245C61}
+\definecolor{ink}{HTML}{182E3B}
+\definecolor{muted}{HTML}{60717B}
+\definecolor{wash}{HTML}{EDF4F3}
+\setbeamercolor{normal text}{fg=ink,bg=white}
+\setbeamercolor{structure}{fg=accent}
+\setbeamercolor{frametitle}{fg=ink}
+\setbeamercolor{title}{fg=ink}
+\setbeamercolor{subtitle}{fg=accent}
+\setbeamercolor{block title}{fg=white,bg=accent}
+\setbeamercolor{block body}{fg=ink,bg=wash}
+\setbeamercolor{alerted text}{fg=accent}
+\setbeamerfont{title}{size=\Huge,series=\bfseries}
+\setbeamerfont{subtitle}{size=\large}
+\setbeamerfont{frametitle}{size=\LARGE,series=\bfseries}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{itemize item}{\small\raise1pt\hbox{\textbullet}}
+\setbeamertemplate{itemize subitem}{\textendash}
+\setbeamersize{text margin left=11mm,text margin right=11mm}
+\setbeamertemplate{frametitle}{\vspace{6mm}\insertframetitle\par\vspace{3mm}{\color{accent}\hrule height 0.7pt}}
+\setbeamertemplate{footline}{%
+\hspace{11mm}\color{muted}\scriptsize\insertshorttitle\hfill\insertframenumber\,/\,\inserttotalframenumber\hspace{11mm}\vspace{4mm}}
+\title[Presentation title]{Presentation title}
+\subtitle{One clear sentence about your contribution}
+\author{Your name}
+\institute{Your department / Institution}
+\date{\today}
+
+\begin{document}
+\begin{frame}[plain]
+\vspace{8mm}
+{\small\color{accent}\insertinstitute}\par
+\vspace{7mm}
+{\usebeamerfont{title}\inserttitle\par}
+\vspace{4mm}
+{\usebeamerfont{subtitle}\color{accent}\insertsubtitle\par}
+\vspace{7mm}{\color{accent}\hrule height 1.5pt}\vspace{5mm}
+\insertauthor\par
+{\small\color{muted}\insertdate}
+\end{frame}
+
+\section{The question}
+\begin{frame}{Start with the question}
+\begin{block}{Research question}
+What changes when we redesign a research workflow?
+\end{block}
+\vspace{4mm}
+\begin{itemize}\setlength{\itemsep}{5mm}
+\item \textbf{Context:} Explain the problem and who experiences it.
+\item \textbf{Gap:} State what existing approaches leave unresolved.
+\item \textbf{Contribution:} Describe the new evidence or method you offer.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Give the audience a route}
+\begin{columns}[T,onlytextwidth]
+\column{0.30\textwidth}
+{\Huge\color{accent}01}\par\vspace{3mm}
+\textbf{Question}\par\vspace{2mm}
+What matters, and what do we need to learn?
+\column{0.30\textwidth}
+{\Huge\color{accent}02}\par\vspace{3mm}
+\textbf{Evidence}\par\vspace{2mm}
+How was the study designed, and what changed?
+\column{0.30\textwidth}
+{\Huge\color{accent}03}\par\vspace{3mm}
+\textbf{Implications}\par\vspace{2mm}
+What can we conclude, and what comes next?
+\end{columns}
+\end{frame}
+
+\section{Approach}
+\begin{frame}{Make the method easy to follow}
+\begin{columns}[T,onlytextwidth]
+\column{0.46\textwidth}
+\textbf{Study design}\par\vspace{3mm}
+\begin{enumerate}\setlength{\itemsep}{4mm}
+\item Define a baseline and revised workflow.
+\item Use the same task and outcome measures.
+\item Compare time, errors and uncertainty.
+\end{enumerate}
+\column{0.46\textwidth}
+\begin{block}{What to report}
+Sample and selection criteria\par\medskip
+Procedure and controls\par\medskip
+Analysis and limitations
+\end{block}
+\end{columns}
+\end{frame}
+
+\section{Evidence}
+\begin{frame}{Show the result, then explain it}
+\begin{columns}[c,onlytextwidth]
+\column{0.54\textwidth}
+\centering
+\begin{tabular}{@{}lrr@{}}
+\toprule
+& Baseline & Revised\\
+\midrule
+Time (min) & 24 & 18\\
+Error rate (\%) & 8 & 5\\
+Tasks & 40 & 40\\
+\bottomrule
+\end{tabular}
+\par\vspace{3mm}{\scriptsize\color{muted}Illustrative values; replace with your own data.}
+\column{0.38\textwidth}
+{\Huge\bfseries\color{accent}25\%}\par\vspace{2mm}
+less completion time in this example.\par\vspace{4mm}
+Explain whether the difference is meaningful and how certain the estimate is.
+\end{columns}
+\end{frame}
+
+\begin{frame}{Separate the finding from its limits}
+\begin{columns}[T,onlytextwidth]
+\column{0.46\textwidth}
+\begin{block}{What the evidence supports}
+State your strongest finding in one sentence. Connect it directly to the
+research question and the evidence on the previous slide.
+\end{block}
+\column{0.46\textwidth}
+\textbf{What remains uncertain}\par\vspace{3mm}
+\begin{itemize}\setlength{\itemsep}{3mm}
+\item Scope and sample size.
+\item Measurement assumptions.
+\item Generalization to other settings.
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\section{Takeaways}
+\begin{frame}{Leave three things to remember}
+\begin{enumerate}\setlength{\itemsep}{6mm}
+\item \textbf{The answer.} Respond directly to the research question.
+\item \textbf{The contribution.} Say what your work makes possible.
+\item \textbf{The next step.} Propose a concrete action or follow-up study.
+\end{enumerate}
+\end{frame}
+
+\begin{frame}[plain]
+\vfill
+{\Huge\bfseries Questions?}\par\vspace{5mm}
+{\large\color{accent}Thank you for your attention.}\par
+\vspace{8mm}{\color{accent}\hrule height 1.5pt}\vspace{5mm}
+\insertauthor\quad /\quad\href{mailto:you@example.com}{you@example.com}\par
+{\small\color{muted}Add a link to your paper, code or supporting material.}
+\vfill
+\end{frame}
+\end{document}

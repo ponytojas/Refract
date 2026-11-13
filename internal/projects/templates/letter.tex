@@ -1,0 +1,72 @@
+% EDIT HERE: sender, recipient, subject and date. No logo or external files needed.
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{tgpagella}
+\usepackage[margin=26mm,top=23mm,bottom=25mm]{geometry}
+\usepackage{xcolor,fancyhdr}
+\definecolor{accent}{HTML}{245C61}
+\definecolor{muted}{HTML}{59676B}
+\usepackage[colorlinks=true,allcolors=accent]{hyperref}
+\newcommand{\sendername}{Your name}
+\newcommand{\senderrole}{Your role / Organization}
+\newcommand{\senderemail}{you@example.com}
+\newcommand{\lettersubject}{Subject of your letter}
+\hypersetup{pdftitle={\lettersubject},pdfauthor={\sendername}}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{10pt}
+\linespread{1.08}
+\pagestyle{fancy}\fancyhf{}
+\fancyfoot[L]{\small\color{muted}\sendername\quad /\quad\href{mailto:\senderemail}{\senderemail}}
+\fancyfoot[R]{\small\color{muted}\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\begin{document}
+{\LARGE\bfseries\sendername}\par
+\vspace{-3pt}{\small\sffamily\color{accent}\senderrole}\par
+\vspace{2pt}
+{\small\color{muted}Street address, City, Postal code\\
+\href{mailto:\senderemail}{\senderemail}\quad /\quad +00 123 456 789}
+\vspace{8pt}{\color{accent}\hrule height 1.3pt}
+\vspace{18pt}
+\begin{minipage}[t]{0.62\linewidth}
+\textbf{Recipient name}\\
+Role / Department\\
+Organization\\
+Street address\\
+City, Postal code
+\end{minipage}\hfill
+\begin{minipage}[t]{0.32\linewidth}\raggedleft
+{\small\color{muted}\today}
+\end{minipage}
+\vspace{22pt}
+
+{\large\bfseries\color{accent}\lettersubject}
+
+Dear Recipient,
+
+Open with the purpose of your letter in a clear sentence. If you are responding
+to a vacancy, proposal or earlier conversation, identify it here and explain
+why you are writing to this recipient.
+
+Develop the main point with a specific example. For an application, connect
+your relevant experience to the organization's needs. For a formal request,
+provide the context, the supporting information and the outcome you seek.
+Keep the focus on what the recipient needs to make a decision.
+
+Add a second supporting paragraph if needed. Use concrete evidence rather than
+general claims, and keep each paragraph focused on one idea. Mention any
+enclosed documents and explain how they support your request.
+
+Close with a practical next step: suggest a meeting, ask for a response by an
+appropriate date or explain how the recipient can contact you. Thank them for
+their time and consideration.
+
+\vspace{5pt}
+Sincerely,
+
+\vspace{18pt}
+\textbf{\sendername}\\
+{\small\color{muted}\senderrole}
+
+\vfill
+{\small\color{muted}\textbf{Enclosures:} CV / Supporting document (remove if not applicable).}
+\end{document}

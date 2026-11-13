@@ -5,5 +5,6 @@ import completion from './completion'
 import assistant from './assistant'
 import ui from './ui'
 import workspace from './workspace'
+import templates from './templates'
 
-export default { ...ui, ...app, ...workspace, ...assistant, ...wordcounter, ...pdf, ...completion }
+export default { ...ui, ...app, ...workspace, ...assistant, ...wordcounter, ...pdf, ...completion, ...templates }
