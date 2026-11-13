@@ -28,7 +28,8 @@ func branch(turn string) string { return "ai/" + turn }
 // sees), then creates the turn's worktree. It returns the base commit and the
 // worktree directory.
 func (s *Service) StartTurn(ctx context.Context, id, turn string) (base, dir string, err error) {
-	if _, err := s.Checkpoint(ctx, id, "checkpoint: before AI"); err != nil {
+	defer lockRepo(id)()
+	if _, err := s.checkpoint(ctx, id, "checkpoint: before AI", true); err != nil {
 		return "", "", err
 	}
 	root := s.Path(id)
@@ -47,6 +48,7 @@ func (s *Service) StartTurn(ctx context.Context, id, turn string) (base, dir str
 // FinishTurn commits the worktree's changes on the turn's branch and lists
 // what changed relative to base.
 func (s *Service) FinishTurn(ctx context.Context, id, turn, base, message string) ([]Change, error) {
+	defer lockRepo(id)()
 	dir := s.worktreeDir(id, turn)
 	if _, err := git(ctx, dir, "add", "-A"); err != nil {
 		return nil, err
@@ -87,9 +89,10 @@ func (s *Service) AcceptTurn(ctx context.Context, id, turn, base string, files [
 			return "", nil, err
 		}
 	}
+	defer lockRepo(id)()
 	root := s.Path(id)
 	// Edits made during the turn become part of HEAD, so the merge sees them.
-	if _, err := s.Checkpoint(ctx, id, "checkpoint: before accepting AI changes"); err != nil {
+	if _, err := s.checkpoint(ctx, id, "checkpoint: before accepting AI changes", true); err != nil {
 		return "", nil, err
 	}
 	patch, err := git(ctx, root, append([]string{"diff", "--binary", "--no-renames", base, branch(turn), "--"}, files...)...)
@@ -148,6 +151,7 @@ func (s *Service) AcceptTurn(ctx context.Context, id, turn, base string, files [
 
 // EndTurn removes the turn's worktree and branch (after reject, or once everything was accepted).
 func (s *Service) EndTurn(ctx context.Context, id, turn string) error {
+	defer lockRepo(id)()
 	root := s.Path(id)
 	git(ctx, root, "worktree", "remove", "--force", s.worktreeDir(id, turn))
 	os.RemoveAll(s.worktreeDir(id, turn))

@@ -232,7 +232,10 @@ func (s *Service) Push(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.checkpoint(ctx, id, "Checkpoint before push", false); err != nil {
+	unlock := lockRepo(id) // only while committing: never across the network
+	_, err = s.checkpoint(ctx, id, "Checkpoint before push", false)
+	unlock()
+	if err != nil {
 		return err
 	}
 	_, err = s.gitRemote(ctx, s.Path(id), r, "push", "--porcelain", r.URL, "HEAD:refs/heads/"+r.Branch)
@@ -258,7 +261,10 @@ func (s *Service) Pull(ctx context.Context, id string) (*PullResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.checkpoint(ctx, id, "Checkpoint before pull", false); err != nil {
+	unlock := lockRepo(id) // released during the fetch, taken again for the merge
+	_, err = s.checkpoint(ctx, id, "Checkpoint before pull", false)
+	unlock()
+	if err != nil {
 		return nil, err
 	}
 	dir := s.Path(id)
@@ -268,13 +274,25 @@ func (s *Service) Pull(ctx context.Context, id string) (*PullResult, error) {
 		}
 		return nil, err
 	}
+	defer lockRepo(id)()
+	return s.mergeFetched(ctx, id, r.Branch)
+}
+
+// mergeFetched merges FETCH_HEAD into the project, under lockRepo. Edits saved
+// while the fetch ran are committed first: git refuses to merge over them, and
+// committed they merge, or show up as conflicts, like any other.
+func (s *Service) mergeFetched(ctx context.Context, id, branch string) (*PullResult, error) {
+	if _, err := s.checkpoint(ctx, id, "Checkpoint before pull", false); err != nil {
+		return nil, err
+	}
+	dir := s.Path(id)
 	before, err := git(ctx, dir, "rev-parse", "HEAD")
 	if err != nil {
 		return nil, err
 	}
 	before = strings.TrimSpace(before)
 	res := &PullResult{Changed: []string{}, Conflicts: []string{}}
-	if _, err := git(ctx, dir, "merge", "-q", "--no-edit", "--allow-unrelated-histories", "-m", "Merge "+r.Branch+" from the remote", "FETCH_HEAD"); err != nil {
+	if _, err := git(ctx, dir, "merge", "-q", "--no-edit", "--allow-unrelated-histories", "-m", "Merge "+branch+" from the remote", "FETCH_HEAD"); err != nil {
 		out, _ := git(ctx, dir, "diff", "--name-only", "--diff-filter=U")
 		git(ctx, dir, "merge", "--abort")
 		if conflicts := strings.Fields(out); len(conflicts) > 0 {
