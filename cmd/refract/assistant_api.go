@@ -86,7 +86,7 @@ func (a *assistantAPI) ask(w http.ResponseWriter, r *http.Request) {
 		if !errors.As(err, &ae) {
 			ae = &ai.Error{Kind: ai.ErrOther, Message: err.Error()}
 		}
-		if !errors.Is(err, assistant.ErrBusy) {
+		if !errors.Is(err, assistant.ErrBusy) && !errors.Is(err, assistant.ErrTooManyTurns) && !errors.Is(err, assistant.ErrReviewPending) && !errors.Is(err, projects.ErrOverLimit) {
 			slog.Error("assistant turn", "err", err)
 		}
 		send(map[string]any{"type": "error", "error": ae})

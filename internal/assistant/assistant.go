@@ -29,7 +29,16 @@ var (
 	ErrBusy      = errors.New("the assistant is already working on this project")
 	ErrState     = errors.New("this turn is not waiting for review")
 	ErrReviewing = errors.New("this turn is already being accepted or rejected")
+
+	ErrTooManyTurns  = errors.New("the assistant is already working on other projects of yours; wait for one to finish")
+	ErrReviewPending = errors.New("review or reject the changes waiting in this project before asking for more")
 )
+
+// TurnLimits caps one account's use of the assistant. A zero field means no limit.
+type TurnLimits struct {
+	Running       int // turns running at once, across the account's projects
+	PendingReview int // turns waiting for review, per project
+}
 
 // Chat is a conversation within a project.
 type Chat struct {
@@ -81,7 +90,11 @@ type Service struct {
 	Provider func(context.Context) ai.Provider             // the request user's provider; nil keeps Agent.Provider
 	Access   *access.Checker                               // rechecks the user after a long turn, before writing
 
+	// LimitsFor returns the caps of one account (by user id); nil: no caps.
+	LimitsFor func(ctx context.Context, userID string) (TurnLimits, error)
+
 	mu        sync.Mutex
+	turnsBy   map[string]int  // user id → running turns
 	running   map[string]bool // project id → a turn is running, or the project is held
 	reviewing map[string]bool // turn id → an accept or reject is in progress
 }
@@ -299,6 +312,27 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 	if err != nil {
 		return nil, err
 	}
+	var lim TurnLimits
+	var uid string
+	if s.LimitsFor != nil {
+		u, err := access.UserFrom(ctx)
+		if err != nil {
+			return nil, err
+		}
+		uid = u.ID
+		if lim, err = s.LimitsFor(ctx, uid); err != nil {
+			return nil, err
+		}
+	}
+	if lim.PendingReview > 0 {
+		var n int
+		if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM turns t JOIN chats c ON c.id = t.chat_id WHERE c.project_id = ? AND t.status = 'review'`, c.ProjectID).Scan(&n); err != nil {
+			return nil, err
+		}
+		if n >= lim.PendingReview {
+			return nil, ErrReviewPending
+		}
+	}
 	// Reserve the project before reading it: a trash holds the reservation
 	// while it changes the project, so a turn either starts first (and the
 	// trash is refused) or reads the project after it and finds nothing.
@@ -306,6 +340,25 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 		return nil, ErrBusy
 	}
 	defer s.free(c.ProjectID)
+	if lim.Running > 0 {
+		s.mu.Lock()
+		if s.turnsBy[uid] >= lim.Running {
+			s.mu.Unlock()
+			return nil, ErrTooManyTurns
+		}
+		if s.turnsBy == nil {
+			s.turnsBy = map[string]int{}
+		}
+		s.turnsBy[uid]++
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			if s.turnsBy[uid]--; s.turnsBy[uid] <= 0 {
+				delete(s.turnsBy, uid)
+			}
+			s.mu.Unlock()
+		}()
+	}
 	p, err := s.Projects.Get(ctx, c.ProjectID)
 	if err != nil {
 		if errors.Is(err, projects.ErrNotFound) {

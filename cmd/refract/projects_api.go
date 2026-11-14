@@ -354,7 +354,7 @@ func projectError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, projects.ErrNotFound), errors.Is(err, fs.ErrNotExist), errors.Is(err, access.ErrNotFound):
 		httpError(w, err, http.StatusNotFound)
-	case errors.Is(err, access.ErrForbidden), errors.Is(err, access.ErrNoUser):
+	case errors.Is(err, access.ErrForbidden), errors.Is(err, access.ErrNoUser), errors.Is(err, projects.ErrOverLimit):
 		httpError(w, err, http.StatusForbidden)
 	case errors.Is(err, projects.ErrNoRemote):
 		httpError(w, err, http.StatusNotFound)

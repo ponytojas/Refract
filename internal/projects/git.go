@@ -140,6 +140,7 @@ func (s *Service) checkpoint(ctx context.Context, id, message string, notify boo
 	if _, err := git(ctx, dir, "commit", "-q", "-m", message); err != nil {
 		return false, err
 	}
+	s.measure(ctx, id)
 	if notify {
 		s.committed(ctx, id)
 	}

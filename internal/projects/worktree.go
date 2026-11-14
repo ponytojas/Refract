@@ -29,6 +29,9 @@ func branch(turn string) string { return "ai/" + turn }
 // worktree directory.
 func (s *Service) StartTurn(ctx context.Context, id, turn string) (base, dir string, err error) {
 	defer lockRepo(id)()
+	if err := s.checkQuotaFor(ctx, id); err != nil {
+		return "", "", err
+	}
 	if _, err := s.checkpoint(ctx, id, "checkpoint: before AI", true); err != nil {
 		return "", "", err
 	}
@@ -42,6 +45,7 @@ func (s *Service) StartTurn(ctx context.Context, id, turn string) (base, dir str
 	if _, err := git(ctx, root, "worktree", "add", "-q", "-b", branch(turn), dir, base); err != nil {
 		return "", "", err
 	}
+	s.measure(ctx, id)
 	return base, dir, nil
 }
 
@@ -152,6 +156,7 @@ func (s *Service) AcceptTurn(ctx context.Context, id, turn, base string, files [
 // EndTurn removes the turn's worktree and branch (after reject, or once everything was accepted).
 func (s *Service) EndTurn(ctx context.Context, id, turn string) error {
 	defer lockRepo(id)()
+	defer s.measure(ctx, id)
 	root := s.Path(id)
 	git(ctx, root, "worktree", "remove", "--force", s.worktreeDir(id, turn))
 	os.RemoveAll(s.worktreeDir(id, turn))

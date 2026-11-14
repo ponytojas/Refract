@@ -128,6 +128,9 @@ func (s *Service) WriteFile(ctx context.Context, id, p string, r io.Reader) erro
 		return err
 	}
 	defer root.Close()
+	if err := s.checkQuotaFor(ctx, id); err != nil {
+		return err
+	}
 	if d := path.Dir(p); d != "." {
 		if err := root.MkdirAll(d, 0o755); err != nil {
 			return err
@@ -157,6 +160,7 @@ func (s *Service) WriteFile(ctx context.Context, id, p string, r io.Reader) erro
 	if err := root.Rename(tmp, p); err != nil {
 		return err
 	}
+	s.grew(ctx, id, n)
 	return s.touch(ctx, id)
 }
 

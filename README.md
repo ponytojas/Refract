@@ -361,7 +361,7 @@ All settings are environment variables.
 | `REFRACT_AUTH` | `cloudflare` (default), `builtin` (Refract's own sign-in; `password` still works) or `none`. See [Choose how people sign in](#choose-how-people-sign-in). |
 | `REFRACT_DATA_DIR` | Where projects, the database and caches live. Default `/data`. |
 | `REFRACT_ADDR` | Listen address. Default `:8080`. |
-| `REFRACT_MODE` | `selfhost` (default) or `saas`, for the hosted service. With `saas`, the ChatGPT plan is off (OpenAI's plan usage covers self-hosted apps): people use the assistant with API providers only. Refract refuses to start with `REFRACT_AUTH=none` or without an https `REFRACT_PUBLIC_URL`. AI providers and git remotes must be public https addresses (no loopback, private or metadata addresses, no local models), and proxy settings are ignored for them. Needs git 2.37 or later. |
+| `REFRACT_MODE` | `selfhost` (default) or `saas`, for the hosted service. With `saas`, the ChatGPT plan is off (OpenAI's plan usage covers self-hosted apps): people use the assistant with API providers only. Refract refuses to start with `REFRACT_AUTH=none` or without an https `REFRACT_PUBLIC_URL`. AI providers and git remotes must be public https addresses (no loopback, private or metadata addresses, no local models), and proxy settings are ignored for them. Needs git 2.37 or later. With `saas`, each account has a plan (`free` by default) that limits its projects, storage and assistant turns; self-hosted installs have no limits. |
 | `REFRACT_CF_TEAM_DOMAIN`, `REFRACT_CF_AUD` | Cloudflare Access team domain and application AUD tag. |
 | `REFRACT_PUBLIC_URL` | The address users open Refract at, e.g. `https://refract.example.com`. Needed for OpenID Connect and for the links in emails, and required with `REFRACT_MODE=saas`. |
 | `REFRACT_SIGNUP` | `open` or `closed` (default): whether people can create their own account. Only with `REFRACT_AUTH=builtin`; needs the three mail settings. See [Let people sign up](#let-people-sign-up). |
@@ -398,6 +398,7 @@ refract users rename <a> <b>    change an account's email, keeping its data
 refract users signout <email>   end all of an account's sessions
 refract users unlock <email>    clear an account's failed sign-ins and email limit (--all: every account and address)
 refract users remove <email>    delete an account and everything it owns, trash included (asks for --yes)
+refract users plan <email> <plan>  set an account's plan: free, plus or ai (REFRACT_MODE=saas)
 refract users list              list accounts
 refract version                 print the version
 ```

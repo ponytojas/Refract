@@ -61,6 +61,8 @@ Usage:
                      let an account (or everyone) sign in again after too many failed attempts
   refract users remove <email> [--yes]
                      delete an account with its projects, chats and connections
+  refract users plan <email> <plan>
+                     set an account's plan (free, plus or ai)
   refract users list list accounts
   refract version    print the version
 `
@@ -216,6 +218,23 @@ func run() error {
 	}}
 	if err := asa.svc.Recover(ctx); err != nil {
 		return err
+	}
+	if deployment == mode.SaaS { // self-hosted installs have no limits
+		pa.svc.QuotaFor = func(ctx context.Context, owner string) (projects.Quota, error) {
+			plan, err := planOf(ctx, db, owner)
+			l := limitsOf(plan)
+			return projects.Quota{MaxProjects: l.Projects, MaxBytes: int64(l.StorageMB) << 20}, err
+		}
+		asa.svc.LimitsFor = func(ctx context.Context, userID string) (assistant.TurnLimits, error) {
+			plan, err := planOf(ctx, db, userID)
+			l := limitsOf(plan)
+			return assistant.TurnLimits{Running: l.Turns, PendingReview: l.PendingReview}, err
+		}
+		go func() { // sizes for projects from before limits existed; saves aren't blocked meanwhile
+			if err := pa.svc.MeasureAll(context.WithoutCancel(ctx)); err != nil {
+				slog.Error("measuring projects", "err", err)
+			}
+		}()
 	}
 
 	acc := &access.Checker{DB: db, SkipVerified: authKind != "builtin"}

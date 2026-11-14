@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/store"
@@ -23,12 +24,13 @@ const usersUsage = `usage:
   refract users signout <email>           end all of an account's sessions
   refract users unlock <email> | --all    let an account (or everyone) sign in again after too many failed attempts
   refract users remove <email> [--yes]    delete an account and everything it owns
+  refract users plan <email> <plan>       set an account's plan (free, plus or ai)
   refract users list                      list accounts`
 
 // runUsers manages accounts on the server's own database (same
 // REFRACT_DATA_DIR and REFRACT_SECRET_KEY as the server).
 func runUsers(args []string, out io.Writer) error {
-	arity := map[string][]int{"list": {1}, "add": {2}, "rename": {3}, "signout": {2}, "unlock": {2}, "remove": {2, 3}}
+	arity := map[string][]int{"list": {1}, "add": {2}, "rename": {3}, "signout": {2}, "unlock": {2}, "remove": {2, 3}, "plan": {3}}
 	if len(args) == 0 || !slices.Contains(arity[args[0]], len(args)) || args[0] == "remove" && len(args) == 3 && args[2] != "--yes" {
 		return errors.New(usersUsage)
 	}
@@ -61,6 +63,14 @@ func runUsers(args []string, out io.Writer) error {
 			}
 			fmt.Fprintf(out, "%s\t%s\n", email, state)
 		}
+	case "plan":
+		if _, ok := plans[args[2]]; !ok {
+			return fmt.Errorf("unknown plan %q: want one of %s", args[2], strings.Join(slices.Sorted(maps.Keys(plans)), ", "))
+		}
+		if err := svc.SetPlan(ctx, args[1], args[2]); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s is now on the %s plan\n", args[1], args[2])
 	case "rename":
 		if err := svc.Rename(ctx, args[1], args[2]); err != nil {
 			return err

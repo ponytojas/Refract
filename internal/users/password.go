@@ -295,6 +295,18 @@ func (s *Service) SignOut(ctx context.Context, email string) (int64, error) {
 // ErrOwnsProjects is returned when an account can't be removed because it still has projects.
 var ErrOwnsProjects = errors.New("the account still owns projects")
 
+// SetPlan changes an account's plan. Which plans exist is the caller's business.
+func (s *Service) SetPlan(ctx context.Context, email, plan string) error {
+	res, err := s.DB.ExecContext(ctx, `UPDATE users SET plan = ? WHERE email = ?`, plan, normEmail(email))
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("there is no account %q", email)
+	}
+	return nil
+}
+
 // Delete removes an account: its sessions, its settings (AI connections,
 // GitHub), its links and the user. Projects must be deleted first (see Remove,
 // and refract users remove).

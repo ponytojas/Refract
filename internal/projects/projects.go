@@ -56,6 +56,9 @@ type Service struct {
 	// addresses only, and git connects to the address that was checked.
 	PublicRemotes bool
 
+	// QuotaFor returns the caps of one account (by user id); nil: no caps.
+	QuotaFor func(ctx context.Context, owner string) (Quota, error)
+
 	// Now is the clock for the trash (tests set it); nil means time.Now.
 	Now func() time.Time
 	// HoldTurns keeps new assistant turns off a project until release is called
@@ -142,6 +145,9 @@ func (s *Service) create(ctx context.Context, name string, fill func(dir string)
 	if err != nil {
 		return nil, err
 	}
+	if err := s.checkQuota(ctx, u.ID, true); err != nil {
+		return nil, err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "Untitled"
@@ -182,6 +188,7 @@ func (s *Service) create(ctx context.Context, name string, fill func(dir string)
 		os.RemoveAll(s.Path(id))
 		return nil, err
 	}
+	s.measure(ctx, id)
 	res := &ImportResult{Project: p, Warnings: warnings, Skipped: skipped}
 	if main == "" {
 		res.Candidates = candidates
