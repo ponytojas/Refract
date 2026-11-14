@@ -88,6 +88,7 @@ Select text and a toolbar offers **Improve**, **Shorten**, **Fix grammar**, **Ta
 - Every project is a git repository. Compiling, accepting AI changes and restoring old versions all create commits. The history view shows each version's diff and restores a file or the whole project, as a new commit.
 - Push and pull to any https git remote with a token, or connect a GitHub account and pick or create repositories from Refract. Optional auto-push after each commit. On the hosted service (`REFRACT_MODE=saas`), remotes must be public addresses and redirects aren't followed: a renamed repository needs its new URL.
 - Export any project as a .zip at any time.
+- Deleting a project moves it to the trash. Restore it within 30 days, or delete it forever from there; after 30 days it is deleted for good.
 
 ### Accounts
 
@@ -187,7 +188,7 @@ docker exec refract refract users add ana@example.com
 docker exec refract refract users list
 ```
 
-To end all of someone's sessions (a lost laptop, say), run `refract users signout <email>`. After too many failed sign-ins an account waits 15 minutes; `refract users unlock <email>` lets it in at once. To delete an account with its projects, chats and connections, run `refract users remove <email>`: it lists what would go, and deletes only when run again with `--yes`. With Cloudflare Access, also remove the person from your Access policy, or they get a new, empty account on their next visit.
+To end all of someone's sessions (a lost laptop, say), run `refract users signout <email>`. After too many failed sign-ins an account waits 15 minutes; `refract users unlock <email>` lets it in at once. To delete an account with its projects (those in the trash too), chats and connections, run `refract users remove <email>`: it lists what would go, and deletes only when run again with `--yes`. With Cloudflare Access, also remove the person from your Access policy, or they get a new, empty account on their next visit.
 
 ### Sign in with OpenID Connect
 
@@ -236,7 +237,7 @@ Everything lives in the `/data` volume:
 |---|---|
 | `refract.db` | Users, sessions, projects, chats and settings (SQLite). Credentials and keys in it are encrypted with `REFRACT_SECRET_KEY`. |
 | `refract.db.pre-upgrade` | A copy of the database exactly as it was when the last upgrade started. Safe to delete once the new version works. |
-| `projects/` | One git repository per project. |
+| `projects/` | One git repository per project, including those in the trash. |
 | `tectonic-cache/` | LaTeX packages Tectonic has downloaded. Safe to delete: they come back on the next compile. |
 | `tmp/` | Uploads in progress. |
 
@@ -372,7 +373,7 @@ refract users add <email>       create an account or reset its password (REFRACT
 refract users rename <a> <b>    change an account's email, keeping its data
 refract users signout <email>   end all of an account's sessions
 refract users unlock <email>    clear an account's failed sign-ins (--all: every account and address)
-refract users remove <email>    delete an account and everything it owns (asks for --yes)
+refract users remove <email>    delete an account and everything it owns, trash included (asks for --yes)
 refract users list              list accounts
 refract version                 print the version
 ```
