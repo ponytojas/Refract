@@ -55,6 +55,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import AccountMenu from '@/components/AccountMenu'
+import VerifyEmailNotice from '@/components/VerifyEmailNotice'
 import PaperIcon from '@/components/PaperIcon'
 import { ago } from '@/lib/time'
 import { daysLeft } from '@/lib/trash'
@@ -361,6 +362,7 @@ function ProjectList({ status }: { status: ChatGPTStatus | null }) {
             onChange={(e) => importFolder([...(e.target.files ?? [])])}
           />
         </header>
+        <VerifyEmailNotice />
 
         <div className="flex items-center border-y px-5 py-2 text-xs text-muted-foreground">
           <button

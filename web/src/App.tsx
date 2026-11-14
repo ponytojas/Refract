@@ -31,11 +31,13 @@ export default function App() {
     const timer = setTimeout(loadWorkspace, 1500)
     return () => clearTimeout(timer)
   }, [])
-  // Old /settings links open the dialog over the project list.
+  // Old /settings links open the dialog over the project list; /settings/account is where
+  // signing in again returns to, to finish deleting the account.
   useEffect(() => {
-    if (window.location.pathname === '/settings') {
+    const p = window.location.pathname
+    if (p === '/settings' || p === '/settings/account') {
       navigate('/', { replace: true })
-      openSettings('assistant')
+      openSettings(p === '/settings' ? 'assistant' : 'account')
     }
   }, [])
 

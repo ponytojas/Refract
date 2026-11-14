@@ -1,7 +1,7 @@
 // Package users maps the identity the auth layer established (an email) to a
 // Refract user, creating it on first sight: who may sign in at all is decided
 // by the auth layer (Cloudflare Access policy, a single local user, or the
-// accounts and sessions kept here for REFRACT_AUTH=password).
+// accounts and sessions kept here for REFRACT_AUTH=builtin).
 package users
 
 import (

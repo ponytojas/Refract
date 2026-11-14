@@ -50,7 +50,7 @@ Usage:
   refract login      sign in with ChatGPT on this computer and write a credential file
                      to upload in Settings → Assistant (run "refract login -h" for options)
   refract users add <email>
-                     create an account, or reset its password (REFRACT_AUTH=password);
+                     create an account, or reset its password (REFRACT_AUTH=builtin);
                      prints a generated password
   refract users rename <email> <new email>
                      change an account's email, keeping its data ("local" is the

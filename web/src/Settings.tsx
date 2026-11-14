@@ -14,6 +14,7 @@ import {
   Sun,
   SunMoon,
   Upload,
+  UserRound,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, describe, errorText, modelsChanged, RequestError, type ChatGPTStatus } from './api'
@@ -21,6 +22,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   SettingsGroup,
   SettingsNav,
@@ -39,6 +49,7 @@ import { shortcutGroups } from '@/lib/shortcuts'
 import { setTheme, useTheme, type Theme } from '@/lib/theme'
 import PlanBadge from './PlanBadge'
 import { useMe } from '@/components/AccountMenu'
+import { useAccount } from '@/components/useAccount'
 import { chatgptOffered } from '@/lib/mode'
 
 type Props = { status: ChatGPTStatus | null; onChange: (s: ChatGPTStatus) => void }
@@ -46,6 +57,7 @@ type Props = { status: ChatGPTStatus | null; onChange: (s: ChatGPTStatus) => voi
 // Settings as a modal over whatever page is open (Prism-style): sections on the left, rows on the right.
 export default function SettingsDialog({ status, onChange }: Props) {
   const section = useSettingsSection()
+  const me = useMe()
   return (
     <Dialog open={section !== null} onOpenChange={(o) => !o && openSettings(null)}>
       <DialogContent className="h-[min(640px,calc(100dvh-2rem))] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-[860px]">
@@ -60,6 +72,11 @@ export default function SettingsDialog({ status, onChange }: Props) {
             <SettingsNavItem value="general" icon={<SunMoon />}>
               {t('General')}
             </SettingsNavItem>
+            {me?.can_sign_out && (
+              <SettingsNavItem value="account" icon={<UserRound />}>
+                {t('Account')}
+              </SettingsNavItem>
+            )}
             <SettingsNavItem value="editor" icon={<Code2 />}>
               {t('Editor')}
             </SettingsNavItem>
@@ -74,6 +91,7 @@ export default function SettingsDialog({ status, onChange }: Props) {
             </SettingsNavItem>
           </SettingsNav>
           <General />
+          {me?.can_sign_out && <AccountPane />}
           <EditorPane />
           <AssistantPane status={status} onChange={onChange} />
           <Integrations />
@@ -134,7 +152,6 @@ function General() {
           />
         </SettingsRow>
       </SettingsGroup>
-      <Account />
     </SettingsPane>
   )
 }
@@ -307,21 +324,80 @@ function AssistantPane({ status, onChange }: Props) {
   )
 }
 
-// Password change, for accounts Refract signs in itself (REFRACT_AUTH=password).
-function Account() {
+// The account Refract signs in itself (REFRACT_AUTH=builtin): email, password and deleting it.
+function AccountPane() {
   const me = useMe()
-  const [has, setHas] = useState(false)
+  const { account, reload } = useAccount()
+  const [sending, setSending] = useState(false)
+
+  async function resend() {
+    setSending(true)
+    try {
+      await api('/api/account/verify-email', { method: 'POST' })
+      toast.success(t('Sent. The link works for 24 hours.'))
+    } catch (err) {
+      toast.error(errorText(err))
+    } finally {
+      setSending(false)
+    }
+  }
+  async function setEmailLang(v: string) {
+    try {
+      await api('/api/account/lang', { method: 'PUT', body: { lang: v } })
+      reload()
+    } catch (err) {
+      toast.error(errorText(err))
+    }
+  }
+
+  return (
+    <SettingsPane value="account" title={t('Account')}>
+      <SettingsGroup>
+        <SettingsRow
+          label={t('Email')}
+          description={account?.email_verified === false ? t('Not confirmed') : t('Confirmed')}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">{me?.email}</span>
+            {account && !account.email_verified && account.mail && (
+              <Button type="button" size="sm" variant="outline" disabled={sending} onClick={resend}>
+                {sending && <Loader2 className="animate-spin" />} {t('Send the link again')}
+              </Button>
+            )}
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          label={t('Language for emails')}
+          description={t('The language of the messages Refract sends you.')}
+        >
+          <SettingsSegmented
+            value={account?.lang || lang}
+            onValueChange={setEmailLang}
+            options={[
+              { value: 'en', label: 'English' }, // language names stay in their own language
+              { value: 'es', label: 'Español' },
+            ]}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+      <PasswordGroup account={account} />
+      <DeleteGroup account={account} reload={reload} />
+    </SettingsPane>
+  )
+}
+
+function PasswordGroup({ account }: { account: ReturnType<typeof useAccount>['account'] }) {
+  const me = useMe()
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [busy, setBusy] = useState(false)
-  useEffect(() => {
-    if (me?.can_sign_out)
-      api<{ has_password: boolean }>('/api/account').then(
-        (a) => setHas(a.has_password),
-        () => {},
-      )
-  }, [me?.can_sign_out])
-  if (!me?.can_sign_out || !has) return null
+  if (!account) return null
+  if (!account.has_password)
+    return account.oidc ? (
+      <SettingsGroup title={t('Password')}>
+        <SettingsRow label={t('Password')} description={t('You sign in with {oidc}.', { oidc: account.oidc })} />
+      </SettingsGroup>
+    ) : null
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -338,8 +414,8 @@ function Account() {
     }
   }
   return (
-    <SettingsGroup title={t('Account')}>
-      <SettingsRow stacked label={t('Password')} description={t('Signed in as {email}.', { email: me.email })}>
+    <SettingsGroup title={t('Password')}>
+      <SettingsRow stacked label={t('Password')} description={t('Signed in as {email}.', { email: me?.email ?? '' })}>
         <form onSubmit={save} className="grid w-full gap-2 sm:grid-cols-[1fr_1fr_auto]">
           <Input
             type="password"
@@ -365,6 +441,97 @@ function Account() {
           </Button>
         </form>
       </SettingsRow>
+    </SettingsGroup>
+  )
+}
+
+function DeleteGroup({ account, reload }: { account: ReturnType<typeof useAccount>['account']; reload: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!account) return null
+  // Without a password, a recent sign-in with the provider stands in for it.
+  const canProceed = account.has_password ? password !== '' : account.recent_sign_in
+
+  async function remove(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      await api('/api/account/delete', { method: 'POST', body: { password } })
+      location.assign('/?account_deleted=1')
+    } catch (err) {
+      toast.error(errorText(err))
+      if (err instanceof RequestError && err.error.kind === 'reauth_required') reload()
+      setBusy(false)
+    }
+  }
+  return (
+    <SettingsGroup title={t('Delete account')}>
+      <SettingsRow
+        label={t('Delete account')}
+        description={t(
+          'Deletes your account and everything in it: projects (including those in the trash), their history and chats, and your AI and GitHub connections. Export the projects you want to keep first.',
+        )}
+      >
+        <Button type="button" size="sm" variant="destructive" onClick={() => setOpen(true)}>
+          {t('Delete account')}
+        </Button>
+      </SettingsRow>
+      <AlertDialog
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o)
+          if (!o) setPassword('')
+        }}
+      >
+        <AlertDialogContent>
+          <form onSubmit={remove} className="grid gap-4">
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('Delete your account?')}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {tn(
+                  account.projects,
+                  "This deletes {email} and its {n} project for good. It can't be undone.",
+                  "This deletes {email} and its {n} projects for good. It can't be undone.",
+                  { email: account.email },
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {account.has_password ? (
+              <Input
+                type="password"
+                autoComplete="current-password"
+                required
+                autoFocus
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={t('Password')}
+                aria-label={t('Password')}
+              />
+            ) : (
+              !account.recent_sign_in && (
+                <div className="grid gap-2 text-sm">
+                  <p>{t("To confirm, sign in again with {oidc}. You'll come back here.", { oidc: account.oidc })}</p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    nativeButton={false}
+                    render={<a href="/api/auth/oidc/start?then=account" />}
+                  >
+                    {t('Sign in again')}
+                  </Button>
+                </div>
+              )
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
+              <Button type="submit" variant="destructive" disabled={!canProceed || busy}>
+                {busy && <Loader2 className="animate-spin" />} {t('Delete account')}
+              </Button>
+            </AlertDialogFooter>
+          </form>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsGroup>
   )
 }

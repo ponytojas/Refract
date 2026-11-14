@@ -14,7 +14,7 @@ import (
 	"github.com/ponytojas/Refract/internal/users"
 )
 
-// loginAPI signs users in and out for REFRACT_AUTH=password: with a password
+// loginAPI signs users in and out for REFRACT_AUTH=builtin: with a password
 // (accounts made with "refract users add") or, when configured, with OIDC.
 type loginAPI struct {
 	users   *users.Service

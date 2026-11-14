@@ -23,7 +23,7 @@ import (
 	"github.com/ponytojas/Refract/internal/store"
 )
 
-// Passwords and sessions, for REFRACT_AUTH=password.
+// Passwords and sessions, for REFRACT_AUTH=builtin.
 
 // pbkdf2Iter is OWASP's figure for PBKDF2-HMAC-SHA256. A variable only so tests
 // can hash quickly; stored hashes carry their own count.
@@ -470,7 +470,7 @@ func (s *Service) EndSession(ctx context.Context, token string) error {
 	return err
 }
 
-// SessionGuard is the web UI guard for REFRACT_AUTH=password. Requests with a
+// SessionGuard is the web UI guard for REFRACT_AUTH=builtin. Requests with a
 // valid session go on as that user. Without one, /api gets 401 and every
 // other path is served by public: the app's files, which show the sign-in page.
 func (s *Service) SessionGuard(public http.Handler) func(http.Handler) http.Handler {

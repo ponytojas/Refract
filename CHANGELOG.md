@@ -17,6 +17,15 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - Deleting a project moves it to the trash for 30 days instead of removing it at once. Undo from the notification, or restore or delete forever from the new Trash page; projects older than 30 days in the trash are deleted for good.
 - A project open in the workspace when it goes to the trash (from another tab or device) becomes read-only with a banner and a Restore button: unsaved edits are kept and saved on restore, and if the project was deleted for good meanwhile, you can copy the unsaved text.
 
+- Accounts can be created and managed by their owners. With `REFRACT_AUTH=builtin`, a mail server (`REFRACT_SMTP_URL`, `REFRACT_MAIL_FROM`) and `REFRACT_PUBLIC_URL`, `REFRACT_SIGNUP=open` adds a sign-up page; there is a confirmation email for new addresses, a "Forgot your password?" reset by email, and **Settings → Account** to confirm the address, choose the language of the emails, change the password and delete the account with everything in it, projects in the trash included. Links in emails work once, expire after 24 hours (confirming) or 1 hour (resetting) and are plain text, in English or Spanish.
+- `REFRACT_AUTH=builtin` is the new name of `REFRACT_AUTH=password`, which keeps working.
+
+### Changed
+
+- Changing the password moved from Settings → General to the new Settings → Account.
+- Until an address is confirmed, an account that signed up can sign in but can't create or import projects. Existing accounts, and those added with `refract users add`, count as confirmed.
+- With `REFRACT_MODE=saas` and `REFRACT_AUTH=builtin`, `REFRACT_SIGNUP=open` is refused until the terms and privacy policy people accept at sign-up exist: keep the default (`closed`) and add accounts with `refract users add`.
+
 ### Fixed
 
 - Citations added from Refract go to the bibliography next to the main file when it is in a subfolder, so they reach the PDF (#13).
@@ -29,6 +38,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 
 ### Security
 
+- OpenID Connect no longer signs in to an account that has a password unless the provider reports the email as verified. A provider that vouches for an address whose account was created by a sign-up nobody confirmed takes it over: that account's password and sessions are removed, so someone who registered another person's address can't keep it.
 - Every API route that touches a project, chat, turn or file goes through one authorization check, declared with the route; without a signed-in user nothing is reachable. Auto-push and assistant turns check again, as the user who started them, before they write. Projects left without an owner after the first account was created stay unreachable.
 - A failed request to OpenAlex no longer includes the server's OpenAlex key in the error shown to the user or sent to the assistant's model.
 - Built with Go 1.27.4, which fixes a crash of the HTTP server in Go's `net/http` (GO-2026-6859).
