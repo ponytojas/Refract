@@ -73,6 +73,7 @@ type Props = {
   onOpen: (open: boolean) => void
   focus?: number // bump to focus the input
   request?: { text: string; n: number } // send this (n changes on every request)
+  readOnly?: boolean // a project in the trash: nothing can be sent; the draft is kept
 }
 
 const finished: Partial<Record<Turn['status'], { label: string; tone: string }>> = {
@@ -159,7 +160,7 @@ export default function Assistant(p: Props) {
   }, [draft, open, bubble])
 
   async function newChat() {
-    if (running) return
+    if (running || p.readOnly) return
     p.onChatId('')
     setError('')
     p.onOpen(true)
@@ -168,7 +169,7 @@ export default function Assistant(p: Props) {
 
   async function send(text = draft) {
     const message = text.trim()
-    if (!message || running) return
+    if (!message || running || p.readOnly) return
     setError('')
     setRunning(true)
     p.onOpen(true)
@@ -416,7 +417,7 @@ export default function Assistant(p: Props) {
                       variant="ghost"
                       size="icon-sm"
                       className="text-muted-foreground"
-                      disabled={running}
+                      disabled={running || p.readOnly}
                       onClick={() => {
                         setPref('chatDocked', !p.docked)
                         p.onOpen(true)
@@ -541,7 +542,14 @@ export default function Assistant(p: Props) {
               ref={input}
               rows={1}
               value={draft}
-              placeholder={open ? t('Ask for a change, or ask about the document…') : t('Ask anything')}
+              placeholder={
+                p.readOnly
+                  ? t('Restore the project to use the assistant.')
+                  : open
+                    ? t('Ask for a change, or ask about the document…')
+                    : t('Ask anything')
+              }
+              disabled={p.readOnly}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKey}
               aria-label={t('Message the assistant')}
@@ -618,7 +626,7 @@ export default function Assistant(p: Props) {
                   size="icon-sm"
                   className="rounded-full"
                   onClick={() => send()}
-                  disabled={!draft.trim()}
+                  disabled={!draft.trim() || p.readOnly}
                   aria-label={t('Send')}
                 >
                   <ArrowUp />

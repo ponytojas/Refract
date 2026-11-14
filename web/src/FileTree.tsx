@@ -63,6 +63,7 @@ type Props = {
   onSetMain: (path: string) => void
   onDownload: (path: string) => void
   mainFile?: string
+  readOnly?: boolean // a project in the trash: only opening files and copying paths
 }
 
 export default function FileTree(p: Props) {
@@ -78,16 +79,24 @@ export default function FileTree(p: Props) {
     e.preventDefault()
     e.stopPropagation()
     setDropTarget(null)
-    if (e.dataTransfer.files.length) p.onUpload(dir, [...e.dataTransfer.files])
+    if (!p.readOnly && e.dataTransfer.files.length) p.onUpload(dir, [...e.dataTransfer.files])
   }
   const over = (e: DragEvent, dir: string) => {
-    if (!e.dataTransfer.types.includes('Files')) return
+    if (p.readOnly || !e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
     e.stopPropagation()
     setDropTarget(dir)
   }
 
-  const menu = (n: Node): MenuEntry[] => [
+  const menu = (n: Node): MenuEntry[] =>
+    p.readOnly
+      ? [
+          ...(n.dir ? [] : [{ label: t('Open'), icon: FileText, onSelect: () => p.onOpen(n.path) }]),
+          { label: t('Copy path'), icon: Copy, onSelect: () => navigator.clipboard.writeText(n.path) },
+        ]
+      : editMenu(n)
+
+  const editMenu = (n: Node): MenuEntry[] => [
     ...(n.dir
       ? [
           { label: t('New file'), icon: Plus, onSelect: () => p.onNew(n.path, 'file') },
@@ -147,7 +156,7 @@ export default function FileTree(p: Props) {
                 )}
               </button>
               <span className="flex items-center opacity-0 transition-opacity duration-100 group-focus-within/row:opacity-100 group-hover/row:opacity-100 has-data-popup-open:opacity-100">
-                {n.dir && (
+                {n.dir && !p.readOnly && (
                   <Button
                     variant="ghost"
                     size="icon-xs"
@@ -188,22 +197,26 @@ export default function FileTree(p: Props) {
       onDrop={(e) => drop(e, '')}
     >
       <ul>{render(buildTree(p.files), 0)}</ul>
-      {p.files.length === 0 && (
+      {p.files.length === 0 && !p.readOnly && (
         <p className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
           <Upload className="size-3.5" /> {t('Drop files here or create one.')}
         </p>
       )}
       {/* Right click on the empty space below the tree. */}
-      <WithContextMenu
-        className="min-h-12 flex-1"
-        items={() => [
-          { label: t('New file'), icon: Plus, onSelect: () => p.onNew('', 'file') },
-          { label: t('New folder'), icon: FolderPlus, onSelect: () => p.onNew('', 'folder') },
-          { label: t('Upload files…'), icon: Upload, onSelect: p.onUploadClick },
-        ]}
-      >
-        <div />
-      </WithContextMenu>
+      {p.readOnly ? (
+        <div className="min-h-12 flex-1" />
+      ) : (
+        <WithContextMenu
+          className="min-h-12 flex-1"
+          items={() => [
+            { label: t('New file'), icon: Plus, onSelect: () => p.onNew('', 'file') },
+            { label: t('New folder'), icon: FolderPlus, onSelect: () => p.onNew('', 'folder') },
+            { label: t('Upload files…'), icon: Upload, onSelect: p.onUploadClick },
+          ]}
+        >
+          <div />
+        </WithContextMenu>
+      )}
     </div>
   )
 }

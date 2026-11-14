@@ -250,4 +250,5 @@ export default {
   // Trashed project (T3b)
   'This project is in the trash. Restore it to keep working.':
     'Este proyecto está en la papelera. Restáuralo para seguir trabajando.',
+  'Restore the project to use the assistant.': 'Restaura el proyecto para usar el asistente.',
 } as Record<string, string>
