@@ -446,3 +446,65 @@ func TestTurnEndingsAfterAccessLossKeepNothing(t *testing.T) {
 		})
 	}
 }
+
+func TestHoldKeepsTurnsOff(t *testing.T) {
+	p := &fakeProvider{script: [][]ai.Event{done("hello")}}
+	s, _, id, chat := setup(t, p)
+	release, ok := s.Hold(id)
+	if !ok {
+		t.Fatal("Hold failed on an idle project")
+	}
+	if _, ok := s.Hold(id); ok {
+		t.Error("a held project was held twice")
+	}
+	if _, err := s.Ask(ownerCtx, chat, "hi", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Ask while held: %v", err)
+	}
+	release()
+	if turn, err := s.Ask(ownerCtx, chat, "hi", Context{}, Choice{}, func(agent.Event) {}); err != nil || turn.Status == "failed" {
+		t.Fatalf("Ask after release: %+v, %v", turn, err)
+	}
+}
+
+func TestHoldFailsWhileATurnRuns(t *testing.T) {
+	p := &fakeProvider{script: [][]ai.Event{done("never")}, block: make(chan struct{}), entered: make(chan struct{})}
+	s, _, id, chat := setup(t, p)
+	ctx, cancel := context.WithCancel(ownerCtx)
+	result := make(chan *Turn)
+	go func() {
+		turn, _ := s.Ask(ctx, chat, "slow", Context{}, Choice{}, func(agent.Event) {})
+		result <- turn
+	}()
+	<-p.entered
+	if _, ok := s.Hold(id); ok {
+		t.Error("Hold succeeded while a turn runs")
+	}
+	cancel()
+	<-result
+	if release, ok := s.Hold(id); !ok {
+		t.Error("Hold failed after the turn ended")
+	} else {
+		release()
+	}
+}
+
+// A turn that starts after the project went to the trash finds nothing: no
+// turn row and no worktree.
+func TestAskOnATrashedProjectIsNotFound(t *testing.T) {
+	s, ps, id, chat := setup(t, &fakeProvider{script: [][]ai.Event{done("never")}})
+	ps.DB.Exec(`UPDATE projects SET deleted_at = 1 WHERE id = ?`, id)
+	if _, err := s.Ask(ownerCtx, chat, "hi", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, projects.ErrNotFound) {
+		t.Fatalf("Ask = %v, want ErrNotFound", err)
+	}
+	var n int
+	ps.DB.QueryRow(`SELECT count(*) FROM turns`).Scan(&n)
+	if n != 0 {
+		t.Errorf("%d turn rows after Ask on a trashed project", n)
+	}
+	// the turn must have freed its reservation
+	if release, ok := s.Hold(id); !ok {
+		t.Error("the failed Ask kept the project reserved")
+	} else {
+		release()
+	}
+}
