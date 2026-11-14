@@ -210,6 +210,8 @@ func run() error {
 	}
 	pa.svc.OnCommit = ra.AutoPush
 	pa.svc.GitHubToken = ra.Token
+	pa.svc.HoldTurns = asa.svc.Hold
+	go pa.svc.PurgeTrashEvery(ctx, 24*time.Hour) // also at startup; ends with the server's ctx
 	pp := &papersAPI{papers: papers, projects: pa.svc, provider: a.metered("cite"), choose: func(ctx context.Context, want assistant.Choice) (assistant.Choice, error) {
 		return a.choose(ctx, want, a.quick)
 	}}

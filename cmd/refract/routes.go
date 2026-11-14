@@ -24,12 +24,14 @@ const (
 	scopeProject              // /api/projects/{id}…
 	scopeChat                 // /api/chats/{chat}…
 	scopeTurn                 // /api/turns/{turn}…
+	scopeTrash                // /api/projects/{id}… of a project in the trash: its owner only, trashRoutes only
 )
 
 var scopePrefix = map[scope]string{
 	scopeProject: "/api/projects/{id}",
 	scopeChat:    "/api/chats/{chat}",
 	scopeTurn:    "/api/turns/{turn}",
+	scopeTrash:   "/api/projects/{id}",
 }
 
 type route struct {
@@ -63,6 +65,11 @@ func (rt *router) turn(pattern string, min access.Role, h http.HandlerFunc) {
 	rt.register(route{Pattern: pattern, Scope: scopeTurn, Min: min}, h)
 }
 
+// trashed registers a route that reaches a project in the trash.
+func (rt *router) trashed(pattern string, min access.Role, h http.HandlerFunc) {
+	rt.register(route{Pattern: pattern, Scope: scopeTrash, Min: min}, h)
+}
+
 func (rt *router) register(r route, h http.HandlerFunc) {
 	if err := r.validate(); err != nil {
 		panic(err) // a programming error: fail at startup, not on a request
@@ -91,6 +98,9 @@ var members = map[string]struct {
 // them a project, chat or turn. Adding one is a decision to review.
 var userWildcards = []string{"/api/providers/{id}"}
 
+// trashRoutes are the only routes that reach a project in the trash. Adding one is a decision to review.
+var trashRoutes = []string{"POST /api/projects/{id}/restore", "DELETE /api/projects/{id}/purge"}
+
 // validate ties the scope to the path: anything addressing a project, chat or
 // turn must be registered with that scope and a role, whatever its wildcard
 // is called.
@@ -104,7 +114,7 @@ func (r route) validate() error {
 	if len(segs) >= 3 && segs[0] == "api" {
 		if m, ok := members[segs[1]]; ok && (wildcard(segs[2]) || m.scope != scopeProject) {
 			// Under /api/projects only literal names (import, import-folder) are not members.
-			if segs[2] != m.wildcard || r.Scope != m.scope {
+			if segs[2] != m.wildcard || (r.Scope != m.scope && !(m.scope == scopeProject && r.Scope == scopeTrash)) {
 				return fmt.Errorf("route %q addresses a member of /api/%s: register it with that scope, as %s", r.Pattern, segs[1], m.wildcard)
 			}
 		}
@@ -120,6 +130,9 @@ func (r route) validate() error {
 	}
 	if r.Min == access.None {
 		return fmt.Errorf("route %q needs a minimum role", r.Pattern)
+	}
+	if r.Scope == scopeTrash && !slices.Contains(trashRoutes, r.Pattern) {
+		return fmt.Errorf("route %q reaches projects in the trash: list it in trashRoutes if it should", r.Pattern)
 	}
 	return nil
 }
@@ -139,19 +152,23 @@ func (rt *router) guard(r route, h http.Handler) http.Handler {
 		}
 		var project string
 		var err error
+		check := rt.acc.Require
 		switch r.Scope {
 		case scopeUser:
 			h.ServeHTTP(w, req)
 			return
 		case scopeProject:
 			project = req.PathValue("id")
+		case scopeTrash:
+			project = req.PathValue("id")
+			check = rt.acc.RequireTrashed
 		case scopeChat:
 			project, err = rt.acc.ChatProject(ctx, req.PathValue("chat"))
 		case scopeTurn:
 			project, err = rt.acc.TurnProject(ctx, req.PathValue("turn"))
 		}
 		if err == nil {
-			err = rt.acc.Require(ctx, project, r.Min)
+			err = check(ctx, project, r.Min)
 		}
 		if err != nil {
 			accessError(w, err)

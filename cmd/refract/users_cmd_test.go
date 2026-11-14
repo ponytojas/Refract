@@ -45,6 +45,13 @@ func TestUsersRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	theirs, _ := ps.Create(auth.WithUser(ctx, bob), "Poster")
+	trashed, err := ps.Create(auth.WithUser(ctx, ana), "Old draft")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.Trash(auth.WithUser(ctx, ana), trashed.ID); err != nil {
+		t.Fatal(err)
+	}
 	db.Exec(`INSERT INTO chats (id, project_id, title, created_at, updated_at) VALUES ('c1', ?, 'chat', 0, 0)`, mine.ID)
 	token, _ := people.NewSession(ctx, ana.ID)
 
@@ -56,7 +63,7 @@ func TestUsersRemove(t *testing.T) {
 	}
 
 	out, err := run("remove", "ana@example.com")
-	if err == nil || !strings.Contains(out, "Thesis") {
+	if err == nil || !strings.Contains(out, "Thesis") || !strings.Contains(out, "Old draft (in the trash)") {
 		t.Fatalf("remove without --yes: %q, %v", out, err)
 	}
 	if _, err := os.Stat(ps.Path(mine.ID)); err != nil {
@@ -69,6 +76,11 @@ func TestUsersRemove(t *testing.T) {
 	var chats, rows int
 	db.QueryRow(`SELECT count(*) FROM chats`).Scan(&chats)
 	db.QueryRow(`SELECT count(*) FROM projects WHERE id = ?`, mine.ID).Scan(&rows)
+	var trashedRows int
+	db.QueryRow(`SELECT count(*) FROM projects WHERE id = ?`, trashed.ID).Scan(&trashedRows)
+	if _, err := os.Stat(ps.Path(trashed.ID)); !os.IsNotExist(err) || trashedRows != 0 {
+		t.Fatalf("the trashed project was left behind: dir err %v, rows %d", err, trashedRows)
+	}
 	if _, err := os.Stat(ps.Path(mine.ID)); !os.IsNotExist(err) || chats != 0 || rows != 0 {
 		t.Fatalf("left behind: dir err %v, chats %d, rows %d", err, chats, rows)
 	}
