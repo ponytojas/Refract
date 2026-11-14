@@ -256,6 +256,11 @@ export default {
   'This project was deleted.': 'Este proyecto se eliminó.',
   'Its unsaved text is still here. Copy it before you leave this page.':
     'Su texto sin guardar sigue aquí. Cópialo antes de salir de esta página.',
+  'Leave this page? Your unsaved text will be lost.': '¿Salir de esta página? Se perderá tu texto sin guardar.',
+  "Couldn't save: the project's files are missing on the server.":
+    'No se pudo guardar: faltan los archivos del proyecto en el servidor.',
+  'Restore the project to open files that were not already open.':
+    'Restaura el proyecto para abrir archivos que no estaban abiertos.',
   'Copy {path}': 'Copiar {path}',
   'Copied {path}': 'Se copió {path}',
   "Couldn't copy {path}.": 'No se pudo copiar {path}.',

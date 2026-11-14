@@ -15,16 +15,21 @@ export class RequestError extends Error {
   }
 }
 
-/** Fired when an API call learns that the project is in the trash (the server says so to its owner). */
+/** Fired when an API call learns that a project is in the trash (the server says so to its owner); detail.project is its id. */
 export const TRASHED_EVENT = 'refract:trashed'
 
 /** Whether an error means "this project is in the trash". */
 export const isTrashed = (e: unknown): boolean => e instanceof RequestError && e.error.kind === 'project_trashed'
 
+function signalTrashed(path: string) {
+  const project = /^\/api\/projects\/([^/?]+)/.exec(path)?.[1]
+  window.dispatchEvent(new CustomEvent(TRASHED_EVENT, { detail: { project } }))
+}
+
 // The one place every failed API call becomes an error, so none misses the trashed signal.
-function failure(res: Response, data: { error?: ApiError } | null): RequestError {
+function failure(res: Response, data: { error?: ApiError } | null, path: string): RequestError {
   const e = new RequestError(data?.error ?? { kind: 'other', message: `HTTP ${res.status}` }, res.status)
-  if (isTrashed(e)) window.dispatchEvent(new Event(TRASHED_EVENT))
+  if (isTrashed(e)) signalTrashed(path)
   return e
 }
 
@@ -42,7 +47,7 @@ export async function api<T>(
   })
   if (res.status === 204) return undefined as T
   const data = await res.json().catch(() => null)
-  if (!res.ok) throw failure(res, data)
+  if (!res.ok) throw failure(res, data, path)
   return data as T
 }
 
@@ -56,7 +61,7 @@ export async function stream(path: string, body: unknown, onEvent: (ev: any) => 
   })
   if (!res.ok || !res.body) {
     const data = await res.json().catch(() => null)
-    onEvent({ type: 'error', error: failure(res, data).error })
+    onEvent({ type: 'error', error: failure(res, data, path).error })
     return
   }
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -69,7 +74,12 @@ export async function stream(path: string, body: unknown, onEvent: (ev: any) => 
     while ((i = buf.indexOf('\n\n')) >= 0) {
       const chunk = buf.slice(0, i)
       buf = buf.slice(i + 2)
-      if (chunk.startsWith('data: ')) onEvent(JSON.parse(chunk.slice(6)))
+      if (chunk.startsWith('data: ')) {
+        const ev = JSON.parse(chunk.slice(6))
+        // The trash can also land after the stream has started.
+        if (ev.type === 'error' && ev.error?.kind === 'project_trashed') signalTrashed(path)
+        onEvent(ev)
+      }
     }
   }
 }
@@ -188,7 +198,7 @@ export const fileURL = (id: string, path: string) => `/api/projects/${id}/file?p
 export async function readFile(id: string, path: string): Promise<OpenedFile> {
   const res = await fetch(fileURL(id, path), { headers })
   if (!res.ok) {
-    throw failure(res, await res.json().catch(() => null))
+    throw failure(res, await res.json().catch(() => null), fileURL(id, path))
   }
   if (res.headers.get('X-Refract-Text') === '1') return { text: true, content: await res.text() }
   const blob = await res.blob()
@@ -204,7 +214,7 @@ export async function writeFile(id: string, path: string, body: string | Blob) {
     keepalive: size < 60_000, // lets a save started while the page unloads still finish
   })
   if (!res.ok) {
-    throw failure(res, await res.json().catch(() => null))
+    throw failure(res, await res.json().catch(() => null), fileURL(id, path))
   }
 }
 

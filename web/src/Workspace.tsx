@@ -224,6 +224,8 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   const projectRef = useRef<Project | null>(null)
   const [reloads, setReloads] = useState(0) // bump to reload files, chats and projects
   const [restoring, setRestoring] = useState(false)
+  // A save got 404 while the project exists: stop retrying until the next edit.
+  const stalled = useRef(false)
   const settleRef = useRef<() => Promise<void>>(async () => {})
   const sidebar = usePanelRef()
   const uploadInput = useRef<HTMLInputElement>(null)
@@ -251,6 +253,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
         } catch (e) {
           // WriteFile creates parent folders, so a 404 can only mean the project is gone.
           if (e instanceof RequestError && e.status === 404) {
+            stalled.current = true
             saver.current?.pause()
             settleRef.current()
           }
@@ -267,7 +270,14 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   }
   const autosave = saver.current
   // Leaving for another page: everything typed is on the server first.
-  useBeforeLeave(useCallback(() => autosave.flushAll(), [autosave]))
+  // Locked, nothing can be saved: leaving would drop what is still pending, so ask first.
+  useBeforeLeave(
+    useCallback(async () => {
+      if (goneRef.current && autosave.unsaved().length > 0)
+        return window.confirm(t('Leave this page? Your unsaved text will be lost.'))
+      await autosave.flushAll()
+    }, [autosave]),
+  )
 
   const loadFiles = useCallback(() => {
     loadSymbols()
@@ -358,6 +368,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   const goLive = useCallback(
     (p: Project) => {
       goneRef.current = null
+      stalled.current = false
       projectRef.current = p
       setGone(null)
       setProject(p)
@@ -391,46 +402,58 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   )
 
   const settling = useRef<Promise<void> | null>(null)
-  const settle = useCallback((): Promise<void> => {
-    if (settling.current) return settling.current
-    const run = (async () => {
-      try {
-        const p = await api<Project>(`/api/projects/${id}`)
-        if (goneRef.current) goLive(p)
-        else if (autosave.isPaused) autosave.resume().catch(() => {}) // a stale signal
-      } catch (e) {
-        if (isTrashed(e)) {
-          let entry: TrashedProject | undefined
-          try {
-            entry = (await api<Trash>('/api/trash')).projects.find((x) => x.id === id)
-          } catch {
-            // the banner shows without a countdown
+  // fresh: the answer must come from a call made now (after a restore), not one already in flight.
+  const settle = useCallback(
+    (fresh = false): Promise<void> => {
+      if (settling.current && !fresh) return settling.current
+      const before = settling.current
+      let current: Promise<void> | undefined
+      current = (async () => {
+        try {
+          if (before) await before.catch(() => {})
+          const p = await api<Project>(`/api/projects/${id}`)
+          if (goneRef.current) goLive(p)
+          else if (stalled.current) {
+            // The project is there but its files can't be written: say so, and wait for the next edit.
+            toast.error(t("Couldn't save: the project's files are missing on the server."))
+          } else if (autosave.isPaused) autosave.resume().catch(() => {}) // a stale signal
+        } catch (e) {
+          if (isTrashed(e)) {
+            let entry: TrashedProject | undefined
+            try {
+              entry = (await api<Trash>('/api/trash')).projects.find((x) => x.id === id)
+            } catch {
+              // the banner shows without a countdown
+            }
+            lock({ state: 'trashed', entry })
+            if (entry) document.title = `${entry.name} · Refract`
+          } else if (e instanceof RequestError && e.status === 404 && (projectRef.current || goneRef.current)) {
+            lock({ state: 'deleted' })
+          } else if (!goneRef.current) {
+            autosave.resume().catch(() => {}) // couldn't tell: keep saving as before
           }
-          lock({ state: 'trashed', entry })
-          if (entry) document.title = `${entry.name} · Refract`
-        } else if (e instanceof RequestError && e.status === 404 && (projectRef.current || goneRef.current)) {
-          lock({ state: 'deleted' })
-        } else if (!goneRef.current) {
-          autosave.resume().catch(() => {}) // couldn't tell: keep saving as before
+        } finally {
+          if (settling.current === current) settling.current = null
         }
-      } finally {
-        settling.current = null
-      }
-    })()
-    settling.current = run
-    return run
-  }, [id, autosave, goLive, lock])
+      })()
+      settling.current = current
+      return current
+    },
+    [id, autosave, goLive, lock],
+  )
   settleRef.current = settle
 
   // Any call may learn that the project is in the trash: stop saving at once, then find out.
   useEffect(() => {
-    const onTrashed = () => {
+    const onTrashed = (e: Event) => {
+      const project = (e as CustomEvent<{ project?: string }>).detail?.project
+      if (project && project !== id) return // another project's signal
       autosave.pause()
       settle()
     }
     // Another tab may have trashed it while this one was in the background.
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && projectRef.current) settle()
+      if (document.visibilityState === 'visible' && (projectRef.current || goneRef.current)) settle()
     }
     window.addEventListener(TRASHED_EVENT, onTrashed)
     document.addEventListener('visibilitychange', onVisible)
@@ -438,7 +461,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
       window.removeEventListener(TRASHED_EVENT, onTrashed)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [autosave, settle])
+  }, [id, autosave, settle])
 
   async function restoreProject() {
     setRestoring(true)
@@ -448,7 +471,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
       // 404: restored elsewhere, or deleted meanwhile; settle() tells which.
       if (!(e instanceof RequestError && e.status === 404)) toast.error(errorText(e))
     }
-    await settle()
+    await settle(true)
     setRestoring(false)
   }
 
@@ -704,6 +727,11 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
 
   async function open(path: string) {
     if (!loaded.current.has(path)) {
+      if (goneRef.current) {
+        // The server refuses to read a project in the trash: only what was already open is here.
+        toast.info(t('Restore the project to open files that were not already open.'))
+        return
+      }
       try {
         loaded.current.set(path, await readFile(id, path))
       } catch (e) {
@@ -1059,6 +1087,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
       }
       beforeSend={() => autosave.flushAll()}
       onReview={(t) => {
+        if (locked) return
         setReview(t)
         setChatOpen(false) // the diff takes the editor
       }}
@@ -1485,7 +1514,13 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                     const f = loaded.current.get(p)
                     return f?.text ? f.content : ''
                   }}
-                  onChange={(p, c) => autosave.change(p, c)}
+                  onChange={(p, c) => {
+                    autosave.change(p, c)
+                    if (stalled.current && !goneRef.current) {
+                      stalled.current = false
+                      autosave.resume().catch(() => {})
+                    }
+                  }}
                   onSave={() => active && autosave.flush(active)}
                   onCompile={compile}
                   onSync={syncToPDF}
