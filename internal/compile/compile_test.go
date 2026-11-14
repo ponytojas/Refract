@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -273,7 +274,7 @@ func TestPrepareOutDirRefusesSymlinks(t *testing.T) {
 			t.Fatal(err)
 		}
 		err := prepareOutDir(proj)
-		if err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		if !errors.Is(err, ErrUnsafeBuildDir) || !strings.Contains(err.Error(), "symbolic link") {
 			t.Errorf("%s as a symlink: err = %v; want a refusal", link, err)
 		}
 		tc := &Tectonic{Bin: "/bin/true", Timeout: time.Second}

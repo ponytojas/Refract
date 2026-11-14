@@ -168,6 +168,10 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 	return res, nil
 }
 
+// ErrUnsafeBuildDir is returned when the project's build folder is a symbolic
+// link or not a folder: the project has to be fixed before it can compile.
+var ErrUnsafeBuildDir = errors.New("refusing to compile")
+
 // prepareOutDir creates .refract/build without following symlinks and refuses
 // a project where any part of it is one: a pulled repository could otherwise
 // point it at a folder outside the project, which the sandbox mounts writable.
@@ -184,9 +188,9 @@ func prepareOutDir(projectDir string) error {
 		case err != nil:
 			return err
 		case fi.Mode()&os.ModeSymlink != 0:
-			return fmt.Errorf("refusing to compile: %s is a symbolic link; delete it and compile again", filepath.ToSlash(strings.TrimPrefix(cur, projectDir+string(filepath.Separator))))
+			return fmt.Errorf("%w: %s is a symbolic link; delete it and compile again", ErrUnsafeBuildDir, filepath.ToSlash(strings.TrimPrefix(cur, projectDir+string(filepath.Separator))))
 		case !fi.IsDir():
-			return fmt.Errorf("refusing to compile: %s is not a folder", filepath.ToSlash(strings.TrimPrefix(cur, projectDir+string(filepath.Separator))))
+			return fmt.Errorf("%w: %s is not a folder", ErrUnsafeBuildDir, filepath.ToSlash(strings.TrimPrefix(cur, projectDir+string(filepath.Separator))))
 		}
 	}
 	real, err := filepath.EvalSymlinks(filepath.Join(projectDir, filepath.FromSlash(BuildDir)))
@@ -198,7 +202,7 @@ func prepareOutDir(projectDir string) error {
 		return err
 	}
 	if rel, err := filepath.Rel(root, real); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("refusing to compile: %s resolves outside the project", BuildDir)
+		return fmt.Errorf("%w: %s resolves outside the project", ErrUnsafeBuildDir, BuildDir)
 	}
 	return nil
 }

@@ -126,6 +126,10 @@ export function describe(e: ApiError): string {
       return t('The server is busy. Try again in a moment.')
     case 'compile_own_busy':
       return t('Another of your compiles is still running. Try again when it finishes.')
+    case 'unsafe_build_dir':
+      return t(
+        "This project can't compile: its .refract folder is a link or not a folder. Delete .refract and compile again.",
+      )
     case 'login_required':
       return t('Your session ended. Reload the page to sign in again.')
     case 'invalid_key':

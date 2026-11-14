@@ -146,6 +146,8 @@ export default {
   'The server is busy. Try again in a moment.': 'El servidor está ocupado. Inténtalo de nuevo en un momento.',
   'Another of your compiles is still running. Try again when it finishes.':
     'Otra de tus compilaciones sigue en curso. Inténtalo de nuevo cuando termine.',
+  "This project can't compile: its .refract folder is a link or not a folder. Delete .refract and compile again.":
+    'Este proyecto no puede compilarse: su carpeta .refract es un enlace o no es una carpeta. Borra .refract y vuelve a compilar.',
   'Your session ended. Reload the page to sign in again.':
     'Tu sesión ha terminado. Recarga la página para volver a entrar.',
   'ChatGPT not connected': 'ChatGPT no conectado',
