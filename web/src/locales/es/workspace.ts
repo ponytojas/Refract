@@ -247,4 +247,7 @@ export default {
     'Escríbelas debajo como frases normales. El texto dentro de estas marcas de comentario se ignora.',
   'You can also ask the assistant to remember something: it proposes an edit to this file.':
     'También puedes pedir al asistente que recuerde algo: propondrá un cambio en este archivo.',
+  // Trashed project (T3b)
+  'This project is in the trash. Restore it to keep working.':
+    'Este proyecto está en la papelera. Restáuralo para seguir trabajando.',
 } as Record<string, string>

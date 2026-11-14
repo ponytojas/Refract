@@ -15,6 +15,19 @@ export class RequestError extends Error {
   }
 }
 
+/** Fired when an API call learns that the project is in the trash (the server says so to its owner). */
+export const TRASHED_EVENT = 'refract:trashed'
+
+/** Whether an error means "this project is in the trash". */
+export const isTrashed = (e: unknown): boolean => e instanceof RequestError && e.error.kind === 'project_trashed'
+
+// The one place every failed API call becomes an error, so none misses the trashed signal.
+function failure(res: Response, data: { error?: ApiError } | null): RequestError {
+  const e = new RequestError(data?.error ?? { kind: 'other', message: `HTTP ${res.status}` }, res.status)
+  if (isTrashed(e)) window.dispatchEvent(new Event(TRASHED_EVENT))
+  return e
+}
+
 // body: an object is sent as JSON; a string, Blob or FormData is sent as is.
 export async function api<T>(
   path: string,
@@ -28,8 +41,8 @@ export async function api<T>(
     signal: init.signal,
   })
   if (res.status === 204) return undefined as T
-  const data = await res.json().catch(() => ({ error: { kind: 'other', message: `HTTP ${res.status}` } }))
-  if (!res.ok) throw new RequestError(data.error)
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw failure(res, data)
   return data as T
 }
 
@@ -43,7 +56,7 @@ export async function stream(path: string, body: unknown, onEvent: (ev: any) => 
   })
   if (!res.ok || !res.body) {
     const data = await res.json().catch(() => null)
-    onEvent({ type: 'error', error: data?.error ?? { kind: 'other', message: `HTTP ${res.status}` } })
+    onEvent({ type: 'error', error: failure(res, data).error })
     return
   }
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -116,6 +129,8 @@ export function describe(e: ApiError): string {
       return t('ChatGPT plan usage is not available for this account: {message}', { message: e.message })
     case 'model_unavailable':
       return t('This model is not available. Pick another one.')
+    case 'project_trashed':
+      return t('This project is in the trash. Restore it to keep working.')
     case 'project_busy':
       return t('The assistant is working on this project. Stop it or wait until it finishes, then try again.')
     case 'bad_login':
@@ -173,8 +188,7 @@ export const fileURL = (id: string, path: string) => `/api/projects/${id}/file?p
 export async function readFile(id: string, path: string): Promise<OpenedFile> {
   const res = await fetch(fileURL(id, path), { headers })
   if (!res.ok) {
-    const data = await res.json().catch(() => null)
-    throw new RequestError(data?.error ?? { kind: 'other', message: `HTTP ${res.status}` }, res.status)
+    throw failure(res, await res.json().catch(() => null))
   }
   if (res.headers.get('X-Refract-Text') === '1') return { text: true, content: await res.text() }
   const blob = await res.blob()
@@ -190,8 +204,7 @@ export async function writeFile(id: string, path: string, body: string | Blob) {
     keepalive: size < 60_000, // lets a save started while the page unloads still finish
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => null)
-    throw new RequestError(data?.error ?? { kind: 'other', message: `HTTP ${res.status}` })
+    throw failure(res, await res.json().catch(() => null))
   }
 }
 
