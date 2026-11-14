@@ -71,12 +71,15 @@ func TestTokensAreSingleUseHashedAndPurposed(t *testing.T) {
 		}
 	}
 
+	// A new link leaves the earlier ones working, up to liveLinks of them.
 	first := mint(Verify)
 	second := mint(Verify)
+	mint(Verify)
+	mint(Verify)
 	if err := redeem(first, Verify); !errors.Is(err, ErrBadToken) {
-		t.Errorf("an older link still works: %v", err)
+		t.Errorf("a link beyond the newest %d still works: %v", liveLinks, err)
 	}
 	if err := redeem(second, Verify); err != nil {
-		t.Errorf("the newest link: %v", err)
+		t.Errorf("a recent link: %v", err)
 	}
 }

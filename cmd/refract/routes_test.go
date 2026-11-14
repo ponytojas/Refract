@@ -445,3 +445,20 @@ func TestRouteNeeds(t *testing.T) {
 		}
 	}
 }
+
+// Only REFRACT_AUTH=builtin can verify an address, so elsewhere the need is waived.
+func TestRouteNeedsWaivedOutsideBuiltin(t *testing.T) {
+	acc := accessDB(t)
+	acc.SkipVerified = true
+	rt := table(acc)
+	for _, r := range rt.routes {
+		if !slices.Contains(r.Needs, access.VerifiedEmail) {
+			continue
+		}
+		w := httptest.NewRecorder()
+		rt.mux.ServeHTTP(w, request(r, ana).WithContext(auth.WithUser(context.Background(), auth.User{ID: "una"})))
+		if w.Code != reached {
+			t.Errorf("%s as an unverified user outside builtin = %d, want it reached", r.Pattern, w.Code)
+		}
+	}
+}

@@ -40,10 +40,11 @@ func TestAdmitOIDC(t *testing.T) {
 		t.Error("a refused sign-in created an account")
 	}
 
-	// An account with a password, verified: the provider has to vouch.
+	// An account with a password that Refract has verified (the operator made
+	// it): a provider that sends no claim, such as Entra, may sign in to it.
 	people.SetPassword(ctx, "ana@example.com", "correct horse")
-	if _, refusal, _ := a.admitOIDC(ctx, "ana@example.com", false); refusal != "unverified_email" {
-		t.Errorf("password account, claim absent: %q", refusal)
+	if u, refusal, err := a.admitOIDC(ctx, "ana@example.com", false); err != nil || refusal != "" || u.Email != "ana@example.com" {
+		t.Errorf("verified password account, claim absent: %+v %q %v", u, refusal, err)
 	}
 	if u, refusal, err := a.admitOIDC(ctx, "ana@example.com", true); err != nil || refusal != "" || u.Email != "ana@example.com" {
 		t.Errorf("password account, claim true: %+v %q %v", u, refusal, err)

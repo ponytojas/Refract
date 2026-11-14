@@ -44,7 +44,13 @@ func UserFrom(ctx context.Context) (auth.User, error) {
 	return u, nil
 }
 
-type Checker struct{ DB *sql.DB }
+type Checker struct {
+	DB *sql.DB
+	// SkipVerified waives the VerifiedEmail need. Only REFRACT_AUTH=builtin has
+	// a way to verify an address, so in the other modes (accounts left
+	// unverified by an earlier builtin setup) requiring it would lock people out.
+	SkipVerified bool
+}
 
 // ProjectRole is the user's role on the project; None when there is no user,
 // no such project, or the project is in the trash.
@@ -117,6 +123,9 @@ func (c *Checker) Meets(ctx context.Context, needs ...Need) error {
 	for _, n := range needs {
 		switch n {
 		case VerifiedEmail:
+			if c.SkipVerified {
+				continue
+			}
 			var at int64
 			switch err := c.DB.QueryRowContext(ctx, `SELECT email_verified_at FROM users WHERE id = ?`, u.ID).Scan(&at); {
 			case errors.Is(err, sql.ErrNoRows):

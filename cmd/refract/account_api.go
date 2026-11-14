@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -40,38 +41,50 @@ func (a *loginAPI) config(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"oidc": name, "mode": string(a.mode), "signup": a.signup, "reset": a.mailReady()})
 }
 
-// allowMail answers 503 or 429 when an email can't be sent for email now.
-func (a *loginAPI) allowMail(w http.ResponseWriter, r *http.Request, email string) bool {
+// allowMail answers 503 or 429 (ok is false) when an email can't be asked for
+// now. When the address has had its share, send is false and the caller
+// answers as if it had sent: only the network address's limit is told.
+func (a *loginAPI) allowMail(w http.ResponseWriter, r *http.Request, email string) (send, ok bool) {
 	if !a.mailReady() {
 		kindError(w, http.StatusServiceUnavailable, "mail_unavailable", errors.New("this server can't send emails"))
-		return false
+		return false, false
 	}
-	switch err := a.users.AllowMail(r.Context(), email, users.ClientIP(r)); {
+	send, err := a.users.AllowMail(r.Context(), email, users.ClientIP(r))
+	switch {
 	case errors.Is(err, users.ErrTooManyMails):
 		kindError(w, http.StatusTooManyRequests, "too_many_emails", err)
-		return false
+		return false, false
 	case err != nil:
 		httpError(w, err, http.StatusInternalServerError)
-		return false
+		return false, false
 	}
-	return true
+	return send, true
 }
 
-// send composes the email for a link and queues it.
-func (a *loginAPI) send(r *http.Request, l users.Link) {
+// later runs job after the answer, on the outbox's worker. Everything that
+// depends on whether an address has an account happens there, so a request
+// takes the same path and time either way.
+func (a *loginAPI) later(r *http.Request, job func(ctx context.Context, lang string)) {
+	lang := users.RequestLang(r)
+	a.mail.Run(func(ctx context.Context) { job(ctx, lang) })
+}
+
+// send composes the email for a link and queues it. lang is the interface
+// language of the request, for an account with none of its own.
+func (a *loginAPI) send(lang string, l users.Link) {
 	kind, path := mail.Verify, "/verify#token="
 	if l.Purpose == users.Reset {
 		kind, path = mail.Reset, "/reset#token="
 	}
-	a.compose(r, kind, l.To, mail.Data{Link: a.public + path + l.Token, SignUp: l.SignUp})
+	a.compose(lang, kind, l.To, mail.Data{Link: a.public + path + l.Token, SignUp: l.SignUp})
 }
 
-func (a *loginAPI) compose(r *http.Request, kind mail.Kind, to users.Account, d mail.Data) {
+func (a *loginAPI) compose(lang string, kind mail.Kind, to users.Account, d mail.Data) {
 	d.Email = to.Email
 	if u, err := url.Parse(a.public); err == nil {
 		d.Site = u.Host
 	}
-	m, err := mail.Compose(kind, cmp.Or(to.Lang, users.RequestLang(r), "en"), to.Email, d)
+	m, err := mail.Compose(kind, cmp.Or(to.Lang, lang, "en"), to.Email, d)
 	if err != nil {
 		slog.Error("composing an email", "kind", kind, "err", err)
 		return
@@ -92,16 +105,18 @@ func (a *loginAPI) signUp(w http.ResponseWriter, r *http.Request) {
 		kindError(w, http.StatusForbidden, "signup_closed", errors.New("this server doesn't take new accounts"))
 		return
 	}
-	if !a.allowMail(w, r, in.Email) {
+	if send, ok := a.allowMail(w, r, in.Email); !ok {
 		return
+	} else if send {
+		a.later(r, func(ctx context.Context, lang string) {
+			l, err := a.users.SignUp(ctx, in.Email, in.Password, in.Lang)
+			if err != nil {
+				slog.Error("sign-up", "err", err)
+				return
+			}
+			a.send(lang, l)
+		})
 	}
-	l, err := a.users.SignUp(r.Context(), in.Email, in.Password, in.Lang)
-	if err != nil {
-		slog.Error("sign-up", "err", err)
-		httpError(w, errors.New("internal error"), http.StatusInternalServerError)
-		return
-	}
-	a.send(r, l)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -114,17 +129,17 @@ func (a *loginAPI) forgot(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	if !a.allowMail(w, r, in.Email) {
+	if send, ok := a.allowMail(w, r, in.Email); !ok {
 		return
-	}
-	l, ok, err := a.users.RequestReset(r.Context(), in.Email)
-	if err != nil {
-		slog.Error("reset request", "err", err)
-		httpError(w, errors.New("internal error"), http.StatusInternalServerError)
-		return
-	}
-	if ok {
-		a.send(r, l)
+	} else if send {
+		a.later(r, func(ctx context.Context, lang string) {
+			l, ok, err := a.users.RequestReset(ctx, in.Email)
+			if err != nil {
+				slog.Error("reset request", "err", err)
+			} else if ok {
+				a.send(lang, l)
+			}
+		})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -195,7 +210,7 @@ func (a *loginAPI) account(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	owned, err := a.users.OwnedProjects(r.Context(), u.ID)
+	owned, err := a.users.OwnedCount(r.Context(), u.ID)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
@@ -206,7 +221,7 @@ func (a *loginAPI) account(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{
 		"email": acct.Email, "has_password": acct.HasPassword, "email_verified": acct.Verified, "lang": acct.Lang,
-		"projects": len(owned), "mail": a.mailReady(), "oidc": name, "recent_sign_in": a.recentSignIn(r),
+		"projects": owned, "mail": a.mailReady(), "oidc": name, "recent_sign_in": a.recentSignIn(r),
 	})
 }
 
@@ -222,16 +237,17 @@ func (a *loginAPI) recentSignIn(r *http.Request) bool {
 
 func (a *loginAPI) resendVerification(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFrom(r.Context())
-	if !a.allowMail(w, r, u.Email) {
+	if send, ok := a.allowMail(w, r, u.Email); !ok {
 		return
-	}
-	l, ok, err := a.users.ResendVerification(r.Context(), u.ID)
-	if err != nil {
-		httpError(w, err, http.StatusInternalServerError)
-		return
-	}
-	if ok {
-		a.send(r, l)
+	} else if send {
+		a.later(r, func(ctx context.Context, lang string) {
+			l, ok, err := a.users.ResendVerification(ctx, u.ID)
+			if err != nil {
+				slog.Error("resending a verification link", "err", err)
+			} else if ok {
+				a.send(lang, l)
+			}
+		})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -276,7 +292,8 @@ func (a *loginAPI) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		kindError(w, http.StatusForbidden, "reauth_required", errors.New("sign in again to delete your account"))
 		return
 	}
-	n, err := a.users.Remove(r.Context(), u.ID, a.destroy)
+	// Once started, deleting runs to the end even if the client goes away.
+	n, err := a.users.Remove(context.WithoutCancel(r.Context()), u.ID, a.destroy)
 	switch {
 	case errors.Is(err, users.ErrOwnsProjects):
 		httpError(w, errors.New("a project was created meanwhile: try again"), http.StatusConflict)
@@ -286,7 +303,7 @@ func (a *loginAPI) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.mailReady() {
-		a.compose(r, mail.Deleted, acct, mail.Data{})
+		a.compose(users.RequestLang(r), mail.Deleted, acct, mail.Data{})
 	}
 	users.ClearSessionCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)

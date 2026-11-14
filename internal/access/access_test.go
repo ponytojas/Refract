@@ -158,4 +158,13 @@ func TestMeets(t *testing.T) {
 	if err := c.Meets(as("ver"), Need(99)); err == nil {
 		t.Error("an unknown need was met")
 	}
+
+	// Outside REFRACT_AUTH=builtin nobody can verify an address: the need is waived.
+	c.SkipVerified = true
+	if err := c.Meets(as("unv"), VerifiedEmail); err != nil {
+		t.Errorf("unverified with SkipVerified: %v", err)
+	}
+	if err := c.Meets(ctx, VerifiedEmail); !errors.Is(err, ErrNoUser) {
+		t.Errorf("no user with SkipVerified: %v", err)
+	}
 }

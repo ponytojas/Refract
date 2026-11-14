@@ -219,6 +219,7 @@ func TestUnverifiedCanSignInButNotCreate(t *testing.T) {
 	e := newAccountEnv(t, envOpts{signup: true})
 	b := e.browser()
 	b.post("/api/auth/signup", map[string]string{"email": "ana@example.com", "password": "correct horse", "lang": "en"})
+	sentAfterSignUp := e.mails() // the account is made after the answer
 	if a := b.post("/api/auth/login", map[string]string{"email": "ana@example.com", "password": "correct horse"}); a.Status != 204 {
 		t.Fatalf("login: %d %s", a.Status, a.Body)
 	}
@@ -227,7 +228,7 @@ func TestUnverifiedCanSignInButNotCreate(t *testing.T) {
 	if a := b.do("GET", "/api/projects", nil); a.Status != 200 {
 		t.Errorf("listing: %d", a.Status)
 	}
-	tok := tokenIn(t, e.mails()[0], "verify")
+	tok := tokenIn(t, sentAfterSignUp[0], "verify")
 	if a := b.post("/api/auth/verify", map[string]string{"token": tok}); a.Status != 204 || len(a.Cookies) != 0 {
 		t.Fatalf("verify while signed in: %d %s cookies=%v", a.Status, a.Body, a.Cookies)
 	}
@@ -320,13 +321,98 @@ func TestMailThrottle(t *testing.T) {
 	e := newAccountEnv(t, envOpts{})
 	e.people.SetPassword(context.Background(), "ana@example.com", "correct horse")
 	b := e.browser()
+	// Past 3 for an address the answer is the same, and nothing is sent.
 	for _, email := range []string{"ana@example.com", "nobody@example.com"} {
-		for i := 0; i < 3; i++ {
-			if a := b.post("/api/auth/forgot", map[string]string{"email": email}); a.Status != 204 {
-				t.Fatalf("%s #%d: %d", email, i+1, a.Status)
+		for i := 0; i < 5; i++ {
+			if a := b.post("/api/auth/forgot", map[string]string{"email": email}); a.Status != 204 || a.Body != "" {
+				t.Fatalf("%s #%d: %d %s", email, i+1, a.Status, a.Body)
 			}
 		}
-		b.expect(b.post("/api/auth/forgot", map[string]string{"email": email}), 429, "too_many_emails")
+	}
+	if n := len(e.mails()); n != 3 {
+		t.Errorf("%d emails sent, want 3 (to ana)", n)
+	}
+	// Past 20 from one network address the request is refused.
+	e.people.DB.Exec(`DELETE FROM login_failures`)
+	for i := 0; i < 20; i++ {
+		if a := b.post("/api/auth/forgot", map[string]string{"email": "u" + strings.Repeat("x", i) + "@example.com"}); a.Status != 204 {
+			t.Fatalf("#%d: %d", i+1, a.Status)
+		}
+	}
+	b.expect(b.post("/api/auth/forgot", map[string]string{"email": "late@example.com"}), 429, "too_many_emails")
+}
+
+// The request path doesn't depend on whether the address has an account: with
+// the outbox's worker busy, an answer comes back and nothing has been written
+// for either address yet.
+func TestAnswersBeforeAnyAccountWork(t *testing.T) {
+	e := newAccountEnv(t, envOpts{signup: true})
+	e.people.SetPassword(context.Background(), "ana@example.com", "correct horse")
+	release := make(chan struct{})
+	e.outbox.Run(func(context.Context) { <-release })
+	b := e.browser()
+	count := func(q string) (n int) {
+		e.people.DB.QueryRow(q).Scan(&n)
+		return n
+	}
+	users0, tokens0 := count(`SELECT count(*) FROM users`), count(`SELECT count(*) FROM account_tokens`)
+	for _, email := range []string{"ana@example.com", "nobody@example.com"} {
+		b.post("/api/auth/forgot", map[string]string{"email": email})
+		b.post("/api/auth/signup", map[string]string{"email": email, "password": "another pass", "lang": "en"})
+	}
+	if u, tk := count(`SELECT count(*) FROM users`), count(`SELECT count(*) FROM account_tokens`); u != users0 || tk != tokens0 {
+		t.Errorf("the handlers wrote before answering: users %d -> %d, tokens %d -> %d", users0, u, tokens0, tk)
+	}
+	close(release)
+	if n := len(e.mails()); n != 3 { // reset + sign-up reset to ana; verify to nobody
+		t.Errorf("%d messages after the work ran, want 3", n)
+	}
+	if count(`SELECT count(*) FROM users`) != users0+1 {
+		t.Error("the sign-up for a new address made no account")
+	}
+}
+
+// Someone else asking for links doesn't cancel the one the owner holds.
+func TestFloodDoesNotCancelTheOwnersLink(t *testing.T) {
+	e := newAccountEnv(t, envOpts{signup: true})
+	e.people.SetPassword(context.Background(), "ana@example.com", "correct horse")
+	b := e.browser()
+	b.post("/api/auth/forgot", map[string]string{"email": "ana@example.com"})
+	tok := tokenIn(t, e.mails()[0], "reset")
+	b.post("/api/auth/signup", map[string]string{"email": "ana@example.com", "password": "attacker pass", "lang": "en"})
+	e.mails()
+	if a := b.post("/api/auth/reset", map[string]string{"token": tok, "password": "owners new pass"}); a.Status != 204 {
+		t.Fatalf("the owner's earlier link: %d %s", a.Status, a.Body)
+	}
+}
+
+// Deleting the account finishes even when the client goes away part way.
+func TestDeleteAccountSurvivesDisconnect(t *testing.T) {
+	e := newAccountEnv(t, envOpts{})
+	ctx := context.Background()
+	u, _ := e.people.SetPassword(ctx, "ana@example.com", "correct horse")
+	as := auth.WithUser(ctx, u)
+	e.ps.Create(as, "One")
+	e.ps.Create(as, "Two")
+	reqCtx, cancel := context.WithCancel(as)
+	defer cancel()
+	inner := e.login.destroy
+	e.login.destroy = func(c context.Context, id string) error {
+		cancel() // the client hangs up as the first project goes
+		return inner(c, id)
+	}
+	body, _ := json.Marshal(map[string]string{"password": "correct horse"})
+	r := httptest.NewRequest("POST", "/api/account/delete", bytes.NewReader(body)).WithContext(reqCtx)
+	w := httptest.NewRecorder()
+	e.login.deleteAccount(w, r)
+	if w.Code != 204 {
+		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := e.people.Lookup(ctx, "ana@example.com"); err == nil {
+		t.Error("the account survived the disconnect")
+	}
+	if n, _ := e.people.OwnedCount(ctx, u.ID); n != 0 {
+		t.Errorf("%d projects left", n)
 	}
 }
 
@@ -358,6 +444,7 @@ func TestResendAndLang(t *testing.T) {
 	e := newAccountEnv(t, envOpts{signup: true})
 	b := e.browser()
 	b.post("/api/auth/signup", map[string]string{"email": "ana@example.com", "password": "correct horse", "lang": "es"})
+	e.mails()
 	b.post("/api/auth/login", map[string]string{"email": "ana@example.com", "password": "correct horse"})
 	e.mails()
 
@@ -510,10 +597,41 @@ func TestOIDCThen(t *testing.T) {
 			t.Errorf("callbackTarget(%q) = %q, want %q", tc.cookie, got, tc.want)
 		}
 	}
+	_ = e
 	for q, want := range map[string]bool{"then=account": true, "then=/evil": false, "then=": false, "": false} {
 		if got := thenAccount(httptest.NewRequest("GET", "/api/auth/oidc/start?"+q, nil)); got != want {
 			t.Errorf("thenAccount(%q) = %v", q, got)
 		}
 	}
 	_ = e
+}
+
+// A plain sign-in expires a destination cookie left by an unfinished
+// "then=account" one.
+func TestOIDCStartClearsThenCookie(t *testing.T) {
+	var idp *httptest.Server
+	idp = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issuer": idp.URL, "authorization_endpoint": idp.URL + "/auth",
+			"token_endpoint": idp.URL + "/token", "jwks_uri": idp.URL + "/jwks"})
+	}))
+	defer idp.Close()
+	a := &loginAPI{oidc: &auth.OIDC{Issuer: idp.URL, ClientID: "c", ClientSecret: "s", RedirectURL: "https://r.test/api/auth/oidc/callback"}}
+	then := func(query string) *http.Cookie {
+		w := httptest.NewRecorder()
+		a.oidcStart(w, httptest.NewRequest("GET", "/api/auth/oidc/start"+query, nil))
+		for _, c := range w.Result().Cookies() {
+			if c.Name == oidcThenCookie {
+				return c
+			}
+		}
+		return nil
+	}
+	if c := then("?then=account"); c == nil || c.Value != "account" || c.MaxAge <= 0 {
+		t.Errorf("then=account cookie = %+v", c)
+	}
+	for _, q := range []string{"", "?then=/evil"} {
+		if c := then(q); c == nil || c.MaxAge >= 0 || c.Value != "" {
+			t.Errorf("%q: cookie = %+v, want it expired", q, c)
+		}
+	}
 }

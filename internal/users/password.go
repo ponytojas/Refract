@@ -169,20 +169,31 @@ func (s *Service) Login(ctx context.Context, email, pw, ip string) (auth.User, e
 var limits = map[string]int{"email": maxFailures, "ip": maxFailuresPerIP, "mail": maxMailsPerEmail, "mailip": maxMailsPerIP}
 
 // ErrTooManyMails is AllowMail's refusal.
-var ErrTooManyMails = errors.New("too many emails to this address: try again in a few minutes")
+var ErrTooManyMails = errors.New("too many emails requested from this network address: try again in a few minutes")
 
-// AllowMail counts one email to address, asked for from ip, and refuses past
-// the limits. It runs before any account lookup, so its answer is the same
-// whether or not the address has an account.
-func (s *Service) AllowMail(ctx context.Context, email, ip string) error {
-	keys := []string{"mail:" + normEmail(email)}
+// AllowMail counts one email to address, asked for from ip. Past the network
+// address's limit it refuses with ErrTooManyMails: that says nothing about the
+// address. Past the address's own limit it answers send=false with no error:
+// callers then answer exactly as if they had sent, so the limit neither tells
+// whether the address has an account nor tells whoever is flooding it. It runs
+// before any account lookup.
+func (s *Service) AllowMail(ctx context.Context, email, ip string) (send bool, err error) {
+	var keys []string
 	if ip != "" {
 		keys = append(keys, "mailip:"+ip)
+		if ok, err := s.allowAttempt(ctx, keys); err != nil || !ok {
+			return false, cmp.Or(err, ErrTooManyMails)
+		}
 	}
-	if ok, err := s.allowAttempt(ctx, keys); err != nil || !ok {
-		return cmp.Or(err, ErrTooManyMails)
+	mailKey := "mail:" + normEmail(email)
+	ok, err := s.allowAttempt(ctx, []string{mailKey})
+	if err != nil {
+		return false, err
 	}
-	return s.count(ctx, keys)
+	if ok {
+		keys = append(keys, mailKey)
+	}
+	return ok, s.count(ctx, keys)
 }
 
 func (s *Service) allowAttempt(ctx context.Context, keys []string) (bool, error) {
@@ -354,6 +365,12 @@ func (s *Service) OwnedProjects(ctx context.Context, userID string) ([]OwnedProj
 	return out, rows.Err()
 }
 
+// OwnedCount is how many projects an account owns, live or in the trash.
+func (s *Service) OwnedCount(ctx context.Context, userID string) (n int, err error) {
+	err = s.DB.QueryRowContext(ctx, `SELECT count(*) FROM projects WHERE owner = ?`, userID).Scan(&n)
+	return n, err
+}
+
 // Remove deletes an account and everything it owns, and returns how many
 // projects went. destroy deletes one project for good, live or in the trash,
 // files included. It stops at the first project it can't delete, leaving the
@@ -382,13 +399,6 @@ func (s *Service) Remove(ctx context.Context, userID string, destroy func(ctx co
 		return len(owned), err
 	}
 	return len(owned), tx.Commit()
-}
-
-// HasPassword reports whether the user can sign in with a password.
-func (s *Service) HasPassword(ctx context.Context, userID string) (bool, error) {
-	var n int
-	err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE id = ? AND password != ''`, userID).Scan(&n)
-	return n > 0, err
 }
 
 // Rename changes a user's email, keeping everything they own. Moving from

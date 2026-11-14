@@ -54,7 +54,7 @@ func TestPasswordLogin(t *testing.T) {
 			t.Fatalf("%v: got %v", c, err)
 		}
 	}
-	if has, _ := s.HasPassword(ctx, u.ID); !has {
+	if a, _ := s.AccountByID(ctx, u.ID); !a.HasPassword {
 		t.Fatal("HasPassword")
 	}
 }

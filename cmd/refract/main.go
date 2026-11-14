@@ -218,7 +218,7 @@ func run() error {
 		return err
 	}
 
-	acc := &access.Checker{DB: db}
+	acc := &access.Checker{DB: db, SkipVerified: authKind != "builtin"}
 	asa.svc.Access = acc
 	ra := &remoteAPI{svc: pa.svc, db: db, key: key, acc: acc}
 	if id := os.Getenv("REFRACT_GITHUB_CLIENT_ID"); id != "" {

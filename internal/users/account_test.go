@@ -218,33 +218,126 @@ func TestAllowMail(t *testing.T) {
 	s.SetPassword(ctx, "ana@example.com", "correct horse")
 	for _, email := range []string{"ana@example.com", "nobody@example.com"} {
 		for i := 0; i < maxMailsPerEmail; i++ {
-			if err := s.AllowMail(ctx, email, ""); err != nil {
-				t.Fatalf("%s #%d: %v", email, i+1, err)
+			if send, err := s.AllowMail(ctx, email, ""); err != nil || !send {
+				t.Fatalf("%s #%d: %v %v", email, i+1, send, err)
 			}
 		}
-		if err := s.AllowMail(ctx, email, ""); !errors.Is(err, ErrTooManyMails) {
-			t.Errorf("%s: 4th = %v", email, err)
+		// Past the address's limit nothing is sent, but nothing is said either.
+		if send, err := s.AllowMail(ctx, email, ""); err != nil || send {
+			t.Errorf("%s: 4th = %v, %v; want silent suppression", email, send, err)
 		}
 	}
 	s.DB.Exec(`UPDATE login_failures SET since = since - 901`)
-	if err := s.AllowMail(ctx, "ana@example.com", ""); err != nil {
-		t.Errorf("after the window: %v", err)
+	if send, err := s.AllowMail(ctx, "ana@example.com", ""); err != nil || !send {
+		t.Errorf("after the window: %v %v", send, err)
 	}
 	s.AllowMail(ctx, "ana@example.com", "")
 	s.AllowMail(ctx, "ana@example.com", "")
 	if ok, _ := s.Unlock(ctx, "ana@example.com"); !ok {
 		t.Error("unlock found nothing")
 	}
-	if err := s.AllowMail(ctx, "ana@example.com", ""); err != nil {
-		t.Errorf("after unlock: %v", err)
+	if send, err := s.AllowMail(ctx, "ana@example.com", ""); err != nil || !send {
+		t.Errorf("after unlock: %v %v", send, err)
 	}
 
 	for i := 0; i < maxMailsPerIP; i++ {
-		if err := s.AllowMail(ctx, "x"+string(rune('a'+i))+"@example.com", "10.0.0.9"); err != nil {
+		if _, err := s.AllowMail(ctx, "x"+string(rune('a'+i))+"@example.com", "10.0.0.9"); err != nil {
 			t.Fatalf("ip #%d: %v", i+1, err)
 		}
 	}
-	if err := s.AllowMail(ctx, "other@example.com", "10.0.0.9"); !errors.Is(err, ErrTooManyMails) {
+	if _, err := s.AllowMail(ctx, "other@example.com", "10.0.0.9"); !errors.Is(err, ErrTooManyMails) {
 		t.Errorf("21st from one address: %v", err)
+	}
+}
+
+func TestConfirmByProviderWipesWhatTheSquatterAttached(t *testing.T) {
+	for _, how := range []string{"provider", "reset"} {
+		t.Run(how, func(t *testing.T) {
+			s, ctx := newService(t), context.Background()
+			l, _ := s.SignUp(ctx, "ana@example.com", "attacker pass", "en")
+			id := l.To.ID
+			bystander, _ := s.SetPassword(ctx, "bob@example.com", "correct horse")
+			for _, u := range []string{id, bystander.ID} {
+				s.NewSession(ctx, u)
+				for _, k := range []string{"providers", "github", "siwc"} {
+					s.DB.Exec(`INSERT INTO settings (key, value) VALUES (?, 'x')`, "user/"+u+"/"+k)
+				}
+				s.DB.Exec(`INSERT INTO ai_usage (at, user_id, kind, model, input_tokens, cached_tokens, output_tokens, reasoning_tokens) VALUES (1, ?, 'agent', 'm', 1, 0, 1, 0)`, u)
+			}
+			s.DB.Exec(`INSERT INTO projects (id, name, created_at, updated_at, owner) VALUES ('sq', 'Squat', 0, 0, ?), ('bob', 'Bob', 0, 0, ?)`, id, bystander.ID)
+			s.DB.Exec(`INSERT INTO chats (id, project_id, title, created_at, updated_at) VALUES ('c1', 'sq', 't', 0, 0)`)
+
+			switch how {
+			case "provider":
+				if err := s.ConfirmByProvider(ctx, id); err != nil {
+					t.Fatal(err)
+				}
+			case "reset":
+				r, ok, err := s.RequestReset(ctx, "ana@example.com")
+				if err != nil || !ok {
+					t.Fatal(ok, err)
+				}
+				if _, err := s.ResetPassword(ctx, r.Token, "owners new pass"); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			count := func(q string, args ...any) int {
+				var n int
+				s.DB.QueryRow(q, args...).Scan(&n)
+				return n
+			}
+			if n := count(`SELECT count(*) FROM settings WHERE key LIKE ?`, "user/"+id+"/%"); n != 0 {
+				t.Errorf("%d settings left", n)
+			}
+			if n := count(`SELECT count(*) FROM ai_usage WHERE user_id = ?`, id); n != 0 {
+				t.Errorf("%d usage rows left", n)
+			}
+			if n := count(`SELECT count(*) FROM projects WHERE owner = ?`, id) + count(`SELECT count(*) FROM chats`); n != 0 {
+				t.Errorf("%d project or chat rows left", n)
+			}
+			if n := count(`SELECT count(*) FROM sessions WHERE user_id = ?`, id); n != 0 {
+				t.Errorf("%d sessions left", n)
+			}
+			if _, err := s.Login(ctx, "ana@example.com", "attacker pass", ""); err == nil {
+				t.Error("the squatter's password still works")
+			}
+			// Another account keeps everything.
+			if count(`SELECT count(*) FROM settings WHERE key LIKE ?`, "user/"+bystander.ID+"/%") != 3 ||
+				count(`SELECT count(*) FROM ai_usage WHERE user_id = ?`, bystander.ID) != 1 ||
+				count(`SELECT count(*) FROM projects WHERE owner = ?`, bystander.ID) != 1 {
+				t.Error("another account's data was touched")
+			}
+		})
+	}
+}
+
+func TestNewLinkKeepsEarlierOnes(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	u, _ := s.SetPassword(ctx, "ana@example.com", "correct horse")
+	var toks []string
+	for i := 0; i < 5; i++ {
+		l, ok, err := s.RequestReset(ctx, "ana@example.com")
+		if err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+		toks = append(toks, l.Token)
+		if i == 0 {
+			continue
+		}
+		// The victim's first link survives the next two requests.
+		_, err = s.tokenAccount(ctx, toks[0], Reset)
+		if i <= liveLinks-1 && err != nil {
+			t.Errorf("after %d links the first is gone: %v", i+1, err)
+		}
+	}
+	for i, tok := range toks {
+		_, err := s.tokenAccount(ctx, tok, Reset)
+		if live := i >= len(toks)-liveLinks; live != (err == nil) {
+			t.Errorf("link %d: err = %v, want live=%v", i, err, live)
+		}
+	}
+	if _, ok, _ := s.ResendVerification(ctx, u.ID); ok {
+		t.Error("verified account was sent a verify link")
 	}
 }

@@ -118,10 +118,13 @@ func (a *loginAPI) oidcStart(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: oidcCookie, Value: cookie, Path: "/api/auth/oidc/", MaxAge: 600,
 		HttpOnly: true, Secure: users.Secure(r), SameSite: http.SameSiteLaxMode})
+	then := &http.Cookie{Name: oidcThenCookie, Path: "/api/auth/oidc/", HttpOnly: true, Secure: users.Secure(r), SameSite: http.SameSiteLaxMode}
 	if thenAccount(r) { // back to Settings → Account afterwards, to finish deleting the account
-		http.SetCookie(w, &http.Cookie{Name: oidcThenCookie, Value: "account", Path: "/api/auth/oidc/", MaxAge: 600,
-			HttpOnly: true, Secure: users.Secure(r), SameSite: http.SameSiteLaxMode})
+		then.Value, then.MaxAge = "account", 600
+	} else { // a plain sign-in must not inherit an earlier, unfinished one
+		then.MaxAge = -1
 	}
+	http.SetCookie(w, then)
 	http.Redirect(w, r, to, http.StatusFound)
 }
 
@@ -173,13 +176,15 @@ func (a *loginAPI) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 // admitOIDC decides whether a provider sign-in may proceed, and into which
 // account. refusal is the login_error code when it may not. verified is
-// whether the provider vouched for the address (email_verified true).
+// whether the provider vouched for the address (email_verified true); the
+// provider's claim being false never gets here, oidc.Finish refuses it.
 //
 // Signing in by address alone is only safe when the account can't be someone
-// else's: an account with a password needs the provider's word that the
-// address is its owner's. And a provider that does vouch for an address whose
-// account was never confirmed (it started as a sign-up) takes it over: the
-// password set at sign-up goes, since it may not be the owner's.
+// else's. An account Refract has verified (made by the operator, by a provider
+// or confirmed by its owner) can't be a stranger's, so a provider that doesn't
+// send the claim (Microsoft Entra) may sign in to it. An account never
+// confirmed started as a sign-up: it needs the provider's word, and then the
+// provider takes it over, wiping what the sign-up attached (ConfirmByProvider).
 func (a *loginAPI) admitOIDC(ctx context.Context, email string, verified bool) (u auth.User, refusal string, err error) {
 	acct, err := a.users.Lookup(ctx, email)
 	switch {
@@ -192,21 +197,17 @@ func (a *loginAPI) admitOIDC(ctx context.Context, email string, verified bool) (
 	case err != nil:
 		return auth.User{}, "", err
 	}
-	if acct.HasPassword {
+	if !acct.Verified {
 		if !verified {
 			return auth.User{}, "unverified_email", nil
 		}
-		if !acct.Verified {
-			if err := a.users.ConfirmByProvider(ctx, acct.ID); err != nil {
-				return auth.User{}, "", err
-			}
+		if err := a.users.ConfirmByProvider(ctx, acct.ID); err != nil {
+			return auth.User{}, "", err
 		}
 	}
 	return auth.User{ID: acct.ID, Email: acct.Email}, "", nil
 }
 
-// changePassword needs the current password: a stolen session alone can't
-// take over the account. Other sessions are signed out.
 func (a *loginAPI) changePassword(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Current string `json:"current"`

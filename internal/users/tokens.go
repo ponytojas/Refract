@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ponytojas/Refract/internal/auth"
+	"github.com/ponytojas/Refract/internal/store"
 )
 
 // Single-use links sent by email: confirming an address and choosing a new
@@ -36,12 +37,22 @@ func (p Purpose) ttl() time.Duration {
 	return VerifyTTL
 }
 
+// liveLinks is how many unexpired links of one purpose an account keeps: a new
+// one doesn't cancel the earlier ones, so someone else asking for links can't
+// make the owner's unused link stop working (only push it out after a few more).
+const liveLinks = 3
+
 // issue makes a token for a link: 32 random bytes, base64url. Only its digest is
-// stored. The user's earlier tokens of the same purpose, and every expired token,
-// are deleted, so only the newest link works.
+// stored. Expired and used tokens are deleted, and so are the user's oldest
+// tokens of the same purpose beyond liveLinks.
 func (s *Service) issue(ctx context.Context, tx *sql.Tx, userID string, p Purpose) (string, error) {
 	now := s.now()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM account_tokens WHERE expires_at <= ? OR (user_id = ? AND purpose = ?)`, now.Unix(), userID, p); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM account_tokens WHERE expires_at <= ? OR used_at != 0`, now.Unix()); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM account_tokens WHERE user_id = ? AND purpose = ? AND hash NOT IN (
+		SELECT hash FROM account_tokens WHERE user_id = ? AND purpose = ? ORDER BY expires_at DESC, rowid DESC LIMIT ?)`,
+		userID, p, userID, p, liveLinks-1); err != nil {
 		return "", err
 	}
 	b := make([]byte, 32)
@@ -123,12 +134,11 @@ func (s *Service) SignUp(ctx context.Context, email, pw, lang string) (Link, err
 	}
 	defer tx.Rollback()
 	var l Link
-	err = tx.QueryRowContext(ctx, `SELECT id, email, lang, password != '', email_verified_at > 0 FROM users WHERE email = ?`, email).
-		Scan(&l.To.ID, &l.To.Email, &l.To.Lang, &l.To.HasPassword, &l.To.Verified)
+	l.To, err = scanAccount(tx.QueryRowContext(ctx, accountColumns+` WHERE email = ?`, email))
 	switch {
 	case err == nil: // exists: change nothing, offer the way back in
 		l.Purpose, l.SignUp = Reset, true
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, ErrNoAccount):
 		l.To = Account{ID: newID(), Email: email, Lang: lang, HasPassword: true}
 		l.Purpose = Verify
 		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, created_at, password, lang) VALUES (?, ?, ?, ?, ?)`,
@@ -201,6 +211,9 @@ func (s *Service) ResetPassword(ctx context.Context, token, pw string) (auth.Use
 	if err := tx.QueryRowContext(ctx, `SELECT email FROM users WHERE id = ?`, u.ID).Scan(&u.Email); err != nil {
 		return auth.User{}, err
 	}
+	if err := clearUnverified(ctx, tx, u.ID); err != nil {
+		return auth.User{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET password = ? WHERE id = ?`, h, u.ID); err != nil {
 		return auth.User{}, err
 	}
@@ -249,15 +262,33 @@ func (s *Service) VerifyEmail(ctx context.Context, token, signedInAs, pw, ip str
 }
 
 // ConfirmByProvider is called when an identity provider vouches for the email of
-// an account that was never verified: someone may have signed up with a password
-// for an address that isn't theirs, so its password, sessions and links go, and
-// it becomes verified. No-op for a verified account.
+// an account that was never verified: someone may have signed up for an address
+// that isn't theirs, so everything that account holds goes (see clearUnverified)
+// and it becomes verified. No-op for a verified account.
 func (s *Service) ConfirmByProvider(ctx context.Context, userID string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := clearUnverified(ctx, tx, userID); err != nil {
+		return err
+	}
+	if err := s.markVerified(ctx, tx, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// clearUnverified is what the real owner of an address does to an account that
+// was never verified, when taking it over: whoever signed up may have attached
+// anything, so the password, sessions and links go, and so does everything
+// stored for the account: AI providers and keys, ChatGPT and GitHub
+// connections (all settings under the user's prefix), AI usage, and projects
+// (rows, with their chats). Verification is required to create projects, so
+// there should be none; their files, if any, would be orphans. A verified
+// account is left alone.
+func clearUnverified(ctx context.Context, tx *sql.Tx, userID string) error {
 	var verified bool
 	if err := tx.QueryRowContext(ctx, `SELECT email_verified_at > 0 FROM users WHERE id = ?`, userID).Scan(&verified); err != nil {
 		return err
@@ -265,17 +296,21 @@ func (s *Service) ConfirmByProvider(ctx context.Context, userID string) error {
 	if verified {
 		return nil
 	}
-	for _, q := range []string{
-		`UPDATE users SET password = '' WHERE id = ?`,
-		`DELETE FROM sessions WHERE user_id = ?`,
-		`DELETE FROM account_tokens WHERE user_id = ?`,
+	prefix := store.UserKey(userID, "")
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE users SET password = '' WHERE id = ?`, []any{userID}},
+		{`DELETE FROM sessions WHERE user_id = ?`, []any{userID}},
+		{`DELETE FROM account_tokens WHERE user_id = ?`, []any{userID}},
+		{`DELETE FROM settings WHERE substr(key, 1, length(?)) = ?`, []any{prefix, prefix}},
+		{`DELETE FROM ai_usage WHERE user_id = ?`, []any{userID}},
+		{`DELETE FROM projects WHERE owner = ?`, []any{userID}},
 	} {
-		if _, err := tx.ExecContext(ctx, q, userID); err != nil {
+		if _, err := tx.ExecContext(ctx, q.sql, q.args...); err != nil {
 			return err
 		}
 	}
-	if err := s.markVerified(ctx, tx, userID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
