@@ -25,6 +25,7 @@ import (
 
 var (
 	ErrNotFound  = errors.New("not found")
+	ErrTrashed   = errors.New("the project is in the trash")
 	ErrBusy      = errors.New("the assistant is already working on this project")
 	ErrState     = errors.New("this turn is not waiting for review")
 	ErrReviewing = errors.New("this turn is already being accepted or rejected")
@@ -307,6 +308,13 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 	defer s.free(c.ProjectID)
 	p, err := s.Projects.Get(ctx, c.ProjectID)
 	if err != nil {
+		if errors.Is(err, projects.ErrNotFound) {
+			// A trash between the route's check and the reservation: say so, so the workspace can lock.
+			var deleted int64
+			if s.DB.QueryRowContext(ctx, `SELECT deleted_at FROM projects WHERE id = ?`, c.ProjectID).Scan(&deleted) == nil && deleted > 0 {
+				return nil, ErrTrashed
+			}
+		}
 		return nil, err
 	}
 

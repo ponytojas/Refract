@@ -491,11 +491,11 @@ func TestHoldFailsWhileATurnRuns(t *testing.T) {
 
 // A turn that starts after the project went to the trash finds nothing: no
 // turn row and no worktree.
-func TestAskOnATrashedProjectIsNotFound(t *testing.T) {
+func TestAskOnATrashedProjectIsRefused(t *testing.T) {
 	s, ps, id, chat := setup(t, &fakeProvider{script: [][]ai.Event{done("never")}})
 	ps.DB.Exec(`UPDATE projects SET deleted_at = 1 WHERE id = ?`, id)
-	if _, err := s.Ask(ownerCtx, chat, "hi", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, projects.ErrNotFound) {
-		t.Fatalf("Ask = %v, want ErrNotFound", err)
+	if _, err := s.Ask(ownerCtx, chat, "hi", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, ErrTrashed) {
+		t.Fatalf("Ask = %v, want ErrTrashed", err)
 	}
 	var n int
 	ps.DB.QueryRow(`SELECT count(*) FROM turns`).Scan(&n)
@@ -529,7 +529,7 @@ func TestTrashedProjectTakesNoTurns(t *testing.T) {
 	}
 	var before int
 	ps.DB.QueryRow(`SELECT count(*) FROM turns`).Scan(&before)
-	if _, err := s.Ask(ownerCtx, chat, "again", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, projects.ErrNotFound) {
+	if _, err := s.Ask(ownerCtx, chat, "again", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, ErrTrashed) {
 		t.Fatalf("Ask after trash = %v", err)
 	}
 	var after int

@@ -77,6 +77,11 @@ func (a *assistantAPI) ask(w http.ResponseWriter, r *http.Request) {
 	}
 	turn, err := a.svc.Ask(r.Context(), r.PathValue("chat"), in.Message, in.Context, in.Choice, func(e agent.Event) { send(e) })
 	if err != nil {
+		if errors.Is(err, assistant.ErrTrashed) {
+			// Not a failure of the assistant: the project was trashed while the request started.
+			send(map[string]any{"type": "error", "error": &ai.Error{Kind: "project_trashed", Message: "not found"}})
+			return
+		}
 		var ae *ai.Error
 		if !errors.As(err, &ae) {
 			ae = &ai.Error{Kind: ai.ErrOther, Message: err.Error()}
