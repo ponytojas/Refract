@@ -185,7 +185,7 @@ func TestFailureTableIsBounded(t *testing.T) {
 	}
 	// Full of expired rows: they're dropped, and the new key counts.
 	fill(time.Now().Add(-2 * failWindow).Unix())
-	s.fail(ctx, []string{"email:new"})
+	s.count(ctx, []string{"email:new"})
 	var rows int
 	s.DB.QueryRow(`SELECT count(*) FROM login_failures`).Scan(&rows)
 	if rows != 1 || count("email:new") != 1 {
@@ -193,7 +193,7 @@ func TestFailureTableIsBounded(t *testing.T) {
 	}
 	// Full of recent rows: existing keys still count, new ones aren't added.
 	fill(time.Now().Unix())
-	s.fail(ctx, []string{"email:1", "email:another"})
+	s.count(ctx, []string{"email:1", "email:another"})
 	if count("email:1") != 2 || count("email:another") != 0 {
 		t.Fatalf("existing %d, new %d", count("email:1"), count("email:another"))
 	}

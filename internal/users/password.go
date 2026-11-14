@@ -40,6 +40,9 @@ const (
 	maxFailuresPerIP = 30 // per address: allows a few people behind one network
 	failWindow       = 15 * time.Minute
 	maxTracked       = 100_000
+
+	maxMailsPerEmail = 3  // emails asked for to one address per window
+	maxMailsPerIP    = 20 // and from one network address
 )
 
 var (
@@ -83,11 +86,11 @@ func normEmail(email string) string { return strings.ToLower(strings.TrimSpace(e
 // them out everywhere.
 func (s *Service) SetPassword(ctx context.Context, email, pw string) (auth.User, error) {
 	email = normEmail(email)
-	if !strings.Contains(email, "@") || strings.ContainsAny(email, " \t\r\n") {
-		return auth.User{}, fmt.Errorf("%q is not an email address", email)
+	if err := validEmail(email); err != nil {
+		return auth.User{}, err
 	}
-	if len(pw) < MinPassword || len(pw) > maxPassword {
-		return auth.User{}, fmt.Errorf("passwords need %d to %d characters", MinPassword, maxPassword)
+	if err := validPassword(pw); err != nil {
+		return auth.User{}, err
 	}
 	u, err := s.Resolve(ctx, email)
 	if err != nil {
@@ -100,8 +103,27 @@ func (s *Service) SetPassword(ctx context.Context, email, pw string) (auth.User,
 	if _, err := s.DB.ExecContext(ctx, `UPDATE users SET password = ? WHERE id = ?`, h, u.ID); err != nil {
 		return auth.User{}, err
 	}
-	_, err = s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, u.ID)
+	if _, err = s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, u.ID); err != nil {
+		return u, err
+	}
+	// A link to choose a password is no longer wanted once one was chosen.
+	_, err = s.DB.ExecContext(ctx, `DELETE FROM account_tokens WHERE user_id = ? AND purpose = ?`, u.ID, Reset)
 	return u, err
+}
+
+// validEmail checks an already normalized address.
+func validEmail(email string) error {
+	if !strings.Contains(email, "@") || strings.ContainsAny(email, " \t\r\n") {
+		return fmt.Errorf("%q is not an email address", email)
+	}
+	return nil
+}
+
+func validPassword(pw string) error {
+	if len(pw) < MinPassword || len(pw) > maxPassword {
+		return fmt.Errorf("passwords need %d to %d characters", MinPassword, maxPassword)
+	}
+	return nil
 }
 
 // Login checks an email and password. ip is the client's address (ClientIP).
@@ -126,10 +148,10 @@ func (s *Service) Login(ctx context.Context, email, pw, ip string) (auth.User, e
 	}
 	if stored == "" {
 		checkPassword(dummyHash(), pw)
-		return auth.User{}, cmp.Or(s.fail(ctx, keys), ErrBadLogin)
+		return auth.User{}, cmp.Or(s.count(ctx, keys), ErrBadLogin)
 	}
 	if !checkPassword(stored, pw) {
-		return auth.User{}, cmp.Or(s.fail(ctx, keys), ErrBadLogin)
+		return auth.User{}, cmp.Or(s.count(ctx, keys), ErrBadLogin)
 	}
 	// The address keeps its count: it may be trying several accounts.
 	_, err = s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE key = ?`, keys[0])
@@ -137,10 +159,27 @@ func (s *Service) Login(ctx context.Context, email, pw, ip string) (auth.User, e
 }
 
 // limits: failures allowed per window, by kind of key.
-var limits = map[string]int{"email": maxFailures, "ip": maxFailuresPerIP}
+var limits = map[string]int{"email": maxFailures, "ip": maxFailuresPerIP, "mail": maxMailsPerEmail, "mailip": maxMailsPerIP}
+
+// ErrTooManyMails is AllowMail's refusal.
+var ErrTooManyMails = errors.New("too many emails to this address: try again in a few minutes")
+
+// AllowMail counts one email to address, asked for from ip, and refuses past
+// the limits. It runs before any account lookup, so its answer is the same
+// whether or not the address has an account.
+func (s *Service) AllowMail(ctx context.Context, email, ip string) error {
+	keys := []string{"mail:" + normEmail(email)}
+	if ip != "" {
+		keys = append(keys, "mailip:"+ip)
+	}
+	if ok, err := s.allowAttempt(ctx, keys); err != nil || !ok {
+		return cmp.Or(err, ErrTooManyMails)
+	}
+	return s.count(ctx, keys)
+}
 
 func (s *Service) allowAttempt(ctx context.Context, keys []string) (bool, error) {
-	expired := time.Now().Add(-failWindow).Unix()
+	expired := s.now().Add(-failWindow).Unix()
 	for _, k := range keys {
 		var n int
 		err := s.DB.QueryRowContext(ctx, `SELECT count FROM login_failures WHERE key = ? AND since > ?`, k, expired).Scan(&n)
@@ -158,8 +197,9 @@ func (s *Service) allowAttempt(ctx context.Context, keys []string) (bool, error)
 	return true, nil
 }
 
-func (s *Service) fail(ctx context.Context, keys []string) error {
-	now := time.Now()
+// count adds one to each key: a failed sign-in, or an email asked for.
+func (s *Service) count(ctx context.Context, keys []string) error {
+	now := s.now()
 	// Made-up emails and addresses each add a row: expired rows go first, and
 	// while the table is full of recent ones, only existing keys are counted.
 	if _, err := s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE since <= ?`, now.Add(-failWindow).Unix()); err != nil {
@@ -187,7 +227,8 @@ func (s *Service) fail(ctx context.Context, keys []string) error {
 // Unlock clears an account's failed sign-ins, so it can try again at once.
 // An address that failed too often still waits out its window.
 func (s *Service) Unlock(ctx context.Context, email string) (bool, error) {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE key = ?`, "email:"+normEmail(email))
+	e := normEmail(email)
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE key IN (?, ?)`, "email:"+e, "mail:"+e)
 	if err != nil {
 		return false, err
 	}
