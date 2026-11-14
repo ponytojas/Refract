@@ -90,6 +90,21 @@ var migrations = []string{
 	CREATE INDEX ai_usage_user ON ai_usage(user_id, at)`,
 	// Trash (T3): when the project was deleted, as Unix seconds; 0 while it is live.
 	`ALTER TABLE projects ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0`,
+	// Account lifecycle (A3): a verified email (existing accounts count as
+	// verified), the language for emails ('' until known), when a session's
+	// sign-in happened, and the single-use links sent by email.
+	`ALTER TABLE users ADD COLUMN email_verified_at INTEGER NOT NULL DEFAULT 0;
+	UPDATE users SET email_verified_at = max(created_at, 1);
+	ALTER TABLE users ADD COLUMN lang TEXT NOT NULL DEFAULT '';
+	ALTER TABLE sessions ADD COLUMN authenticated_at INTEGER NOT NULL DEFAULT 0;
+	CREATE TABLE account_tokens (
+		hash       TEXT PRIMARY KEY, -- sha256 (hex) of the token in the link
+		user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		purpose    TEXT NOT NULL,    -- verify | reset
+		expires_at INTEGER NOT NULL,
+		used_at    INTEGER NOT NULL DEFAULT 0
+	);
+	CREATE INDEX account_tokens_user ON account_tokens(user_id, purpose)`,
 }
 
 // Open opens (creating if needed) the database at path and applies pending migrations.

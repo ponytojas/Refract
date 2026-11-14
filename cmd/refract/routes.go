@@ -38,6 +38,7 @@ type route struct {
 	Pattern string // "METHOD /path"
 	Scope   scope
 	Min     access.Role
+	Needs   []access.Need // what the account must have; checked after the role
 }
 
 type router struct {
@@ -49,25 +50,25 @@ type router struct {
 	stub func(route) http.HandlerFunc
 }
 
-func (rt *router) user(pattern string, h http.HandlerFunc) {
-	rt.register(route{Pattern: pattern, Scope: scopeUser}, h)
+func (rt *router) user(pattern string, h http.HandlerFunc, needs ...access.Need) {
+	rt.register(route{Pattern: pattern, Scope: scopeUser, Needs: needs}, h)
 }
 
-func (rt *router) project(pattern string, min access.Role, h http.HandlerFunc) {
-	rt.register(route{Pattern: pattern, Scope: scopeProject, Min: min}, h)
+func (rt *router) project(pattern string, min access.Role, h http.HandlerFunc, needs ...access.Need) {
+	rt.register(route{Pattern: pattern, Scope: scopeProject, Min: min, Needs: needs}, h)
 }
 
-func (rt *router) chat(pattern string, min access.Role, h http.HandlerFunc) {
-	rt.register(route{Pattern: pattern, Scope: scopeChat, Min: min}, h)
+func (rt *router) chat(pattern string, min access.Role, h http.HandlerFunc, needs ...access.Need) {
+	rt.register(route{Pattern: pattern, Scope: scopeChat, Min: min, Needs: needs}, h)
 }
 
-func (rt *router) turn(pattern string, min access.Role, h http.HandlerFunc) {
-	rt.register(route{Pattern: pattern, Scope: scopeTurn, Min: min}, h)
+func (rt *router) turn(pattern string, min access.Role, h http.HandlerFunc, needs ...access.Need) {
+	rt.register(route{Pattern: pattern, Scope: scopeTurn, Min: min, Needs: needs}, h)
 }
 
 // trashed registers a route that reaches a project in the trash.
-func (rt *router) trashed(pattern string, min access.Role, h http.HandlerFunc) {
-	rt.register(route{Pattern: pattern, Scope: scopeTrash, Min: min}, h)
+func (rt *router) trashed(pattern string, min access.Role, h http.HandlerFunc, needs ...access.Need) {
+	rt.register(route{Pattern: pattern, Scope: scopeTrash, Min: min, Needs: needs}, h)
 }
 
 func (rt *router) register(r route, h http.HandlerFunc) {
@@ -155,8 +156,6 @@ func (rt *router) guard(r route, h http.Handler) http.Handler {
 		check := rt.acc.Require
 		switch r.Scope {
 		case scopeUser:
-			h.ServeHTTP(w, req)
-			return
 		case scopeProject:
 			project = req.PathValue("id")
 		case scopeTrash:
@@ -167,7 +166,7 @@ func (rt *router) guard(r route, h http.Handler) http.Handler {
 		case scopeTurn:
 			project, err = rt.acc.TurnProject(ctx, req.PathValue("turn"))
 		}
-		if err == nil {
+		if err == nil && r.Scope != scopeUser {
 			err = check(ctx, project, r.Min)
 		}
 		if err != nil {
@@ -183,8 +182,21 @@ func (rt *router) guard(r route, h http.Handler) http.Handler {
 			accessError(w, err)
 			return
 		}
+		// Last, so a stranger still gets the not-found of a missing project.
+		if err := rt.acc.Meets(ctx, r.Needs...); err != nil {
+			needError(w, err)
+			return
+		}
 		h.ServeHTTP(w, req)
 	})
+}
+
+func needError(w http.ResponseWriter, err error) {
+	if errors.Is(err, access.ErrUnverified) {
+		kindError(w, http.StatusForbidden, "email_unverified", err)
+		return
+	}
+	accessError(w, err)
 }
 
 func accessError(w http.ResponseWriter, err error) {

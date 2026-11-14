@@ -259,4 +259,67 @@ export default {
   'The trash is empty': 'La papelera está vacía',
   'The assistant is working on this project. Stop it or wait until it finishes, then try again.':
     'El asistente está trabajando en este proyecto. Deténlo o espera a que termine y vuelve a intentarlo.',
+  // Account lifecycle (A3)
+  'Confirm your email address to create or import projects. Open the link we sent you, or send a new one from Settings → Account.':
+    'Confirma tu correo electrónico para crear o importar proyectos. Abre el enlace que te enviamos, o pide uno nuevo en Ajustes → Cuenta.',
+  'Too many emails to this address. Try again in a few minutes.':
+    'Demasiados correos a esta dirección. Inténtalo de nuevo en unos minutos.',
+  "This server can't send emails, so this isn't available. Ask the person who runs it.":
+    'Este servidor no puede enviar correos, así que esto no está disponible. Pregunta a quien lo administra.',
+  "This server doesn't take new accounts. Ask the person who runs it to add you.":
+    'Este servidor no admite cuentas nuevas. Pide a quien lo administra que te añada.',
+  'This link has expired or was already used.': 'Este enlace ha caducado o ya se usó.',
+  'Enter your password to continue.': 'Introduce tu contraseña para continuar.',
+  'For your security, sign in again, then delete your account within 10 minutes.':
+    'Por seguridad, vuelve a iniciar sesión y elimina tu cuenta en los 10 minutos siguientes.',
+  "Your provider didn't confirm this email address, and this account has a password: sign in with it instead.":
+    'Tu proveedor no confirmó esta dirección de correo y la cuenta tiene contraseña: inicia sesión con ella.',
+  'Forgot your password?': '¿Olvidaste tu contraseña?',
+  'New to Refract?': '¿Nuevo en Refract?',
+  'Create an account': 'Crear una cuenta',
+  'Your account and everything in it were deleted.': 'Tu cuenta y todo lo que contenía se han eliminado.',
+  'Check your email': 'Revisa tu correo',
+  "If it doesn't arrive in a few minutes, check your spam folder.":
+    'Si no llega en unos minutos, mira en la carpeta de spam.',
+  'Back to sign in': 'Volver a iniciar sesión',
+  'We sent a message to {email}. Open the link in it to continue.':
+    'Enviamos un mensaje a {email}. Abre el enlace que contiene para continuar.',
+  'Create your account': 'Crea tu cuenta',
+  '8 or more characters': '8 o más caracteres',
+  'Language for emails': 'Idioma de los correos',
+  'Create account': 'Crear cuenta',
+  'Already have an account?': '¿Ya tienes una cuenta?',
+  'Reset your password': 'Restablece tu contraseña',
+  'Send reset link': 'Enviar enlace de restablecimiento',
+  'If {email} has an account, we sent it a link to choose a new password. The link works for 1 hour.':
+    'Si {email} tiene una cuenta, le enviamos un enlace para elegir una contraseña nueva. El enlace funciona durante 1 hora.',
+  'Confirm your email': 'Confirma tu correo',
+  'Confirm my email': 'Confirmar mi correo',
+  'Enter your password to confirm your email and sign in.':
+    'Introduce tu contraseña para confirmar tu correo e iniciar sesión.',
+  'Email confirmed.': 'Correo confirmado.',
+  'Open Refract': 'Abrir Refract',
+  'Sign in and send a new link from Settings → Account.': 'Inicia sesión y pide un enlace nuevo en Ajustes → Cuenta.',
+  'Choose a new password': 'Elige una contraseña nueva',
+  'Save and sign in': 'Guardar e iniciar sesión',
+  'Confirm your email address to create or import projects. We sent a link to {email}.':
+    'Confirma tu correo electrónico para crear o importar proyectos. Enviamos un enlace a {email}.',
+  'Send it again': 'Enviarlo de nuevo',
+  'Sent. The link works for 24 hours.': 'Enviado. El enlace funciona durante 24 horas.',
+  Confirmed: 'Confirmado',
+  'Not confirmed': 'Sin confirmar',
+  'Send the link again': 'Enviar el enlace de nuevo',
+  'The language of the messages Refract sends you.': 'El idioma de los mensajes que te envía Refract.',
+  'You sign in with {oidc}.': 'Inicias sesión con {oidc}.',
+  'Delete account': 'Eliminar cuenta',
+  'Deletes your account and everything in it: projects (including those in the trash), their history and chats, and your AI and GitHub connections. Export the projects you want to keep first.':
+    'Elimina tu cuenta y todo lo que contiene: proyectos (también los de la papelera), su historial y chats, y tus conexiones de IA y GitHub. Exporta antes los proyectos que quieras conservar.',
+  'Delete your account?': '¿Eliminar tu cuenta?',
+  "This deletes {email} and its {n} project for good. It can't be undone.":
+    'Esto elimina {email} y su {n} proyecto para siempre. No se puede deshacer.',
+  "This deletes {email} and its {n} projects for good. It can't be undone.":
+    'Esto elimina {email} y sus {n} proyectos para siempre. No se puede deshacer.',
+  "To confirm, sign in again with {oidc}. You'll come back here.":
+    'Para confirmar, vuelve a iniciar sesión con {oidc}. Volverás aquí.',
+  'Sign in again': 'Iniciar sesión de nuevo',
 } as Record<string, string>

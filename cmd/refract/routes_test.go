@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,6 +38,12 @@ func accessDB(t *testing.T) *access.Checker {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
+	// ana and ben have verified emails, una has not.
+	for id, verified := range map[string]int{"ana": 1, "ben": 1, "una": 0} {
+		if _, err := db.Exec(`INSERT INTO users (id, email, created_at, email_verified_at) VALUES (?, ?, 1, ?)`, id, id+"@example.com", verified); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for user, o := range map[string]owned{"ana": ana, "ben": ben} {
 		for _, q := range []struct {
 			sql  string
@@ -289,6 +296,8 @@ var allowedRegistrations = map[string][]string{
 	"main.go:run":        {`"/api/"`, `"/"`, `"GET /healthz"`, `"/api/auth/"`},
 	"login_api.go:handler": {
 		`"GET /api/auth/config"`, `"POST /api/auth/login"`, `"POST /api/auth/logout"`,
+		// Served to people who aren't signed in yet: they ask for sign-up, a new password or to confirm an address.
+		`"POST /api/auth/signup"`, `"POST /api/auth/forgot"`, `"POST /api/auth/reset"`, `"POST /api/auth/verify"`,
 		`"GET /api/auth/oidc/start"`, `"GET /api/auth/oidc/callback"`,
 		`"/api/auth/oidc/"`, `"/api/auth/"`,
 	},
@@ -390,5 +399,66 @@ func TestHandlersKeepUsersApart(t *testing.T) {
 	}
 	if ps, _ := ps.List(auth.WithUser(context.Background(), auth.User{ID: "ben"})); len(ps) != 1 || ps[0].ID != ben.project {
 		t.Errorf("ben lists %+v", ps)
+	}
+}
+
+// Creating or importing a project needs a verified email, declared on the route
+// and enforced by the guard: no other route asks for it.
+func TestRouteNeeds(t *testing.T) {
+	rt := table(accessDB(t))
+	want := []string{"POST /api/projects", "POST /api/projects/import", "POST /api/projects/import-folder"}
+	var got []string
+	for _, r := range rt.routes {
+		if slices.Contains(r.Needs, access.VerifiedEmail) {
+			got = append(got, r.Pattern)
+		}
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("routes needing a verified email = %v, want %v", got, want)
+	}
+	as := func(user string) context.Context {
+		return auth.WithUser(context.Background(), auth.User{ID: user})
+	}
+	for _, r := range rt.routes {
+		if r.Scope != scopeUser {
+			continue
+		}
+		needs := slices.Contains(want, r.Pattern)
+		for _, who := range []string{"una", "nobody"} {
+			w := httptest.NewRecorder()
+			rt.mux.ServeHTTP(w, request(r, ana).WithContext(as(who)))
+			switch {
+			case !needs && w.Code != reached:
+				t.Errorf("%s as %s = %d, want it reached", r.Pattern, who, w.Code)
+			case needs && (w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), `"email_unverified"`)):
+				t.Errorf("%s as %s = %d %s, want 403 email_unverified", r.Pattern, who, w.Code, w.Body.String())
+			}
+		}
+		if needs {
+			w := httptest.NewRecorder()
+			rt.mux.ServeHTTP(w, request(r, ana).WithContext(as("ana")))
+			if w.Code != reached {
+				t.Errorf("%s as a verified user = %d", r.Pattern, w.Code)
+			}
+		}
+	}
+}
+
+// Only REFRACT_AUTH=builtin can verify an address, so elsewhere the need is waived.
+func TestRouteNeedsWaivedOutsideBuiltin(t *testing.T) {
+	acc := accessDB(t)
+	acc.SkipVerified = true
+	rt := table(acc)
+	for _, r := range rt.routes {
+		if !slices.Contains(r.Needs, access.VerifiedEmail) {
+			continue
+		}
+		w := httptest.NewRecorder()
+		rt.mux.ServeHTTP(w, request(r, ana).WithContext(auth.WithUser(context.Background(), auth.User{ID: "una"})))
+		if w.Code != reached {
+			t.Errorf("%s as an unverified user outside builtin = %d, want it reached", r.Pattern, w.Code)
+		}
 	}
 }

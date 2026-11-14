@@ -1,8 +1,9 @@
-import { t } from '@/lib/i18n'
+import { lang, t } from '@/lib/i18n'
 import { chatgptOffered } from '@/lib/mode'
 
-// Every /api call carries X-Refract (the server rejects requests without it: CSRF).
-const headers = { 'X-Refract': '1' }
+// Every /api call carries X-Refract (the server rejects requests without it: CSRF),
+// and the interface language, which the server uses for the emails it sends.
+const headers = { 'X-Refract': '1', 'X-Refract-Lang': lang }
 
 export type ApiError = { kind: string; message: string; code?: string; param?: string }
 
@@ -149,6 +150,22 @@ export function describe(e: ApiError): string {
       return t('The current password is wrong.')
     case 'too_many_attempts':
       return t('Too many failed attempts. Try again in a few minutes.')
+    case 'email_unverified':
+      return t(
+        'Confirm your email address to create or import projects. Open the link we sent you, or send a new one from Settings → Account.',
+      )
+    case 'too_many_emails':
+      return t('Too many emails to this address. Try again in a few minutes.')
+    case 'mail_unavailable':
+      return t("This server can't send emails, so this isn't available. Ask the person who runs it.")
+    case 'signup_closed':
+      return t("This server doesn't take new accounts. Ask the person who runs it to add you.")
+    case 'invalid_token':
+      return t('This link has expired or was already used.')
+    case 'password_required':
+      return t('Enter your password to continue.')
+    case 'reauth_required':
+      return t('For your security, sign in again, then delete your account within 10 minutes.')
     case 'login_required':
       return t('Your session ended. Reload the page to sign in again.')
     case 'invalid_key':

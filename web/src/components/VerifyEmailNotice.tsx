@@ -1,0 +1,28 @@
+import { Loader2, MailWarning } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { useAccount } from '@/components/useAccount'
+import { t } from '@/lib/i18n'
+
+/** A strip above the project list while the account's email is unconfirmed (creating and importing need it). */
+export default function VerifyEmailNotice() {
+  const { account, sending, resend } = useAccount()
+  if (!account || account.email_verified) return null
+  return (
+    <div
+      role="status"
+      className="mx-5 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm"
+    >
+      <MailWarning className="size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+      <span className="mr-auto">
+        {t('Confirm your email address to create or import projects. We sent a link to {email}.', {
+          email: account.email,
+        })}
+      </span>
+      {account.mail && (
+        <Button type="button" size="sm" variant="outline" disabled={sending} onClick={resend}>
+          {sending && <Loader2 className="animate-spin" />} {t('Send it again')}
+        </Button>
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,11 @@
+Subject: Choose a new password for Refract
+
+Hi,
+
+{{if .SignUp}}Someone tried to create a Refract account at {{.Site}} with this address ({{.Email}}), which already has one. If it was you, sign in, or choose a new password with this link:{{else}}Someone asked to choose a new password for the Refract account at {{.Site}} with this address ({{.Email}}). To do it, open this link:{{end}}
+
+{{.Link}}
+
+The link works for 1 hour and only once. Choosing a new password signs you out everywhere.
+
+If it wasn't you, ignore this message: nothing has changed.

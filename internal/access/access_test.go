@@ -134,3 +134,37 @@ func TestTrashedProjectsHaveNoRole(t *testing.T) {
 		t.Errorf("TrashedRole of a live project = %v", role)
 	}
 }
+
+func TestMeets(t *testing.T) {
+	c, ctx := setup(t), context.Background()
+	c.DB.Exec(`INSERT INTO users (id, email, created_at, email_verified_at) VALUES ('ver', 'v@example.com', 1, 1), ('unv', 'u@example.com', 1, 0)`)
+	as := func(id string) context.Context { return auth.WithUser(ctx, auth.User{ID: id}) }
+	for _, tc := range []struct {
+		name  string
+		ctx   context.Context
+		needs []Need
+		want  error
+	}{
+		{"verified", as("ver"), []Need{VerifiedEmail}, nil},
+		{"unverified", as("unv"), []Need{VerifiedEmail}, ErrUnverified},
+		{"no users row", as("ghost"), []Need{VerifiedEmail}, ErrUnverified},
+		{"no user", ctx, []Need{VerifiedEmail}, ErrNoUser},
+		{"no needs, no user", ctx, nil, nil},
+	} {
+		if err := c.Meets(tc.ctx, tc.needs...); !errors.Is(err, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.name, err, tc.want)
+		}
+	}
+	if err := c.Meets(as("ver"), Need(99)); err == nil {
+		t.Error("an unknown need was met")
+	}
+
+	// Outside REFRACT_AUTH=builtin nobody can verify an address: the need is waived.
+	c.SkipVerified = true
+	if err := c.Meets(as("unv"), VerifiedEmail); err != nil {
+		t.Errorf("unverified with SkipVerified: %v", err)
+	}
+	if err := c.Meets(ctx, VerifiedEmail); !errors.Is(err, ErrNoUser) {
+		t.Errorf("no user with SkipVerified: %v", err)
+	}
+}

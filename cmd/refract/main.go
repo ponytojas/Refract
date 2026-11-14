@@ -28,6 +28,7 @@ import (
 	"github.com/ponytojas/Refract/internal/compile"
 	"github.com/ponytojas/Refract/internal/fonts"
 	"github.com/ponytojas/Refract/internal/github"
+	"github.com/ponytojas/Refract/internal/mail"
 	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/openalex"
 	"github.com/ponytojas/Refract/internal/projects"
@@ -49,7 +50,7 @@ Usage:
   refract login      sign in with ChatGPT on this computer and write a credential file
                      to upload in Settings → Assistant (run "refract login -h" for options)
   refract users add <email>
-                     create an account, or reset its password (REFRACT_AUTH=password);
+                     create an account, or reset its password (REFRACT_AUTH=builtin);
                      prints a generated password
   refract users rename <email> <new email>
                      change an account's email, keeping its data ("local" is the
@@ -110,9 +111,24 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := checkDeployment(deployment, cmp.Or(os.Getenv("REFRACT_AUTH"), "cloudflare"), os.Getenv("REFRACT_PUBLIC_URL")); err != nil {
+	authKind := authMode(os.Getenv("REFRACT_AUTH"))
+	if err := checkDeployment(deployment, authKind, os.Getenv("REFRACT_PUBLIC_URL")); err != nil {
 		return err
 	}
+	signup, err := parseSignup(deployment, os.Getenv("REFRACT_SIGNUP"))
+	if err != nil {
+		return err
+	}
+	smtp, err := mailFromEnv()
+	if err != nil {
+		return err
+	}
+	base, _ := publicBase(os.Getenv("REFRACT_PUBLIC_URL"))
+	mailReady := smtp != nil && base != ""
+	if err := checkSignup(deployment, authKind, signup, mailReady); err != nil {
+		return err
+	}
+	warnAccounts(authKind, signup, smtp != nil, base != "", os.Getenv("REFRACT_SIGNUP") != "")
 
 	key, err := store.ParseKey(os.Getenv("REFRACT_SECRET_KEY"))
 	if err != nil {
@@ -129,7 +145,7 @@ func run() error {
 	defer db.Close()
 
 	people := &users.Service{DB: db, Key: key}
-	guard, login, err := authMiddleware(people)
+	guard, login, err := authMiddleware(people, authKind)
 	if err != nil {
 		return err
 	}
@@ -202,7 +218,7 @@ func run() error {
 		return err
 	}
 
-	acc := &access.Checker{DB: db}
+	acc := &access.Checker{DB: db, SkipVerified: authKind != "builtin"}
 	asa.svc.Access = acc
 	ra := &remoteAPI{svc: pa.svc, db: db, key: key, acc: acc}
 	if id := os.Getenv("REFRACT_GITHUB_CLIENT_ID"); id != "" {
@@ -218,6 +234,17 @@ func run() error {
 		defer close(purged)
 		pa.svc.PurgeTrashEvery(purgeCtx, 24*time.Hour) // also at startup
 	}()
+	// Account lifecycle (A3): sign-up, confirmation, reset and self-delete.
+	var outbox *mail.Outbox
+	if login != nil {
+		login.mode, login.public = deployment, base
+		login.signup = signup && mailReady
+		login.destroy = destroyer(pa.svc)
+		if mailReady {
+			outbox = mail.NewOutbox(smtp)
+			login.mail = outbox
+		}
+	}
 	pp := &papersAPI{papers: papers, projects: pa.svc, provider: a.metered("cite"), choose: func(ctx context.Context, want assistant.Choice) (assistant.Choice, error) {
 		return a.choose(ctx, want, a.quick)
 	}}
@@ -255,6 +282,10 @@ func run() error {
 	case <-purged:
 	case <-time.After(5 * time.Second):
 		slog.Warn("shutdown: a trash purge is still running")
+	}
+	// Emails still queued go out; nothing sends new ones once requests have finished.
+	if outbox != nil && !outbox.Drain(5*time.Second) {
+		slog.Warn("shutdown: emails still unsent")
 	}
 	// Auto-pushes started by the last commits still read the database.
 	if !pa.svc.Drain(5 * time.Second) {
@@ -299,22 +330,41 @@ func serve(ctx context.Context, srv *http.Server, ln net.Listener, drain, settle
 	return serveErr
 }
 
-// authMiddleware picks the web UI guard from REFRACT_AUTH. It fails closed:
-// running without auth must be requested explicitly. login is set for
-// REFRACT_AUTH=password, which signs users in itself.
-func authMiddleware(people *users.Service) (guard func(http.Handler) http.Handler, login *loginAPI, err error) {
-	switch mode := cmp.Or(os.Getenv("REFRACT_AUTH"), "cloudflare"); mode {
+// authMode reads REFRACT_AUTH: cloudflare by default; password is builtin's old name.
+func authMode(v string) string {
+	switch v = cmp.Or(v, "cloudflare"); v {
+	case "password":
+		return "builtin"
+	}
+	return v
+}
+
+// publicBase is REFRACT_PUBLIC_URL without a trailing slash: the address
+// people open Refract at, the base of links in emails. An http or https URL with a host.
+func publicBase(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return "", errors.New("REFRACT_PUBLIC_URL must be the address users open Refract at (e.g. https://refract.example.com)")
+	}
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// authMiddleware picks the web UI guard from kind, REFRACT_AUTH after authMode.
+// It fails closed: running without auth must be requested explicitly. login is
+// set for REFRACT_AUTH=builtin, which signs users in itself.
+func authMiddleware(people *users.Service, kind string) (guard func(http.Handler) http.Handler, login *loginAPI, err error) {
+	switch kind {
 	case "cloudflare":
 		team, aud := os.Getenv("REFRACT_CF_TEAM_DOMAIN"), os.Getenv("REFRACT_CF_AUD")
 		if team == "" || aud == "" {
-			return nil, nil, errors.New("REFRACT_AUTH=cloudflare needs REFRACT_CF_TEAM_DOMAIN and REFRACT_CF_AUD (or set REFRACT_AUTH=password to sign in to Refract itself)")
+			return nil, nil, errors.New("REFRACT_AUTH=cloudflare needs REFRACT_CF_TEAM_DOMAIN and REFRACT_CF_AUD (or set REFRACT_AUTH=builtin to sign in to Refract itself)")
 		}
 		return auth.CloudflareAccess(context.Background(), team, aud), nil, nil
-	case "password":
+	case "builtin":
 		login = &loginAPI{users: people}
 		if issuer := os.Getenv("REFRACT_OIDC_ISSUER"); issuer != "" {
-			public, err := url.Parse(os.Getenv("REFRACT_PUBLIC_URL"))
-			if err != nil || (public.Scheme != "https" && public.Scheme != "http") || public.Host == "" {
+			public, err := publicBase(os.Getenv("REFRACT_PUBLIC_URL"))
+			if err != nil {
 				return nil, nil, errors.New("REFRACT_OIDC_ISSUER needs REFRACT_PUBLIC_URL, the address users open Refract at (e.g. https://refract.example.com)")
 			}
 			id, secret := os.Getenv("REFRACT_OIDC_CLIENT_ID"), os.Getenv("REFRACT_OIDC_CLIENT_SECRET")
@@ -326,7 +376,7 @@ func authMiddleware(people *users.Service) (guard func(http.Handler) http.Handle
 				Issuer:       issuer,
 				ClientID:     id,
 				ClientSecret: secret,
-				RedirectURL:  strings.TrimRight(public.String(), "/") + "/api/auth/oidc/callback",
+				RedirectURL:  public + "/api/auth/oidc/callback",
 			}
 			if v := os.Getenv("REFRACT_OIDC_ALLOWED"); v != "" {
 				login.allowed = strings.Split(v, ",")
@@ -337,6 +387,33 @@ func authMiddleware(people *users.Service) (guard func(http.Handler) http.Handle
 		slog.Warn("REFRACT_AUTH=none: the web UI is unprotected; only use this locally or behind your own auth")
 		return auth.Unauthenticated, nil, nil // one local user
 	default:
-		return nil, nil, fmt.Errorf("REFRACT_AUTH=%q: want cloudflare, password or none", mode)
+		return nil, nil, fmt.Errorf("REFRACT_AUTH=%q: want cloudflare, builtin or none", kind)
+	}
+}
+
+// mailFromEnv reads REFRACT_SMTP_URL and REFRACT_MAIL_FROM: nil when neither
+// is set, an error when only one is or either is invalid.
+func mailFromEnv() (*mail.SMTP, error) {
+	raw, from := os.Getenv("REFRACT_SMTP_URL"), os.Getenv("REFRACT_MAIL_FROM")
+	switch {
+	case raw == "" && from == "":
+		return nil, nil
+	case raw == "" || from == "":
+		return nil, errors.New("set both REFRACT_SMTP_URL and REFRACT_MAIL_FROM to send email, or neither")
+	}
+	return mail.ParseSMTP(raw, from)
+}
+
+// warnAccounts tells a self-hosting operator what their account settings
+// leave off, instead of silently turning sign-up and reset off.
+func warnAccounts(authKind string, signup, haveMail, havePublic, signupSet bool) {
+	if haveMail && !havePublic {
+		slog.Warn("REFRACT_SMTP_URL is set but REFRACT_PUBLIC_URL is not (or is invalid): links in emails need it, so email stays off")
+	}
+	if authKind == "builtin" && signup && !(haveMail && havePublic) {
+		slog.Warn("REFRACT_SIGNUP=open, but sign-up stays off until REFRACT_SMTP_URL, REFRACT_MAIL_FROM and REFRACT_PUBLIC_URL are set")
+	}
+	if authKind != "builtin" && signupSet {
+		slog.Warn("REFRACT_SIGNUP only applies with REFRACT_AUTH=builtin; ignored")
 	}
 }

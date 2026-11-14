@@ -1,0 +1,7 @@
+Subject: Se ha eliminado tu cuenta de Refract
+
+Hola:
+
+Se han eliminado la cuenta de Refract de {{.Email}} en {{.Site}} y todo lo que contenía.
+
+Si no has sido tú, alguien tenía tu contraseña: cámbiala en cualquier otro sitio donde la uses.

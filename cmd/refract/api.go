@@ -30,7 +30,7 @@ type api struct {
 	model string        // default model (REFRACT_MODEL_AGENT)
 	quick string        // default model for quick actions (REFRACT_MODEL_QUICK)
 
-	canSignOut bool // REFRACT_AUTH=password: Refract keeps the session
+	canSignOut bool // REFRACT_AUTH=builtin: Refract keeps the session
 
 	providers *providers.Store // users' API-key providers
 	outbound  *http.Client     // for those providers (see providers.HTTPClient)

@@ -94,6 +94,7 @@ Select text and a toolbar offers **Improve**, **Shorten**, **Fix grammar**, **Ta
 
 - Several users, each with their own projects, chats, AI connections and GitHub account. Nothing is shared between users.
 - Sign-in through Cloudflare Access, Refract's own sign-in page (passwords and, optionally, OpenID Connect such as Google, Microsoft Entra, Keycloak or Authentik), or no sign-in on a private network.
+- With Refract's own sign-in and a mail server, people can create their own account and confirm their address, choose a new password by email, and delete their account with everything in it from **Settings → Account**. Self-hosted installs stay as they are until you turn it on (see [Let people sign up](#let-people-sign-up)).
 
 ## Screenshots
 
@@ -161,7 +162,7 @@ Refract is a single container: the Go server with the web app built in, Tectonic
 docker run -d --name refract --restart unless-stopped --stop-timeout 30 \
   -p 127.0.0.1:8080:8080 -v refract-data:/data \
   -e REFRACT_SECRET_KEY="<the output of: openssl rand -base64 32>" \
-  -e REFRACT_AUTH=password \
+  -e REFRACT_AUTH=builtin \
   ghcr.io/ponytojas/refract:0.1
 ```
 
@@ -176,29 +177,49 @@ Refract refuses to start until `REFRACT_AUTH` says how people get in.
 | `REFRACT_AUTH` | Who gets in | Use it when |
 |---|---|---|
 | `cloudflare` (default) | Whoever your [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/) policy allows. Refract verifies Access's token itself, so reaching the server directly doesn't bypass it. | Refract is behind a Cloudflare Tunnel or proxy. |
-| `password` | Accounts you create, with a password and optionally an OpenID Connect provider. | Any other public deployment. Serve it over https. |
+| `builtin` | Accounts you create (or, if you turn it on, people sign up for), with a password and optionally an OpenID Connect provider. `password` still works as the old name. | Any other public deployment. Serve it over https. |
 | `none` | Anyone who can reach the port, as a single local user. | Only on your own machine or a private network. |
 
 **Cloudflare Access:** set `REFRACT_CF_TEAM_DOMAIN` (e.g. `yourteam.cloudflareaccess.com`) and `REFRACT_CF_AUD` (the application's AUD tag). Each email Access lets in gets its own account on first visit.
 
-**Passwords:** create accounts on the server. The command prints a generated password, which the user can change in **Settings → General**. Running it again for the same email resets the password and signs that user out everywhere.
+**Passwords:** create accounts on the server. The command prints a generated password, which the user can change in **Settings → Account**. Running it again for the same email resets the password and signs that user out everywhere.
 
 ```sh
 docker exec refract refract users add ana@example.com
 docker exec refract refract users list
 ```
 
-To end all of someone's sessions (a lost laptop, say), run `refract users signout <email>`. After too many failed sign-ins an account waits 15 minutes; `refract users unlock <email>` lets it in at once. To delete an account with its projects (those in the trash too), chats and connections, run `refract users remove <email>`: it lists what would go, and deletes only when run again with `--yes`. With Cloudflare Access, also remove the person from your Access policy, or they get a new, empty account on their next visit.
+Accounts you add this way count as confirmed: you vouch for the address. To end all of someone's sessions (a lost laptop, say), run `refract users signout <email>`. After too many failed sign-ins an account waits 15 minutes; `refract users unlock <email>` lets it in at once. To delete an account with its projects (those in the trash too), chats and connections, run `refract users remove <email>`: it lists what would go, and deletes only when run again with `--yes`. With Cloudflare Access, also remove the person from your Access policy, or they get a new, empty account on their next visit.
 
 ### Sign in with OpenID Connect
 
-With `REFRACT_AUTH=password`, an OpenID Connect provider (Google, Microsoft Entra, Keycloak, Authentik, Authelia…) can add a **Continue with …** button next to the password form.
+With `REFRACT_AUTH=builtin`, an OpenID Connect provider (Google, Microsoft Entra, Keycloak, Authentik, Authelia…) can add a **Continue with …** button next to the password form.
 
 1. Register Refract with your provider as a web application. The redirect URI is `https://<your Refract address>/api/auth/oidc/callback`.
 2. Set `REFRACT_PUBLIC_URL` (e.g. `https://refract.example.com`), `REFRACT_OIDC_ISSUER`, `REFRACT_OIDC_CLIENT_ID`, `REFRACT_OIDC_CLIENT_SECRET`, and optionally `REFRACT_OIDC_NAME` for the button label.
 3. Decide who may sign in. By default, only emails that already have an account (from `refract users add`). To let people create their account by signing in, list their emails or domains in `REFRACT_OIDC_ALLOWED`, e.g. `@lab.example.org,guest@example.com`.
 
-The provider must report the email as verified. The sign-in uses the authorization code flow with PKCE, and the ID token is checked against the provider's keys.
+A provider that reports the email as not verified (`email_verified` false) is refused. A provider that leaves the claim out (Microsoft Entra, for one) can sign in to accounts Refract has already verified, such as those made with `refract users add`. If the account came from a sign-up nobody confirmed, the provider must report the email as verified, and then its word wins: everything the sign-up attached is removed (password, sessions, AI keys and connections, usage, projects) and the address is confirmed. The sign-in uses the authorization code flow with PKCE, and the ID token is checked against the provider's keys.
+
+### Let people sign up
+
+By default nobody can create an account: you add them with `refract users add`. With `REFRACT_AUTH=builtin` and a mail server, Refract can also let people sign up, confirm their address and reset a forgotten password themselves.
+
+```sh
+-e REFRACT_PUBLIC_URL=https://refract.example.com \
+-e REFRACT_SMTP_URL=smtp://user:password@smtp.example.com:587 \
+-e REFRACT_MAIL_FROM='Refract <no-reply@refract.example.com>' \
+-e REFRACT_SIGNUP=open
+```
+
+- **Mail:** set both `REFRACT_SMTP_URL` and `REFRACT_MAIL_FROM`, and `REFRACT_PUBLIC_URL` (the base of the links in the emails). The server must offer STARTTLS on port 587; Refract refuses to send mail or credentials in clear, except to `localhost`, `127.0.0.1` and `::1`. Without a usable `REFRACT_PUBLIC_URL`, sign-up and password reset stay off, with a warning in the log.
+- **What is sent:** a confirmation link (valid 24 hours), a reset link (1 hour), and a note when an account is deleted. They are plain text, in English or Spanish: the person picks the language when signing up and can change it in **Settings → Account**. Each link works once, and the database only keeps a hash of it. The link carries its token in the part of the address after `#`, so it doesn't reach server logs, and mail scanners that merely open it can't use it up: the page asks for a button press.
+- **Unconfirmed accounts** can sign in but can't create or import projects until the address is confirmed. Confirming asks for the account's password unless the browser is already signed in to it, so someone who signs up with another person's address can't get them to confirm it.
+- **No guessing which addresses have accounts:** signing up or asking for a reset answers the same either way and sends its email after answering. Signing up with an address that already has an account changes nothing and sends that address a reset link instead. At most 3 emails per address and 20 per network address are sent every 15 minutes: past 3 for an address the answer stays the same but nothing is sent, and past 20 for a network address the request is refused. Someone who keeps asking for emails for an address can therefore keep its owner from getting a new link for a while (links sent earlier still work, and a new one doesn't cancel the 2 before it); `refract users unlock <email>` clears an address's count.
+- **Deleting an account** (Settings → Account) asks for the password (or a sign-in with the provider in the last 10 minutes, for accounts without one) and deletes the projects, those in the trash too, with their history, chats and connections.
+- **`REFRACT_SIGNUP`** is `open` or `closed` (the default). It only applies with `REFRACT_AUTH=builtin`, and only takes effect once mail works. Creating accounts through OpenID Connect is governed by `REFRACT_OIDC_ALLOWED` alone.
+- **Hosted service:** with `REFRACT_MODE=saas`, `REFRACT_SIGNUP=open` is refused until the terms and privacy policy people accept when signing up exist in a future version. Keep it `closed` and add accounts with `refract users add`.
+- **Trying it:** run [Mailpit](https://mailpit.axllent.org/) (`docker run -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit`), set `REFRACT_SMTP_URL=smtp://127.0.0.1:1025`, and read the emails at <http://127.0.0.1:8025>.
 
 ### Behind a reverse proxy
 
@@ -337,12 +358,15 @@ All settings are environment variables.
 | Variable | Purpose |
 |---|---|
 | `REFRACT_SECRET_KEY` | **Required.** 32 bytes, base64 (`openssl rand -base64 32`). Encrypts stored credentials and keys. |
-| `REFRACT_AUTH` | `cloudflare` (default), `password` or `none`. See [Choose how people sign in](#choose-how-people-sign-in). |
+| `REFRACT_AUTH` | `cloudflare` (default), `builtin` (Refract's own sign-in; `password` still works) or `none`. See [Choose how people sign in](#choose-how-people-sign-in). |
 | `REFRACT_DATA_DIR` | Where projects, the database and caches live. Default `/data`. |
 | `REFRACT_ADDR` | Listen address. Default `:8080`. |
 | `REFRACT_MODE` | `selfhost` (default) or `saas`, for the hosted service. With `saas`, the ChatGPT plan is off (OpenAI's plan usage covers self-hosted apps): people use the assistant with API providers only. Refract refuses to start with `REFRACT_AUTH=none` or without an https `REFRACT_PUBLIC_URL`. AI providers and git remotes must be public https addresses (no loopback, private or metadata addresses, no local models), and proxy settings are ignored for them. Needs git 2.37 or later. |
 | `REFRACT_CF_TEAM_DOMAIN`, `REFRACT_CF_AUD` | Cloudflare Access team domain and application AUD tag. |
-| `REFRACT_PUBLIC_URL` | The address users open Refract at, e.g. `https://refract.example.com`. Needed for OpenID Connect, and required with `REFRACT_MODE=saas`. |
+| `REFRACT_PUBLIC_URL` | The address users open Refract at, e.g. `https://refract.example.com`. Needed for OpenID Connect and for the links in emails, and required with `REFRACT_MODE=saas`. |
+| `REFRACT_SIGNUP` | `open` or `closed` (default): whether people can create their own account. Only with `REFRACT_AUTH=builtin`; needs the three mail settings. See [Let people sign up](#let-people-sign-up). |
+| `REFRACT_SMTP_URL` | The mail server, `smtp://user:pass@host:587` (URL-encode special characters). STARTTLS is required except to `localhost`, `127.0.0.1` and `::1`. |
+| `REFRACT_MAIL_FROM` | The sender, e.g. `Refract <no-reply@refract.example.com>`. Set both mail variables or neither. |
 | `REFRACT_OIDC_ISSUER`, `REFRACT_OIDC_CLIENT_ID`, `REFRACT_OIDC_CLIENT_SECRET` | Your OpenID Connect provider's issuer URL and Refract's client credentials there. |
 | `REFRACT_OIDC_NAME` | Label of the sign-in button: *Continue with …*. Default `SSO`. |
 | `REFRACT_OIDC_ALLOWED` | Comma-separated emails and `@domains` that may create an account by signing in with OpenID Connect. Empty: existing accounts only. |
@@ -369,10 +393,10 @@ Without this, any project can still push to and pull from an https git remote wi
 refract                         run the server (configured with REFRACT_* variables)
 refract login                   sign in with ChatGPT on this computer and write a credential
                                 file to upload in Settings → Assistant (refract login -h)
-refract users add <email>       create an account or reset its password (REFRACT_AUTH=password)
+refract users add <email>       create a confirmed account or reset its password (REFRACT_AUTH=builtin)
 refract users rename <a> <b>    change an account's email, keeping its data
 refract users signout <email>   end all of an account's sessions
-refract users unlock <email>    clear an account's failed sign-ins (--all: every account and address)
+refract users unlock <email>    clear an account's failed sign-ins and email limit (--all: every account and address)
 refract users remove <email>    delete an account and everything it owns, trash included (asks for --yes)
 refract users list              list accounts
 refract version                 print the version
@@ -398,6 +422,7 @@ On Windows and Linux, read <kbd>Ctrl</kbd> for <kbd>⌘</kbd>. Hold <kbd>⌘</kb
 ## Security
 
 - **Sign-in:** Cloudflare Access tokens are verified on every request. Passwords are hashed with PBKDF2-SHA256 (600,000 iterations). Repeated failures for an account, or from one address, are refused for 15 minutes; the counts survive restarts. Sessions are random tokens stored only as hashes, in `HttpOnly`, `SameSite=Lax` cookies that last 30 days.
+- **Account links:** confirmation and reset links are random, expire, work once and are stored only as hashes. Setting a password by any means cancels reset links. Sign-up and reset answer the same for addresses with and without an account, email goes out after the answer, and emails are limited per address and per network address.
 - **Requests:** every API call must carry a custom header that browsers can't add cross-site, which blocks cross-site request forgery.
 - **Browser:** a strict Content-Security-Policy lets the app run only its own scripts and connect only to its own server. Refract can't be embedded in other sites, and over https it sends `Strict-Transport-Security`.
 - **Secrets at rest:** ChatGPT credentials, API keys and git tokens are encrypted with AES-GCM under `REFRACT_SECRET_KEY`, each bound to its owner.
@@ -413,7 +438,7 @@ You need Go, Node.js, git, ripgrep, Tectonic and `synctex` (and Google Chrome fo
 
 ```sh
 make dev                                  # API on :8080 and Vite on :5173; open http://localhost:5173
-make dev AUTH=password                    # the same, with the sign-in page
+make dev AUTH=builtin                     # the same, with the sign-in page
 make users ARGS="add you@example.com"     # accounts in the development data
 make login                                # refract login, for ChatGPT
 make test                                 # go vet, Go tests and web unit tests

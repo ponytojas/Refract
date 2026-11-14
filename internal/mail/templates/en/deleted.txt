@@ -1,0 +1,7 @@
+Subject: Your Refract account was deleted
+
+Hi,
+
+The Refract account for {{.Email}} at {{.Site}} and everything in it were deleted.
+
+If it wasn't you, someone had your password: change it anywhere else you use it.

@@ -82,6 +82,20 @@ export async function navigate(to: string, { replace = false } = {}) {
   return show(to, false, !replace)
 }
 
+/**
+ * Loads a page from the server instead of switching in place (no argument:
+ * reloads this one). Needed when the session cookie has just changed (signing
+ * in, out or deleting the account): the app's state, such as who is signed in,
+ * was read under the old session. Like navigate it first waits for pages to
+ * finish pending work (saving edits), but it doesn't let them cancel: the
+ * session is already gone or changed.
+ */
+export async function reloadTo(to?: string) {
+  await leave()
+  if (to === undefined) location.reload()
+  else location.assign(to)
+}
+
 let undoing = false
 window.addEventListener('popstate', async (e) => {
   if (undoing) {

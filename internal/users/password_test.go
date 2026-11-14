@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,7 +54,7 @@ func TestPasswordLogin(t *testing.T) {
 			t.Fatalf("%v: got %v", c, err)
 		}
 	}
-	if has, _ := s.HasPassword(ctx, u.ID); !has {
+	if a, _ := s.AccountByID(ctx, u.ID); !a.HasPassword {
 		t.Fatal("HasPassword")
 	}
 }
@@ -185,7 +186,7 @@ func TestFailureTableIsBounded(t *testing.T) {
 	}
 	// Full of expired rows: they're dropped, and the new key counts.
 	fill(time.Now().Add(-2 * failWindow).Unix())
-	s.fail(ctx, []string{"email:new"})
+	s.count(ctx, []string{"email:new"})
 	var rows int
 	s.DB.QueryRow(`SELECT count(*) FROM login_failures`).Scan(&rows)
 	if rows != 1 || count("email:new") != 1 {
@@ -193,7 +194,7 @@ func TestFailureTableIsBounded(t *testing.T) {
 	}
 	// Full of recent rows: existing keys still count, new ones aren't added.
 	fill(time.Now().Unix())
-	s.fail(ctx, []string{"email:1", "email:another"})
+	s.count(ctx, []string{"email:1", "email:another"})
 	if count("email:1") != 2 || count("email:another") != 0 {
 		t.Fatalf("existing %d, new %d", count("email:1"), count("email:another"))
 	}
@@ -301,3 +302,74 @@ func TestSignOutAndDelete(t *testing.T) {
 		t.Fatal("old account came back")
 	}
 }
+
+func TestRemove(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	s.Now = func() time.Time { return time.Unix(1_800_000_000, 0) }
+	u, _ := s.SetPassword(ctx, "ana@example.com", "correct horse")
+	other, _ := s.SetPassword(ctx, "bob@example.com", "correct horse")
+	s.NewSession(ctx, u.ID)
+	s.DB.Exec(`INSERT INTO settings (key, value) VALUES (?, 'x')`, "user/"+u.ID+"/providers")
+	s.DB.Exec(`INSERT INTO ai_usage (at, user_id, kind, model, input_tokens, cached_tokens, output_tokens, reasoning_tokens) VALUES (1, ?, 'agent', 'm', 1, 0, 1, 0)`, u.ID)
+	s.RequestReset(ctx, "ana@example.com")
+	s.AllowMail(ctx, "ana@example.com", "")
+	s.DB.Exec(`INSERT INTO projects (id, name, created_at, updated_at, owner) VALUES ('p1', 'Alpha', 0, 0, ?), ('p2', 'Beta', 0, 0, ?), ('p3', 'Other', 0, 0, ?)`, u.ID, u.ID, other.ID)
+	s.DB.Exec(`UPDATE projects SET deleted_at = 5 WHERE id = 'p2'`)
+
+	owned, err := s.OwnedProjects(ctx, u.ID)
+	if err != nil || len(owned) != 2 || owned[0].Trashed || !owned[1].Trashed {
+		t.Fatalf("owned = %+v, %v", owned, err)
+	}
+
+	var destroyed []string
+	del := func(ctx context.Context, id string) error {
+		destroyed = append(destroyed, id)
+		if id == "p2" && len(destroyed) == 2 && failSecond {
+			return errors.New("busy")
+		}
+		_, err := s.DB.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+		return err
+	}
+	failSecond = true
+	if n, err := s.Remove(ctx, u.ID, del); err == nil || !strings.Contains(err.Error(), "Beta") || n != 1 {
+		t.Fatalf("a failing destroy: n=%d err=%v; want an error naming the project", n, err)
+	}
+	if _, err := s.Lookup(ctx, "ana@example.com"); err != nil {
+		t.Fatal("the account went although a project couldn't be deleted")
+	}
+	failSecond, destroyed = false, nil
+	if n, err := s.Remove(ctx, u.ID, del); err != nil || n != 1 {
+		t.Fatalf("remove = %d, %v", n, err)
+	}
+	if _, err := s.Lookup(ctx, "ana@example.com"); !errors.Is(err, ErrNoAccount) {
+		t.Fatalf("account still there: %v", err)
+	}
+	for table, where := range map[string]string{
+		"sessions": "user_id", "ai_usage": "user_id", "account_tokens": "user_id",
+	} {
+		var n int
+		s.DB.QueryRow(`SELECT count(*) FROM `+table+` WHERE `+where+` = ?`, u.ID).Scan(&n)
+		if n != 0 {
+			t.Errorf("%s: %d rows left", table, n)
+		}
+	}
+	var settings, throttle, projectsLeft int
+	s.DB.QueryRow(`SELECT count(*) FROM settings WHERE key LIKE 'user/%'`).Scan(&settings)
+	s.DB.QueryRow(`SELECT count(*) FROM login_failures WHERE key LIKE '%ana@%'`).Scan(&throttle)
+	s.DB.QueryRow(`SELECT count(*) FROM projects`).Scan(&projectsLeft)
+	if settings != 0 || throttle != 0 || projectsLeft != 1 {
+		t.Errorf("left: %d settings, %d throttle rows, %d projects (bob's one stays)", settings, throttle, projectsLeft)
+	}
+
+	// An account with no projects goes at once; a project that appears
+	// between listing and deleting stops it.
+	if n, err := s.Remove(ctx, other.ID, func(context.Context, string) error { return nil }); !errors.Is(err, ErrOwnsProjects) || n != 1 {
+		t.Errorf("a destroy that left the project: n=%d, %v", n, err)
+	}
+	s.DB.Exec(`DELETE FROM projects`)
+	if _, err := s.Remove(ctx, other.ID, del); err != nil {
+		t.Fatal(err)
+	}
+}
+
+var failSecond bool

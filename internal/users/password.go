@@ -23,7 +23,7 @@ import (
 	"github.com/ponytojas/Refract/internal/store"
 )
 
-// Passwords and sessions, for REFRACT_AUTH=password.
+// Passwords and sessions, for REFRACT_AUTH=builtin.
 
 // pbkdf2Iter is OWASP's figure for PBKDF2-HMAC-SHA256. A variable only so tests
 // can hash quickly; stored hashes carry their own count.
@@ -40,12 +40,19 @@ const (
 	maxFailuresPerIP = 30 // per address: allows a few people behind one network
 	failWindow       = 15 * time.Minute
 	maxTracked       = 100_000
+
+	maxMailsPerEmail = 3  // emails asked for to one address per window
+	maxMailsPerIP    = 20 // and from one network address
 )
 
 var (
 	ErrBadLogin = errors.New("wrong email or password")
 	ErrTooMany  = errors.New("too many failed attempts: try again in a few minutes")
 )
+
+// LowerHashCostForTests makes password hashing fast, for the tests of packages
+// that sign people in: the real count makes each hash take about 0.3 s.
+func LowerHashCostForTests() { pbkdf2Iter = 1000 }
 
 func hashPassword(pw string) (string, error) {
 	salt := make([]byte, 16)
@@ -83,11 +90,11 @@ func normEmail(email string) string { return strings.ToLower(strings.TrimSpace(e
 // them out everywhere.
 func (s *Service) SetPassword(ctx context.Context, email, pw string) (auth.User, error) {
 	email = normEmail(email)
-	if !strings.Contains(email, "@") || strings.ContainsAny(email, " \t\r\n") {
-		return auth.User{}, fmt.Errorf("%q is not an email address", email)
+	if err := validEmail(email); err != nil {
+		return auth.User{}, err
 	}
-	if len(pw) < MinPassword || len(pw) > maxPassword {
-		return auth.User{}, fmt.Errorf("passwords need %d to %d characters", MinPassword, maxPassword)
+	if err := validPassword(pw); err != nil {
+		return auth.User{}, err
 	}
 	u, err := s.Resolve(ctx, email)
 	if err != nil {
@@ -100,8 +107,30 @@ func (s *Service) SetPassword(ctx context.Context, email, pw string) (auth.User,
 	if _, err := s.DB.ExecContext(ctx, `UPDATE users SET password = ? WHERE id = ?`, h, u.ID); err != nil {
 		return auth.User{}, err
 	}
-	_, err = s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, u.ID)
+	if _, err = s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, u.ID); err != nil {
+		return u, err
+	}
+	// A link to choose a password is no longer wanted once one was chosen.
+	_, err = s.DB.ExecContext(ctx, `DELETE FROM account_tokens WHERE user_id = ? AND purpose = ?`, u.ID, Reset)
 	return u, err
+}
+
+// validEmail checks an already normalized address.
+func validEmail(email string) error {
+	if !strings.Contains(email, "@") || strings.ContainsAny(email, " \t\r\n") {
+		return fmt.Errorf("%q is not an email address", email)
+	}
+	return nil
+}
+
+// ValidatePassword checks the length rules of a new password.
+func ValidatePassword(pw string) error { return validPassword(pw) }
+
+func validPassword(pw string) error {
+	if len(pw) < MinPassword || len(pw) > maxPassword {
+		return fmt.Errorf("passwords need %d to %d characters", MinPassword, maxPassword)
+	}
+	return nil
 }
 
 // Login checks an email and password. ip is the client's address (ClientIP).
@@ -126,10 +155,10 @@ func (s *Service) Login(ctx context.Context, email, pw, ip string) (auth.User, e
 	}
 	if stored == "" {
 		checkPassword(dummyHash(), pw)
-		return auth.User{}, cmp.Or(s.fail(ctx, keys), ErrBadLogin)
+		return auth.User{}, cmp.Or(s.count(ctx, keys), ErrBadLogin)
 	}
 	if !checkPassword(stored, pw) {
-		return auth.User{}, cmp.Or(s.fail(ctx, keys), ErrBadLogin)
+		return auth.User{}, cmp.Or(s.count(ctx, keys), ErrBadLogin)
 	}
 	// The address keeps its count: it may be trying several accounts.
 	_, err = s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE key = ?`, keys[0])
@@ -137,10 +166,38 @@ func (s *Service) Login(ctx context.Context, email, pw, ip string) (auth.User, e
 }
 
 // limits: failures allowed per window, by kind of key.
-var limits = map[string]int{"email": maxFailures, "ip": maxFailuresPerIP}
+var limits = map[string]int{"email": maxFailures, "ip": maxFailuresPerIP, "mail": maxMailsPerEmail, "mailip": maxMailsPerIP}
+
+// ErrTooManyMails is AllowMail's refusal.
+var ErrTooManyMails = errors.New("too many emails requested from this network address: try again in a few minutes")
+
+// AllowMail counts one email to address, asked for from ip. Past the network
+// address's limit it refuses with ErrTooManyMails: that says nothing about the
+// address. Past the address's own limit it answers send=false with no error:
+// callers then answer exactly as if they had sent, so the limit neither tells
+// whether the address has an account nor tells whoever is flooding it. It runs
+// before any account lookup.
+func (s *Service) AllowMail(ctx context.Context, email, ip string) (send bool, err error) {
+	var keys []string
+	if ip != "" {
+		keys = append(keys, "mailip:"+ip)
+		if ok, err := s.allowAttempt(ctx, keys); err != nil || !ok {
+			return false, cmp.Or(err, ErrTooManyMails)
+		}
+	}
+	mailKey := "mail:" + normEmail(email)
+	ok, err := s.allowAttempt(ctx, []string{mailKey})
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		keys = append(keys, mailKey)
+	}
+	return ok, s.count(ctx, keys)
+}
 
 func (s *Service) allowAttempt(ctx context.Context, keys []string) (bool, error) {
-	expired := time.Now().Add(-failWindow).Unix()
+	expired := s.now().Add(-failWindow).Unix()
 	for _, k := range keys {
 		var n int
 		err := s.DB.QueryRowContext(ctx, `SELECT count FROM login_failures WHERE key = ? AND since > ?`, k, expired).Scan(&n)
@@ -158,8 +215,9 @@ func (s *Service) allowAttempt(ctx context.Context, keys []string) (bool, error)
 	return true, nil
 }
 
-func (s *Service) fail(ctx context.Context, keys []string) error {
-	now := time.Now()
+// count adds one to each key: a failed sign-in, or an email asked for.
+func (s *Service) count(ctx context.Context, keys []string) error {
+	now := s.now()
 	// Made-up emails and addresses each add a row: expired rows go first, and
 	// while the table is full of recent ones, only existing keys are counted.
 	if _, err := s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE since <= ?`, now.Add(-failWindow).Unix()); err != nil {
@@ -187,7 +245,8 @@ func (s *Service) fail(ctx context.Context, keys []string) error {
 // Unlock clears an account's failed sign-ins, so it can try again at once.
 // An address that failed too often still waits out its window.
 func (s *Service) Unlock(ctx context.Context, email string) (bool, error) {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE key = ?`, "email:"+normEmail(email))
+	e := normEmail(email)
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM login_failures WHERE key IN (?, ?)`, "email:"+e, "mail:"+e)
 	if err != nil {
 		return false, err
 	}
@@ -233,8 +292,12 @@ func (s *Service) SignOut(ctx context.Context, email string) (int64, error) {
 	return res.RowsAffected()
 }
 
+// ErrOwnsProjects is returned when an account can't be removed because it still has projects.
+var ErrOwnsProjects = errors.New("the account still owns projects")
+
 // Delete removes an account: its sessions, its settings (AI connections,
-// GitHub) and the user. Projects must be deleted first (see refract users remove).
+// GitHub), its links and the user. Projects must be deleted first (see Remove,
+// and refract users remove).
 func (s *Service) Delete(ctx context.Context, email string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -247,34 +310,95 @@ func (s *Service) Delete(ctx context.Context, email string) error {
 	} else if err != nil {
 		return err
 	}
-	var owned int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM projects WHERE owner = ?`, id).Scan(&owned); err != nil {
-		return err
-	}
-	if owned > 0 {
-		return fmt.Errorf("%s still owns %d projects", email, owned)
-	}
-	prefix := store.UserKey(id, "") // all of the user's settings start with it
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE substr(key, 1, length(?)) = ?`, prefix, prefix); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM ai_usage WHERE user_id = ?`, id); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id); err != nil {
+	if err := deleteAccount(ctx, tx, id, normEmail(email)); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// HasPassword reports whether the user can sign in with a password.
-func (s *Service) HasPassword(ctx context.Context, userID string) (bool, error) {
-	var n int
-	err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE id = ? AND password != ''`, userID).Scan(&n)
-	return n > 0, err
+func deleteAccount(ctx context.Context, tx *sql.Tx, id, email string) error {
+	var owned int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM projects WHERE owner = ?`, id).Scan(&owned); err != nil {
+		return err
+	}
+	if owned > 0 {
+		return fmt.Errorf("%s still owns %d projects: %w", email, owned, ErrOwnsProjects)
+	}
+	prefix := store.UserKey(id, "") // all of the user's settings start with it
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`DELETE FROM sessions WHERE user_id = ?`, []any{id}},
+		{`DELETE FROM settings WHERE substr(key, 1, length(?)) = ?`, []any{prefix, prefix}},
+		{`DELETE FROM ai_usage WHERE user_id = ?`, []any{id}},
+		{`DELETE FROM login_failures WHERE key IN (?, ?)`, []any{"email:" + email, "mail:" + email}},
+		{`DELETE FROM users WHERE id = ?`, []any{id}}, // its links go with it
+	} {
+		if _, err := tx.ExecContext(ctx, q.sql, q.args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// OwnedProject is a project an account owns, live or in the trash.
+type OwnedProject struct {
+	ID, Name string
+	Trashed  bool
+}
+
+func (s *Service) OwnedProjects(ctx context.Context, userID string) ([]OwnedProject, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, deleted_at > 0 FROM projects WHERE owner = ? ORDER BY name`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OwnedProject
+	for rows.Next() {
+		var p OwnedProject
+		if err := rows.Scan(&p.ID, &p.Name, &p.Trashed); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// OwnedCount is how many projects an account owns, live or in the trash.
+func (s *Service) OwnedCount(ctx context.Context, userID string) (n int, err error) {
+	err = s.DB.QueryRowContext(ctx, `SELECT count(*) FROM projects WHERE owner = ?`, userID).Scan(&n)
+	return n, err
+}
+
+// Remove deletes an account and everything it owns, and returns how many
+// projects went. destroy deletes one project for good, live or in the trash,
+// files included. It stops at the first project it can't delete, leaving the
+// account and the rest in place. Then it removes the account as Delete does,
+// refusing with ErrOwnsProjects if a project appeared meanwhile.
+func (s *Service) Remove(ctx context.Context, userID string, destroy func(ctx context.Context, projectID string) error) (int, error) {
+	acct, err := s.AccountByID(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	owned, err := s.OwnedProjects(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	for i, p := range owned {
+		if err := destroy(ctx, p.ID); err != nil {
+			return i, fmt.Errorf("deleting project %s (%s): %w", p.Name, p.ID, err)
+		}
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return len(owned), err
+	}
+	defer tx.Rollback()
+	if err := deleteAccount(ctx, tx, userID, acct.Email); err != nil {
+		return len(owned), err
+	}
+	return len(owned), tx.Commit()
 }
 
 // Rename changes a user's email, keeping everything they own. Moving from
@@ -324,7 +448,10 @@ func (s *Service) List(ctx context.Context) (map[string]bool, error) {
 }
 
 // sessionID is what the database keeps: a leaked database holds no usable cookies.
-func sessionID(token string) string {
+func sessionID(token string) string { return digest(token) }
+
+// digest is the sha256 (hex) of a token: what the database keeps of cookies and links.
+func digest(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
@@ -334,9 +461,9 @@ func (s *Service) NewSession(ctx context.Context, userID string) (string, error)
 	b := make([]byte, 32)
 	rand.Read(b)
 	token := base64.RawURLEncoding.EncodeToString(b)
-	now := time.Now()
+	now := s.now()
 	s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at < ?`, now.Unix())
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)`, sessionID(token), userID, now.Add(SessionTTL).Unix())
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO sessions (id, user_id, expires_at, authenticated_at) VALUES (?, ?, ?, ?)`, sessionID(token), userID, now.Add(SessionTTL).Unix(), now.Unix())
 	return token, err
 }
 
@@ -353,7 +480,7 @@ func (s *Service) EndSession(ctx context.Context, token string) error {
 	return err
 }
 
-// SessionGuard is the web UI guard for REFRACT_AUTH=password. Requests with a
+// SessionGuard is the web UI guard for REFRACT_AUTH=builtin. Requests with a
 // valid session go on as that user. Without one, /api gets 401 and every
 // other path is served by public: the app's files, which show the sign-in page.
 func (s *Service) SessionGuard(public http.Handler) func(http.Handler) http.Handler {

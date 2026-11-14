@@ -1,0 +1,11 @@
+Subject: Elige una contraseña nueva para Refract
+
+Hola:
+
+{{if .SignUp}}Alguien ha intentado crear una cuenta de Refract en {{.Site}} con esta dirección ({{.Email}}), que ya tiene una. Si has sido tú, inicia sesión, o elige una contraseña nueva con este enlace:{{else}}Alguien ha pedido elegir una contraseña nueva para la cuenta de Refract en {{.Site}} con esta dirección ({{.Email}}). Para hacerlo, abre este enlace:{{end}}
+
+{{.Link}}
+
+El enlace funciona durante 1 hora y una sola vez. Al elegir una contraseña nueva se cierra tu sesión en todas partes.
+
+Si no has sido tú, ignora este mensaje: no ha cambiado nada.

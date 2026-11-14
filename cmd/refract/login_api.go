@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -8,15 +9,23 @@ import (
 	"net/url"
 
 	"github.com/ponytojas/Refract/internal/auth"
+	"github.com/ponytojas/Refract/internal/mail"
+	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/users"
 )
 
-// loginAPI signs users in and out for REFRACT_AUTH=password: with a password
+// loginAPI signs users in and out for REFRACT_AUTH=builtin: with a password
 // (accounts made with "refract users add") or, when configured, with OIDC.
 type loginAPI struct {
 	users   *users.Service
 	oidc    *auth.OIDC // nil without OIDC
 	allowed []string   // emails and "@domains" OIDC may create accounts for; empty: existing users only
+
+	mode    mode.Mode                                         // REFRACT_MODE
+	signup  bool                                              // people may create their own account (open sign-up, and mail to confirm it)
+	public  string                                            // REFRACT_PUBLIC_URL, the base of links in emails; "" without
+	mail    *mail.Outbox                                      // nil when the server can't send email
+	destroy func(ctx context.Context, projectID string) error // deletes a project for good, for removing an account
 }
 
 const oidcCookie = "refract_oidc"
@@ -29,6 +38,12 @@ func (a *loginAPI) handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/config", a.config)
 	mux.HandleFunc("POST /api/auth/login", a.login)
 	mux.HandleFunc("POST /api/auth/logout", a.logout)
+	// Served to people who aren't signed in yet: they ask for sign-up, a new
+	// password or the confirmation of an address.
+	mux.HandleFunc("POST /api/auth/signup", a.signUp)
+	mux.HandleFunc("POST /api/auth/forgot", a.forgot)
+	mux.HandleFunc("POST /api/auth/reset", a.resetPassword)
+	mux.HandleFunc("POST /api/auth/verify", a.verifyEmail)
 	oidcMux := http.NewServeMux()
 	oidcMux.HandleFunc("GET /api/auth/oidc/start", a.oidcStart)
 	oidcMux.HandleFunc("GET /api/auth/oidc/callback", a.oidcCallback)
@@ -42,14 +57,9 @@ func (a *loginAPI) handler() http.Handler {
 func (a *loginAPI) accountRoutes(rt *router) {
 	rt.user("GET /api/account", a.account)
 	rt.user("POST /api/account/password", a.changePassword)
-}
-
-func (a *loginAPI) config(w http.ResponseWriter, r *http.Request) {
-	name := ""
-	if a.oidc != nil {
-		name = a.oidc.Name
-	}
-	writeJSON(w, map[string]string{"oidc": name})
+	rt.user("POST /api/account/verify-email", a.resendVerification)
+	rt.user("PUT /api/account/lang", a.setLang)
+	rt.user("POST /api/account/delete", a.deleteAccount)
 }
 
 func (a *loginAPI) login(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +118,13 @@ func (a *loginAPI) oidcStart(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: oidcCookie, Value: cookie, Path: "/api/auth/oidc/", MaxAge: 600,
 		HttpOnly: true, Secure: users.Secure(r), SameSite: http.SameSiteLaxMode})
+	then := &http.Cookie{Name: oidcThenCookie, Path: "/api/auth/oidc/", HttpOnly: true, Secure: users.Secure(r), SameSite: http.SameSiteLaxMode}
+	if thenAccount(r) { // back to Settings → Account afterwards, to finish deleting the account
+		then.Value, then.MaxAge = "account", 600
+	} else { // a plain sign-in must not inherit an earlier, unfinished one
+		then.MaxAge = -1
+	}
+	http.SetCookie(w, then)
 	http.Redirect(w, r, to, http.StatusFound)
 }
 
@@ -117,6 +134,8 @@ func (a *loginAPI) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: oidcCookie, Path: "/api/auth/oidc/", MaxAge: -1, HttpOnly: true, Secure: users.Secure(r)})
+	http.SetCookie(w, &http.Cookie{Name: oidcThenCookie, Path: "/api/auth/oidc/", MaxAge: -1, HttpOnly: true, Secure: users.Secure(r)})
+	target := callbackTarget(r)
 	fail := func(code string, err error) {
 		slog.Warn("oidc sign-in refused", "reason", code, "err", err)
 		http.Redirect(w, r, "/?login_error="+url.QueryEscape(code), http.StatusFound)
@@ -131,21 +150,16 @@ func (a *loginAPI) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		fail("failed", errors.New(e))
 		return
 	}
-	email, err := a.oidc.Finish(r.Context(), c.Value, q.Get("state"), q.Get("code"))
+	email, verified, err := a.oidc.Finish(r.Context(), c.Value, q.Get("state"), q.Get("code"))
 	if err != nil {
 		fail("failed", err)
 		return
 	}
-	exists, err := a.users.Exists(r.Context(), email)
-	if err != nil {
-		fail("failed", err)
+	u, refusal, err := a.admitOIDC(r.Context(), email, verified)
+	if refusal != "" {
+		fail(refusal, errors.New(email))
 		return
 	}
-	if !exists && !auth.Allowed(a.allowed, email) {
-		fail("not_allowed", errors.New(email))
-		return
-	}
-	u, err := a.users.Resolve(r.Context(), email)
 	if err != nil {
 		fail("failed", err)
 		return
@@ -157,21 +171,43 @@ func (a *loginAPI) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	users.SetSessionCookie(w, r, token)
 	slog.Info("signed in with oidc", "user", u.ID)
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
-func (a *loginAPI) account(w http.ResponseWriter, r *http.Request) {
-	u, _ := auth.UserFrom(r.Context())
-	has, err := a.users.HasPassword(r.Context(), u.ID)
-	if err != nil {
-		httpError(w, err, http.StatusInternalServerError)
-		return
+// admitOIDC decides whether a provider sign-in may proceed, and into which
+// account. refusal is the login_error code when it may not. verified is
+// whether the provider vouched for the address (email_verified true); the
+// provider's claim being false never gets here, oidc.Finish refuses it.
+//
+// Signing in by address alone is only safe when the account can't be someone
+// else's. An account Refract has verified (made by the operator, by a provider
+// or confirmed by its owner) can't be a stranger's, so a provider that doesn't
+// send the claim (Microsoft Entra) may sign in to it. An account never
+// confirmed started as a sign-up: it needs the provider's word, and then the
+// provider takes it over, wiping what the sign-up attached (ConfirmByProvider).
+func (a *loginAPI) admitOIDC(ctx context.Context, email string, verified bool) (u auth.User, refusal string, err error) {
+	acct, err := a.users.Lookup(ctx, email)
+	switch {
+	case errors.Is(err, users.ErrNoAccount):
+		if !auth.Allowed(a.allowed, email) {
+			return auth.User{}, "not_allowed", nil
+		}
+		u, err = a.users.Resolve(ctx, email) // an account made for an identity the operator allowed: verified
+		return u, "", err
+	case err != nil:
+		return auth.User{}, "", err
 	}
-	writeJSON(w, map[string]bool{"has_password": has})
+	if !acct.Verified {
+		if !verified {
+			return auth.User{}, "unverified_email", nil
+		}
+		if err := a.users.ConfirmByProvider(ctx, acct.ID); err != nil {
+			return auth.User{}, "", err
+		}
+	}
+	return auth.User{ID: acct.ID, Email: acct.Email}, "", nil
 }
 
-// changePassword needs the current password: a stolen session alone can't
-// take over the account. Other sessions are signed out.
 func (a *loginAPI) changePassword(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Current string `json:"current"`
