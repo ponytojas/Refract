@@ -50,6 +50,10 @@ var (
 	ErrTooMany  = errors.New("too many failed attempts: try again in a few minutes")
 )
 
+// LowerHashCostForTests makes password hashing fast, for the tests of packages
+// that sign people in: the real count makes each hash take about 0.3 s.
+func LowerHashCostForTests() { pbkdf2Iter = 1000 }
+
 func hashPassword(pw string) (string, error) {
 	salt := make([]byte, 16)
 	rand.Read(salt)
@@ -118,6 +122,9 @@ func validEmail(email string) error {
 	}
 	return nil
 }
+
+// ValidatePassword checks the length rules of a new password.
+func ValidatePassword(pw string) error { return validPassword(pw) }
 
 func validPassword(pw string) error {
 	if len(pw) < MinPassword || len(pw) > maxPassword {

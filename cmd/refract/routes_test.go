@@ -296,6 +296,8 @@ var allowedRegistrations = map[string][]string{
 	"main.go:run":        {`"/api/"`, `"/"`, `"GET /healthz"`, `"/api/auth/"`},
 	"login_api.go:handler": {
 		`"GET /api/auth/config"`, `"POST /api/auth/login"`, `"POST /api/auth/logout"`,
+		// Served to people who aren't signed in yet: they ask for sign-up, a new password or to confirm an address.
+		`"POST /api/auth/signup"`, `"POST /api/auth/forgot"`, `"POST /api/auth/reset"`, `"POST /api/auth/verify"`,
 		`"GET /api/auth/oidc/start"`, `"GET /api/auth/oidc/callback"`,
 		`"/api/auth/oidc/"`, `"/api/auth/"`,
 	},

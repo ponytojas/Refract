@@ -43,3 +43,51 @@ func TestCheckDeployment(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSignup(t *testing.T) {
+	for _, tc := range []struct {
+		mode mode.Mode
+		in   string
+		want bool
+		bad  bool
+	}{
+		{mode.SelfHost, "", false, false},
+		{mode.SaaS, "", false, false}, // closed until the terms exist (S8)
+		{mode.SelfHost, "open", true, false},
+		{mode.SaaS, "open", true, false},
+		{mode.SelfHost, "closed", false, false},
+		{mode.SaaS, "closed", false, false},
+		{mode.SelfHost, "yes", false, true},
+		{mode.SelfHost, "Open", false, true},
+	} {
+		got, err := parseSignup(tc.mode, tc.in)
+		if (err != nil) != tc.bad || got != tc.want {
+			t.Errorf("parseSignup(%s, %q) = %v, %v", tc.mode, tc.in, got, err)
+		}
+	}
+}
+
+func TestCheckSignup(t *testing.T) {
+	for _, tc := range []struct {
+		mode              mode.Mode
+		auth              string
+		signup, mailReady bool
+		want              string // part of the refusal; empty means allowed
+	}{
+		{mode.SelfHost, "builtin", true, false, ""},
+		{mode.SelfHost, "builtin", true, true, ""},
+		{mode.SaaS, "cloudflare", true, false, ""},
+		{mode.SaaS, "builtin", false, false, ""}, // the default: closed
+		{mode.SaaS, "builtin", false, true, ""},
+		{mode.SaaS, "builtin", true, false, "REFRACT_SMTP_URL"},
+		{mode.SaaS, "builtin", true, true, "REFRACT_SIGNUP=closed"}, // the S8 gate
+	} {
+		err := checkSignup(tc.mode, tc.auth, tc.signup, tc.mailReady)
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("checkSignup(%s, %s, %v, %v) = %v; want it allowed", tc.mode, tc.auth, tc.signup, tc.mailReady, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("checkSignup(%s, %s, %v, %v) = %v; want a refusal naming %q", tc.mode, tc.auth, tc.signup, tc.mailReady, err, tc.want)
+		}
+	}
+}

@@ -9,6 +9,8 @@ import (
 	"net/url"
 
 	"github.com/ponytojas/Refract/internal/auth"
+	"github.com/ponytojas/Refract/internal/mail"
+	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/users"
 )
 
@@ -18,6 +20,12 @@ type loginAPI struct {
 	users   *users.Service
 	oidc    *auth.OIDC // nil without OIDC
 	allowed []string   // emails and "@domains" OIDC may create accounts for; empty: existing users only
+
+	mode    mode.Mode                                         // REFRACT_MODE
+	signup  bool                                              // people may create their own account (open sign-up, and mail to confirm it)
+	public  string                                            // REFRACT_PUBLIC_URL, the base of links in emails; "" without
+	mail    *mail.Outbox                                      // nil when the server can't send email
+	destroy func(ctx context.Context, projectID string) error // deletes a project for good, for removing an account
 }
 
 const oidcCookie = "refract_oidc"
@@ -30,6 +38,12 @@ func (a *loginAPI) handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/config", a.config)
 	mux.HandleFunc("POST /api/auth/login", a.login)
 	mux.HandleFunc("POST /api/auth/logout", a.logout)
+	// Served to people who aren't signed in yet: they ask for sign-up, a new
+	// password or the confirmation of an address.
+	mux.HandleFunc("POST /api/auth/signup", a.signUp)
+	mux.HandleFunc("POST /api/auth/forgot", a.forgot)
+	mux.HandleFunc("POST /api/auth/reset", a.resetPassword)
+	mux.HandleFunc("POST /api/auth/verify", a.verifyEmail)
 	oidcMux := http.NewServeMux()
 	oidcMux.HandleFunc("GET /api/auth/oidc/start", a.oidcStart)
 	oidcMux.HandleFunc("GET /api/auth/oidc/callback", a.oidcCallback)
@@ -43,14 +57,9 @@ func (a *loginAPI) handler() http.Handler {
 func (a *loginAPI) accountRoutes(rt *router) {
 	rt.user("GET /api/account", a.account)
 	rt.user("POST /api/account/password", a.changePassword)
-}
-
-func (a *loginAPI) config(w http.ResponseWriter, r *http.Request) {
-	name := ""
-	if a.oidc != nil {
-		name = a.oidc.Name
-	}
-	writeJSON(w, map[string]string{"oidc": name})
+	rt.user("POST /api/account/verify-email", a.resendVerification)
+	rt.user("PUT /api/account/lang", a.setLang)
+	rt.user("POST /api/account/delete", a.deleteAccount)
 }
 
 func (a *loginAPI) login(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +118,10 @@ func (a *loginAPI) oidcStart(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: oidcCookie, Value: cookie, Path: "/api/auth/oidc/", MaxAge: 600,
 		HttpOnly: true, Secure: users.Secure(r), SameSite: http.SameSiteLaxMode})
+	if thenAccount(r) { // back to Settings → Account afterwards, to finish deleting the account
+		http.SetCookie(w, &http.Cookie{Name: oidcThenCookie, Value: "account", Path: "/api/auth/oidc/", MaxAge: 600,
+			HttpOnly: true, Secure: users.Secure(r), SameSite: http.SameSiteLaxMode})
+	}
 	http.Redirect(w, r, to, http.StatusFound)
 }
 
@@ -118,6 +131,8 @@ func (a *loginAPI) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: oidcCookie, Path: "/api/auth/oidc/", MaxAge: -1, HttpOnly: true, Secure: users.Secure(r)})
+	http.SetCookie(w, &http.Cookie{Name: oidcThenCookie, Path: "/api/auth/oidc/", MaxAge: -1, HttpOnly: true, Secure: users.Secure(r)})
+	target := callbackTarget(r)
 	fail := func(code string, err error) {
 		slog.Warn("oidc sign-in refused", "reason", code, "err", err)
 		http.Redirect(w, r, "/?login_error="+url.QueryEscape(code), http.StatusFound)
@@ -153,7 +168,7 @@ func (a *loginAPI) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	users.SetSessionCookie(w, r, token)
 	slog.Info("signed in with oidc", "user", u.ID)
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 // admitOIDC decides whether a provider sign-in may proceed, and into which
@@ -188,16 +203,6 @@ func (a *loginAPI) admitOIDC(ctx context.Context, email string, verified bool) (
 		}
 	}
 	return auth.User{ID: acct.ID, Email: acct.Email}, "", nil
-}
-
-func (a *loginAPI) account(w http.ResponseWriter, r *http.Request) {
-	u, _ := auth.UserFrom(r.Context())
-	has, err := a.users.HasPassword(r.Context(), u.ID)
-	if err != nil {
-		httpError(w, err, http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, map[string]bool{"has_password": has})
 }
 
 // changePassword needs the current password: a stolen session alone can't

@@ -42,3 +42,29 @@ func secureOrigin(u *url.URL) bool {
 	}
 	return false
 }
+
+// parseSignup reads REFRACT_SIGNUP: whether people may create their own
+// account. The default is closed in every mode until the hosted service has
+// terms and a privacy policy to show at sign-up (S8 makes it open in saas).
+func parseSignup(_ mode.Mode, v string) (bool, error) {
+	switch v {
+	case "", "closed":
+		return false, nil
+	case "open":
+		return true, nil
+	}
+	return false, fmt.Errorf("REFRACT_SIGNUP=%q: want open or closed", v)
+}
+
+// checkSignup refuses open sign-up on the hosted service when it can't be run
+// properly. A self-hosted install, or one that doesn't sign people in itself,
+// is never refused here.
+func checkSignup(m mode.Mode, authKind string, signup, mailReady bool) error {
+	if m != mode.SaaS || authKind != "builtin" || !signup {
+		return nil
+	}
+	if !mailReady {
+		return errors.New("REFRACT_MODE=saas with REFRACT_SIGNUP=open needs email: set REFRACT_SMTP_URL and REFRACT_MAIL_FROM, or REFRACT_SIGNUP=closed")
+	}
+	return errors.New(`REFRACT_MODE=saas can't open sign-up yet: this version can't show the terms and privacy policy people accept when they sign up. Set REFRACT_SIGNUP=closed and add accounts with "refract users add"`)
+}

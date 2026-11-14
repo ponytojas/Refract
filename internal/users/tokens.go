@@ -86,20 +86,32 @@ type Link struct {
 	SignUp  bool // a reset sent because someone signed up with an address that has an account
 }
 
+// ValidateSignUp checks what SignUp checks of its input, which depends on
+// nothing but the input: callers use it to answer 400 before anything else.
+func ValidateSignUp(email, pw, lang string) error {
+	if err := validEmail(normEmail(email)); err != nil {
+		return err
+	}
+	if err := validPassword(pw); err != nil {
+		return err
+	}
+	if !validLang(lang) {
+		return errors.New("choose a language for emails")
+	}
+	return nil
+}
+
+// ValidateEmail checks that email looks like an address.
+func ValidateEmail(email string) error { return validEmail(normEmail(email)) }
+
 // SignUp validates the input, then always hashes pw. For a new address it creates
 // an unverified account (password, lang; no adoption of earlier data) and returns
 // a Verify link. For an address with an account it changes nothing and returns a
 // Reset link with SignUp set. Callers must answer both cases identically.
 func (s *Service) SignUp(ctx context.Context, email, pw, lang string) (Link, error) {
 	email = normEmail(email)
-	if err := validEmail(email); err != nil {
+	if err := ValidateSignUp(email, pw, lang); err != nil {
 		return Link{}, err
-	}
-	if err := validPassword(pw); err != nil {
-		return Link{}, err
-	}
-	if !validLang(lang) {
-		return Link{}, errors.New("choose a language for emails")
 	}
 	h, err := hashPassword(pw)
 	if err != nil {
