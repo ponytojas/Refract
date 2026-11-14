@@ -110,6 +110,7 @@ func setup(t *testing.T, p *fakeProvider) (*Service, *projects.Service, string, 
 		Agent:    agent.Agent{Provider: p, Compiler: okCompiler{}, MaxIterations: 10, Timeout: time.Minute},
 		ModelFor: func(_ context.Context, c Choice) (Choice, error) { return Choice{Model: cmp.Or(c.Model, "m")}, nil },
 	}
+	ps.HoldTurns = s.Hold
 	c, err := s.CreateChat(ownerCtx, res.Project.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -506,5 +507,37 @@ func TestAskOnATrashedProjectIsNotFound(t *testing.T) {
 		t.Error("the failed Ask kept the project reserved")
 	} else {
 		release()
+	}
+}
+
+// Trashing during a turn is refused and the turn completes; once trashed, no
+// turn starts, and no worktree is made.
+func TestTrashedProjectTakesNoTurns(t *testing.T) {
+	p := &fakeProvider{script: [][]ai.Event{done("fine"), done("never")}}
+	s, ps, id, chat := setup(t, p)
+	var trashErr error
+	s.Agent.Provider = onStream{p, func() { trashErr = ps.Trash(ownerCtx, id) }}
+	turn, err := s.Ask(ownerCtx, chat, "hi", Context{}, Choice{}, func(agent.Event) {})
+	if err != nil || turn.Status == "failed" {
+		t.Fatalf("turn = %+v, %v", turn, err)
+	}
+	if !errors.Is(trashErr, projects.ErrTurnRunning) {
+		t.Fatalf("Trash during a turn = %v", trashErr)
+	}
+	if err := ps.Trash(ownerCtx, id); err != nil {
+		t.Fatal(err)
+	}
+	var before int
+	ps.DB.QueryRow(`SELECT count(*) FROM turns`).Scan(&before)
+	if _, err := s.Ask(ownerCtx, chat, "again", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, projects.ErrNotFound) {
+		t.Fatalf("Ask after trash = %v", err)
+	}
+	var after int
+	ps.DB.QueryRow(`SELECT count(*) FROM turns`).Scan(&after)
+	if after != before {
+		t.Errorf("turn rows %d -> %d", before, after)
+	}
+	if wt, _ := filepath.Glob(filepath.Join(ps.Path(id), ".refract", "worktrees", "*")); len(wt) != 0 {
+		t.Errorf("worktrees after trash: %v", wt)
 	}
 }

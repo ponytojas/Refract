@@ -285,7 +285,7 @@ func (a *projectsAPI) update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *projectsAPI) delete(w http.ResponseWriter, r *http.Request) {
-	if err := a.svc.Delete(r.Context(), r.PathValue("id")); err != nil {
+	if err := a.svc.Destroy(r.Context(), r.PathValue("id")); err != nil {
 		projectError(w, err)
 		return
 	}

@@ -4,7 +4,6 @@ package projects
 
 import (
 	"github.com/ponytojas/Refract/internal/access"
-	"github.com/ponytojas/Refract/internal/store"
 
 	"archive/zip"
 	"context"
@@ -56,6 +55,13 @@ type Service struct {
 	// PublicRemotes (the hosted service): git remotes must resolve to public
 	// addresses only, and git connects to the address that was checked.
 	PublicRemotes bool
+
+	// Now is the clock for the trash (tests set it); nil means time.Now.
+	Now func() time.Time
+	// HoldTurns keeps new assistant turns off a project until release is called
+	// (assistant.Service.Hold); ok is false while a turn is running. Nil (the CLI,
+	// tests) holds nothing.
+	HoldTurns func(id string) (release func(), ok bool)
 
 	bgMu     sync.Mutex     // guards stopping, and orders bg.Add before bg.Wait
 	stopping bool           // Drain started: no new OnCommit calls
@@ -225,18 +231,6 @@ func (s *Service) update(ctx context.Context, id, query, value string) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-// Delete removes the project and its history.
-func (s *Service) Delete(ctx context.Context, id string) error {
-	if _, err := s.Get(ctx, id); err != nil {
-		return err
-	}
-	if _, err := s.DB.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id); err != nil {
-		return err
-	}
-	store.SetSetting(ctx, s.DB, remoteKey(id), "") // its remote and token
-	return os.RemoveAll(s.Path(id))
 }
 
 // Check re-runs the portability checks on a project.

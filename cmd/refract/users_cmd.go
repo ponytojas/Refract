@@ -139,7 +139,7 @@ func removeUser(ctx context.Context, svc *users.Service, projectsDir, email stri
 	}
 	ps := &projects.Service{DB: svc.DB, Dir: projectsDir}
 	for _, id := range ids {
-		if err := ps.Delete(ctx, id); err != nil { // no user in ctx: any project
+		if err := ps.Destroy(ctx, id); err != nil { // no user in ctx: any project
 			return fmt.Errorf("deleting project %s: %w", id, err)
 		}
 	}
