@@ -160,7 +160,6 @@ export default {
   'Drop .zip files to import them.': 'Suelta archivos .zip para importarlos.',
   'Imported {name}': 'Importado {name}',
   'Imported {n} projects': '{n} proyectos importados',
-  'Deleted {name}': 'Eliminado {name}',
   Search: 'Buscar',
   'Search projects': 'Buscar proyectos',
   'Importing…': 'Importando…',
@@ -185,9 +184,6 @@ export default {
   Cancel: 'Cancelar',
   Create: 'Crear',
   Save: 'Guardar',
-  'Delete {name}?': '¿Eliminar {name}?',
-  'The project and its whole history are removed from this server. Export it first if you may need it.':
-    'El proyecto y todo su historial se eliminan de este servidor. Expórtalo antes si puedes necesitarlo.',
   'Imported, with notes': 'Importado, con notas',
   "These won't stop you from working, but they may affect compiling on another machine.":
     'No te impiden trabajar, pero pueden afectar a la compilación en otro equipo.',
@@ -242,4 +238,25 @@ export default {
   'Renews {date}': 'Se renueva el {date}',
   'Included AI left this month': 'IA incluida restante este mes',
   'Add your own API key': 'Añadir tu propia clave de API',
+  // Trash (T3)
+  Trash: 'Papelera',
+  'Move to trash': 'Mover a la papelera',
+  'Moved {name} to the trash': 'Se movió {name} a la papelera',
+  Undo: 'Deshacer',
+  'Restored {name}': 'Se restauró {name}',
+  'Deleted {name} for good': 'Se eliminó {name} para siempre',
+  'Delete forever': 'Eliminar para siempre',
+  'Delete {name} forever?': '¿Eliminar {name} para siempre?',
+  "Its files, history and chats are removed from this server. This can't be undone.":
+    'Sus archivos, historial y chats se eliminan de este servidor. No se puede deshacer.',
+  'Deleted projects stay here for {n} day, then they are deleted for good.':
+    'Los proyectos eliminados se quedan aquí {n} día y después se eliminan para siempre.',
+  'Deleted projects stay here for {n} days, then they are deleted for good.':
+    'Los proyectos eliminados se quedan aquí {n} días y después se eliminan para siempre.',
+  'Deleted for good in {n} day': 'Se elimina para siempre en {n} día',
+  'Deleted for good in {n} days': 'Se elimina para siempre en {n} días',
+  'Deleted on {date}': 'Eliminado el {date}',
+  'The trash is empty': 'La papelera está vacía',
+  'The assistant is working on this project. Stop it or wait until it finishes, then try again.':
+    'El asistente está trabajando en este proyecto. Deténlo o espera a que termine y vuelve a intentarlo.',
 } as Record<string, string>

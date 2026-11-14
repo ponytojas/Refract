@@ -116,6 +116,8 @@ export function describe(e: ApiError): string {
       return t('ChatGPT plan usage is not available for this account: {message}', { message: e.message })
     case 'model_unavailable':
       return t('This model is not available. Pick another one.')
+    case 'project_busy':
+      return t('The assistant is working on this project. Stop it or wait until it finishes, then try again.')
     case 'bad_login':
       return t('Wrong email or password.')
     case 'wrong_password':
@@ -154,6 +156,8 @@ export async function download(path: string, filename: string) {
 }
 
 export type Project = { id: string; name: string; main_file: string; created_at: string; updated_at: string }
+export type TrashedProject = Project & { deleted_at: string; purge_at: string }
+export type Trash = { days: number; projects: TrashedProject[] }
 export type Warning = { file: string; line: number; kind: string; message: string }
 export type ImportResult = { project: Project; warnings: Warning[]; skipped?: string[]; candidates?: string[] }
 
