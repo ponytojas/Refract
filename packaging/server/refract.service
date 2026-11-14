@@ -1,0 +1,46 @@
+# systemd unit for the hosted service: Refract with the compile sandbox.
+# See "Compile sandbox" in the README for the steps before starting it:
+#   - the user:      useradd --system --home-dir /var/lib/refract --shell /usr/sbin/nologin refract
+#   - the binary:    /usr/local/bin/refract, with tectonic, synctex, git and rg beside it or on the PATH
+#   - bubblewrap:    apt install bubblewrap
+#   - the TeX bundle: packaging/server/prepare-bundle.sh /opt/refract/tex
+#   - the secret key: openssl rand -base64 32 > /etc/refract/refract.key; chmod 600 (root only: systemd hands it to the service)
+# Install as /etc/systemd/system/refract.service, then: systemctl enable --now refract
+[Unit]
+Description=Refract
+After=network.target
+
+[Service]
+User=refract
+Group=refract
+# systemd reads the key as root and gives the service a private copy; the
+# wrapper turns it into the variable Refract reads, so it is never in a unit
+# file, a process listing or a world-readable file.
+LoadCredential=refract.key:/etc/refract/refract.key
+ExecStart=/bin/sh -c 'REFRACT_SECRET_KEY="$(cat "$CREDENTIALS_DIRECTORY/refract.key")" exec /usr/local/bin/refract'
+Restart=on-failure
+TimeoutStopSec=30
+
+Environment=REFRACT_MODE=saas
+Environment=REFRACT_AUTH=password
+Environment=REFRACT_PUBLIC_URL=https://refract.example.com
+Environment=REFRACT_ADDR=127.0.0.1:8080
+Environment=REFRACT_DATA_DIR=/var/lib/refract
+Environment=REFRACT_SANDBOX=bwrap
+# The wait for a turn (20 s by default) plus this must stay under 95 s.
+Environment=REFRACT_COMPILE_TIMEOUT=60
+Environment=REFRACT_TECTONIC_BUNDLE=/opt/refract/tex/bundle
+Environment=TECTONIC_CACHE_DIR=/opt/refract/tex/cache
+
+# The data folder, /var/lib/refract, is the only place the service can write.
+StateDirectory=refract
+ProtectSystem=strict
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectHome=yes
+# Not set on purpose, bubblewrap needs them: RestrictNamespaces=, PrivateUsers=,
+# ProtectKernelTunables=, ProtectProc= and ProcSubset= (it needs user
+# namespaces and a fresh /proc). Add one only after checking a compile still works.
+
+[Install]
+WantedBy=multi-user.target

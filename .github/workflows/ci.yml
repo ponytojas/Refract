@@ -41,6 +41,15 @@ jobs:
           sudo apt-get install -yq zlib1g-dev
           scripts/install-tex-tools.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # The sandbox tests need bubblewrap and unprivileged user namespaces, which
+      # Ubuntu's runners restrict through AppArmor. REFRACT_TEST_SANDBOX=1 makes
+      # a missing tool fail those tests instead of skipping them.
+      - name: Bubblewrap
+        run: |
+          sudo apt-get install -yq bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --unshare-all --ro-bind / / -- true
+          echo "REFRACT_TEST_SANDBOX=1" >> "$GITHUB_ENV"
       - uses: actions/cache@v6
         with:
           path: ${{ env.TECTONIC_CACHE_DIR }}

@@ -90,3 +90,9 @@ python3 -m unittest discover -s scripts -p 'test_*.py' -v
 The Debian payload test needs `dpkg-deb`; it runs in Linux CI and skips if the tool
 is absent locally. `make test` also runs these tests. No tests open the OAuth
 browser or read real credentials.
+
+## Server deployment
+
+`server/` holds what the hosted service needs, which these CLI packages must not:
+a systemd unit and `prepare-bundle.sh`, for the compile sandbox. See "Compile sandbox"
+in the top-level README.
