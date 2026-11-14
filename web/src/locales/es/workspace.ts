@@ -251,4 +251,12 @@ export default {
   'This project is in the trash. Restore it to keep working.':
     'Este proyecto está en la papelera. Restáuralo para seguir trabajando.',
   'Restore the project to use the assistant.': 'Restaura el proyecto para usar el asistente.',
+  'Your unsaved edits are kept here and saved when you restore it. Leaving this page discards them.':
+    'Tus cambios sin guardar se conservan aquí y se guardan al restaurarlo. Si sales de esta página, se pierden.',
+  'This project was deleted.': 'Este proyecto se eliminó.',
+  'Its unsaved text is still here. Copy it before you leave this page.':
+    'Su texto sin guardar sigue aquí. Cópialo antes de salir de esta página.',
+  'Copy {path}': 'Copiar {path}',
+  'Copied {path}': 'Se copió {path}',
+  "Couldn't copy {path}.": 'No se pudo copiar {path}.',
 } as Record<string, string>

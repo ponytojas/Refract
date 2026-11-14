@@ -25,6 +25,7 @@ import {
   PanelLeft,
   Play,
   Plus,
+  RotateCcw,
   ScrollText,
   Sparkles,
   Upload,
@@ -37,16 +38,20 @@ import {
   download,
   errorText,
   fileURL,
+  isTrashed,
   mkdir,
   move,
   readFile,
   RequestError,
   removeFile,
+  TRASHED_EVENT,
   writeFile,
   type ChatGPTStatus,
   type FileEntry,
   type OpenedFile,
   type Project,
+  type Trash,
+  type TrashedProject,
 } from './api'
 import Assistant, { type Chat, type EditorContext, type Turn } from './Assistant'
 import Review from './Review'
@@ -63,7 +68,7 @@ import { defaultRules } from '@/lib/wordcount'
 import FileTree from './FileTree'
 import PdfViewer, { type Highlight } from './PdfViewer'
 import AccountMenu from '@/components/AccountMenu'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import {
@@ -100,6 +105,7 @@ import { useCommands } from '@/lib/commands'
 import { setPref, usePrefs } from '@/lib/prefs'
 import { editorShortcuts, mod } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
+import { daysLeft } from '@/lib/trash'
 import { buildOutline, currentHeading, emptyOutline, OutlineCache, type Outline as OutlineData } from '@/lib/outline'
 import Outline from './Outline'
 import { t, tn } from '@/lib/i18n'
@@ -147,6 +153,8 @@ type Ask = {
   action: string
   onSubmit: (v: string) => Promise<void>
 }
+// A workspace whose project left its owner's scope: in the trash (it can be restored), or deleted for good.
+type Gone = { state: 'trashed'; entry?: TrashedProject } | { state: 'deleted' }
 type Confirm = { title: string; description: string; action: string; onConfirm: () => Promise<void> }
 
 export default function Workspace({ id, status }: { id: string; status: ChatGPTStatus | null }) {
@@ -209,6 +217,14 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   const [ask, setAsk] = useState<Ask | null>(null)
   const [askValue, setAskValue] = useState('')
   const [confirm, setConfirm] = useState<Confirm | null>(null)
+  // Set when the project is in the trash or deleted: nothing can change it, edits stay in memory.
+  const [gone, setGone] = useState<Gone | null>(null)
+  const locked = gone !== null
+  const goneRef = useRef<Gone | null>(null)
+  const projectRef = useRef<Project | null>(null)
+  const [reloads, setReloads] = useState(0) // bump to reload files, chats and projects
+  const [restoring, setRestoring] = useState(false)
+  const settleRef = useRef<() => Promise<void>>(async () => {})
   const sidebar = usePanelRef()
   const uploadInput = useRef<HTMLInputElement>(null)
 
@@ -230,7 +246,16 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   if (!saver.current) {
     saver.current = new Autosaver(
       async (p, c) => {
-        await writeFile(id, p, c)
+        try {
+          await writeFile(id, p, c)
+        } catch (e) {
+          // WriteFile creates parent folders, so a 404 can only mean the project is gone.
+          if (e instanceof RequestError && e.status === 404) {
+            saver.current?.pause()
+            settleRef.current()
+          }
+          throw e
+        }
         outlineCache.current!.saved(p, c)
         loadSymbols()
         refreshOutline.current()
@@ -312,19 +337,120 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   }, [shown])
 
   useEffect(() => {
+    // A trashed project is not an error: the banner says so.
+    const failed = (e: unknown) => isTrashed(e) || toast.error(errorText(e))
     const p1 = api<Project>(`/api/projects/${id}`)
       .then((p) => {
+        projectRef.current = p
         setProject(p)
         document.title = `${p.name} · Refract`
       })
-      .catch((e) => toast.error(errorText(e)))
+      .catch(failed)
     api<Project[]>('/api/projects')
       .then(setProjects)
       .catch(() => {})
-    const p2 = loadFiles().catch((e) => toast.error(errorText(e)))
+    const p2 = loadFiles().catch(failed)
     Promise.all([p1, p2]).then(() => setShown(true))
     loadChats()
-  }, [id, loadFiles, loadChats])
+  }, [id, loadFiles, loadChats, reloads])
+
+  // The project came back (restored here or elsewhere): it works again, with what was typed meanwhile.
+  const goLive = useCallback(
+    (p: Project) => {
+      goneRef.current = null
+      projectRef.current = p
+      setGone(null)
+      setProject(p)
+      document.title = `${p.name} · Refract`
+      toast.success(t('Restored {name}', { name: p.name }))
+      autosave.resume().catch(() => {}) // a failed save shows as the normal save error
+      setReloads((n) => n + 1)
+      setPdfVersion((v) => v + 1)
+    },
+    [autosave],
+  )
+
+  // Asks the server where the project is now, and follows: live, in the trash or
+  // deleted. One call at a time, whoever asks.
+  // Locked: close everything that could write, then show the banner.
+  const lock = useCallback(
+    (next: Gone) => {
+      goneRef.current = next
+      setReview(null)
+      setHistoryOpen(false)
+      setGitOpen(false)
+      setCiting(null)
+      setAsk(null)
+      setConfirm(null)
+      setChatOpen(false)
+      setProposal(undefined)
+      setInsert(undefined)
+      setGone(next)
+    },
+    [setReview, setHistoryOpen, setGitOpen, setCiting, setAsk, setConfirm, setChatOpen, setProposal, setInsert],
+  )
+
+  const settling = useRef<Promise<void> | null>(null)
+  const settle = useCallback((): Promise<void> => {
+    if (settling.current) return settling.current
+    const run = (async () => {
+      try {
+        const p = await api<Project>(`/api/projects/${id}`)
+        if (goneRef.current) goLive(p)
+        else if (autosave.isPaused) autosave.resume().catch(() => {}) // a stale signal
+      } catch (e) {
+        if (isTrashed(e)) {
+          let entry: TrashedProject | undefined
+          try {
+            entry = (await api<Trash>('/api/trash')).projects.find((x) => x.id === id)
+          } catch {
+            // the banner shows without a countdown
+          }
+          lock({ state: 'trashed', entry })
+          if (entry) document.title = `${entry.name} · Refract`
+        } else if (e instanceof RequestError && e.status === 404 && (projectRef.current || goneRef.current)) {
+          lock({ state: 'deleted' })
+        } else if (!goneRef.current) {
+          autosave.resume().catch(() => {}) // couldn't tell: keep saving as before
+        }
+      } finally {
+        settling.current = null
+      }
+    })()
+    settling.current = run
+    return run
+  }, [id, autosave, goLive, lock])
+  settleRef.current = settle
+
+  // Any call may learn that the project is in the trash: stop saving at once, then find out.
+  useEffect(() => {
+    const onTrashed = () => {
+      autosave.pause()
+      settle()
+    }
+    // Another tab may have trashed it while this one was in the background.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && projectRef.current) settle()
+    }
+    window.addEventListener(TRASHED_EVENT, onTrashed)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener(TRASHED_EVENT, onTrashed)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [autosave, settle])
+
+  async function restoreProject() {
+    setRestoring(true)
+    try {
+      await api(`/api/projects/${id}/restore`, { method: 'POST' })
+    } catch (e) {
+      // 404: restored elsewhere, or deleted meanwhile; settle() tells which.
+      if (!(e instanceof RequestError && e.status === 404)) toast.error(errorText(e))
+    }
+    await settle()
+    setRestoring(false)
+  }
 
   // Never lose edits on reload or close: flush and ask the browser to confirm.
   useEffect(() => {
@@ -338,6 +464,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   }, [autosave])
 
   async function compile() {
+    if (locked) return
     setCompiling(true)
     setCompileError('')
     try {
@@ -468,6 +595,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
 
   // Push/pull from the palette, without opening the dialog.
   async function sync(op: 'push' | 'pull') {
+    if (locked) return
     await autosave.flushAll()
     try {
       if (op === 'push') {
@@ -536,6 +664,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
 
   // "Fix with AI" on compile problems: a new chat asking for the fix (and a check compile).
   function fixWithAI(ps: Problem[]) {
+    if (locked) return
     const lines = ps.map(
       (p) => `- ${p.file ? `${p.file}${p.line ? `:${p.line}` : ''}: ` : ''}${p.severity}: ${p.message}`,
     )
@@ -558,6 +687,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   }
 
   async function setMainFile(path: string) {
+    if (locked) return
     await run(async () => {
       setProject(await api<Project>(`/api/projects/${id}`, { method: 'PATCH', body: { main_file: path } }))
       toast.success(t('Main file: {path}', { path }))
@@ -608,6 +738,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   }
 
   function create(dir: string, kind: 'file' | 'folder') {
+    if (locked) return
     askFor({
       title: kind === 'file' ? t('New file') : t('New folder'),
       description: t('Use slashes for subfolders, e.g. chapters/intro.tex'),
@@ -638,6 +769,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
 
   // Project instructions: open REFRACT.md, creating it from the template the first time.
   async function openInstructions() {
+    if (locked) return
     try {
       if ((await savedInstructions()) === undefined) {
         await writeFile(id, INSTRUCTIONS_FILE, instructionsTemplate(t))
@@ -660,6 +792,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   }
 
   function rename(from: string) {
+    if (locked) return
     askFor({
       title: t('Rename or move'),
       description: t('Change the path to move it to another folder.'),
@@ -689,6 +822,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   }
 
   function remove(path: string, dir: boolean) {
+    if (locked) return
     setConfirm({
       title: t('Delete {path}?', { path }),
       description: dir
@@ -706,6 +840,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   }
 
   async function upload(dir: string, list: File[]) {
+    if (locked) return
     const target = (f: File) => (dir ? `${dir}/${f.name}` : f.name)
     const write = async () => {
       for (const f of list) {
@@ -741,149 +876,172 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   }
 
   function newChat() {
+    if (locked) return
     setChatId('')
     setChatOpen(true)
     setChatFocus((n) => n + 1)
   }
 
-  useCommands(() => [
-    { id: 'ws:compile', group: 'Actions', label: t('Compile'), icon: Play, shortcut: `${mod}↵`, run: compile },
-    {
-      id: 'ws:chat',
-      group: 'Actions',
-      label: t('New chat'),
-      icon: MessageSquarePlus,
-      keywords: 'assistant ai ask',
-      run: newChat,
-    },
-    {
-      id: 'ws:assistant',
-      group: 'Actions',
-      label: chatOpen ? t('Collapse the assistant') : t('Open the assistant'),
-      icon: Sparkles,
-      keywords: 'chat ai',
-      run: () => setChatOpen(!chatOpen),
-    },
-    { id: 'ws:newfile', group: 'Actions', label: t('New file'), icon: FileText, run: () => create('', 'file') },
-    { id: 'ws:newfolder', group: 'Actions', label: t('New folder'), icon: FolderPlus, run: () => create('', 'folder') },
-    {
-      id: 'ws:upload',
-      group: 'Actions',
-      label: t('Upload files'),
-      icon: Upload,
-      run: () => uploadInput.current?.click(),
-    },
-    {
-      id: 'ws:instructions',
-      group: 'Actions',
-      label: t('Project instructions'),
-      icon: ScrollText,
-      keywords: 'refract.md assistant rules style remember',
-      run: openInstructions,
-    },
-    {
-      id: 'ws:git',
-      group: 'Actions',
-      label: t('Git remote…'),
-      icon: GitBranch,
-      keywords: 'github remote sync push pull',
-      run: () => setGitOpen(true),
-    },
-    {
-      id: 'ws:push',
-      group: 'Actions',
-      label: t('Push to the remote'),
-      icon: ArrowUpFromLine,
-      keywords: 'git github sync upload',
-      run: () => sync('push'),
-    },
-    {
-      id: 'ws:pull',
-      group: 'Actions',
-      label: t('Pull from the remote'),
-      icon: ArrowDownToLine,
-      keywords: 'git github sync download',
-      run: () => sync('pull'),
-    },
-    {
-      id: 'ws:history',
-      group: 'Actions',
-      label: t('Project history'),
-      icon: HistoryIcon,
-      keywords: 'versions restore undo commits',
-      run: () => setHistoryOpen(true),
-    },
-    {
-      id: 'ws:cite',
-      group: 'Actions',
-      label: t('Add a reference…'),
-      icon: BookMarked,
-      keywords: 'bibliography bibtex reference paper',
-      run: () => setCiting({ target: null, suggest: false }),
-    },
-    {
-      id: 'ws:outline',
-      group: 'Actions',
-      label: t('Go to section…'),
-      icon: ListTree,
-      keywords: 'outline sections headings chapter',
-      run: () => {
-        if (sidebar.current?.isCollapsed()) sidebar.current.expand()
-        setSideTab('files')
-        setRevealOutline((n) => n + 1)
-      },
-    },
-    {
-      id: 'ws:sidebar',
-      group: 'Actions',
-      label: sidebarCollapsed ? t('Show the sidebar') : t('Hide the sidebar'),
-      icon: PanelLeft,
-      run: toggleSidebar,
-    },
-    ...files
-      .filter((f) => !f.dir)
-      .map((f) => {
-        const slash = f.path.lastIndexOf('/')
-        return {
-          id: `file:${f.path}`,
-          group: 'Files',
-          label: f.path.slice(slash + 1),
-          hint: slash > 0 ? f.path.slice(0, slash) : undefined,
-          icon: File,
-          keywords: f.path,
-          run: () => open(f.path),
-        }
-      }),
-    ...outline.headings.map((h, i) => ({
-      id: `section:${i}`,
-      group: 'Sections',
-      label: h.title,
-      hint: h.path === project?.main_file ? `L${h.line}` : `${h.path}:${h.line}`,
-      icon: ListTree,
-      keywords: 'section',
-      run: () => jumpTo(h.path, h.line),
-    })),
-    ...chats.map((c) => ({
-      id: `chat:${c.id}`,
-      group: 'Chats',
-      label: c.title,
-      hint: ago(c.updated_at),
-      icon: MessageSquare,
-      run: () => {
-        setChatId(c.id)
-        setChatOpen(true)
-      },
-    })),
-    ...projects
-      .filter((p) => p.id !== id)
-      .map((p) => ({
-        id: `project:${p.id}`,
-        group: 'Projects',
-        label: p.name,
-        icon: FolderOpen,
-        run: () => navigate(`/p/${p.id}`),
-      })),
+  // What the palette doesn't offer while the project is locked; navigation stays.
+  const writes = new Set([
+    'ws:compile',
+    'ws:chat',
+    'ws:newfile',
+    'ws:newfolder',
+    'ws:upload',
+    'ws:instructions',
+    'ws:git',
+    'ws:push',
+    'ws:pull',
+    'ws:history',
+    'ws:cite',
   ])
+  useCommands(() =>
+    [
+      { id: 'ws:compile', group: 'Actions', label: t('Compile'), icon: Play, shortcut: `${mod}↵`, run: compile },
+      {
+        id: 'ws:chat',
+        group: 'Actions',
+        label: t('New chat'),
+        icon: MessageSquarePlus,
+        keywords: 'assistant ai ask',
+        run: newChat,
+      },
+      {
+        id: 'ws:assistant',
+        group: 'Actions',
+        label: chatOpen ? t('Collapse the assistant') : t('Open the assistant'),
+        icon: Sparkles,
+        keywords: 'chat ai',
+        run: () => setChatOpen(!chatOpen),
+      },
+      { id: 'ws:newfile', group: 'Actions', label: t('New file'), icon: FileText, run: () => create('', 'file') },
+      {
+        id: 'ws:newfolder',
+        group: 'Actions',
+        label: t('New folder'),
+        icon: FolderPlus,
+        run: () => create('', 'folder'),
+      },
+      {
+        id: 'ws:upload',
+        group: 'Actions',
+        label: t('Upload files'),
+        icon: Upload,
+        run: () => uploadInput.current?.click(),
+      },
+      {
+        id: 'ws:instructions',
+        group: 'Actions',
+        label: t('Project instructions'),
+        icon: ScrollText,
+        keywords: 'refract.md assistant rules style remember',
+        run: openInstructions,
+      },
+      {
+        id: 'ws:git',
+        group: 'Actions',
+        label: t('Git remote…'),
+        icon: GitBranch,
+        keywords: 'github remote sync push pull',
+        run: () => setGitOpen(true),
+      },
+      {
+        id: 'ws:push',
+        group: 'Actions',
+        label: t('Push to the remote'),
+        icon: ArrowUpFromLine,
+        keywords: 'git github sync upload',
+        run: () => sync('push'),
+      },
+      {
+        id: 'ws:pull',
+        group: 'Actions',
+        label: t('Pull from the remote'),
+        icon: ArrowDownToLine,
+        keywords: 'git github sync download',
+        run: () => sync('pull'),
+      },
+      {
+        id: 'ws:history',
+        group: 'Actions',
+        label: t('Project history'),
+        icon: HistoryIcon,
+        keywords: 'versions restore undo commits',
+        run: () => setHistoryOpen(true),
+      },
+      {
+        id: 'ws:cite',
+        group: 'Actions',
+        label: t('Add a reference…'),
+        icon: BookMarked,
+        keywords: 'bibliography bibtex reference paper',
+        run: () => setCiting({ target: null, suggest: false }),
+      },
+      {
+        id: 'ws:outline',
+        group: 'Actions',
+        label: t('Go to section…'),
+        icon: ListTree,
+        keywords: 'outline sections headings chapter',
+        run: () => {
+          if (sidebar.current?.isCollapsed()) sidebar.current.expand()
+          setSideTab('files')
+          setRevealOutline((n) => n + 1)
+        },
+      },
+      {
+        id: 'ws:sidebar',
+        group: 'Actions',
+        label: sidebarCollapsed ? t('Show the sidebar') : t('Hide the sidebar'),
+        icon: PanelLeft,
+        run: toggleSidebar,
+      },
+      ...files
+        .filter((f) => !f.dir)
+        .map((f) => {
+          const slash = f.path.lastIndexOf('/')
+          return {
+            id: `file:${f.path}`,
+            group: 'Files',
+            label: f.path.slice(slash + 1),
+            hint: slash > 0 ? f.path.slice(0, slash) : undefined,
+            icon: File,
+            keywords: f.path,
+            run: () => open(f.path),
+          }
+        }),
+      ...outline.headings.map((h, i) => ({
+        id: `section:${i}`,
+        group: 'Sections',
+        label: h.title,
+        hint: h.path === project?.main_file ? `L${h.line}` : `${h.path}:${h.line}`,
+        icon: ListTree,
+        keywords: 'section',
+        run: () => jumpTo(h.path, h.line),
+      })),
+      ...chats.map((c) => ({
+        id: `chat:${c.id}`,
+        group: 'Chats',
+        label: c.title,
+        hint: ago(c.updated_at),
+        icon: MessageSquare,
+        run: () => {
+          setChatId(c.id)
+          setChatOpen(true)
+        },
+      })),
+      ...projects
+        .filter((p) => p.id !== id)
+        .map((p) => ({
+          id: `project:${p.id}`,
+          group: 'Projects',
+          label: p.name,
+          icon: FolderOpen,
+          run: () => navigate(`/p/${p.id}`),
+        })),
+    ].filter((c) => !locked || !writes.has(c.id)),
+  )
 
   const aiReady = !!status?.ai_ready
   const docked = prefs.chatDocked
@@ -911,6 +1069,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
       focus={chatFocus}
       request={aiRequest}
       docked={asPanel}
+      readOnly={locked}
     />
   )
 
@@ -918,9 +1077,12 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   const texFiles = files.filter((f) => !f.dir && f.path.toLowerCase().endsWith('.tex')).map((f) => f.path)
   const saving = active ? saveState[statuses[active] ?? 'saved'] : null
 
+  const unsaved = locked ? autosave.unsaved() : []
+
   return (
-    <div className="h-full p-2">
-      <ResizablePanelGroup orientation="horizontal">
+    <div className="flex h-full flex-col p-2">
+      {gone && <GoneBanner gone={gone} unsaved={unsaved} restoring={restoring} onRestore={restoreProject} />}
+      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel
           id="sidebar"
           panelRef={sidebar}
@@ -952,7 +1114,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                   render={<Button variant="ghost" size="sm" className="min-w-0 flex-1 justify-start gap-1.5 px-2" />}
                 >
                   <span className="truncate font-semibold" style={{ viewTransitionName: 'project-title' }}>
-                    {project?.name ?? '…'}
+                    {project?.name ?? (gone?.state === 'trashed' ? gone.entry?.name : undefined) ?? '…'}
                   </span>
                   <ChevronDown className="opacity-50" />
                 </DropdownMenuTrigger>
@@ -960,18 +1122,22 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                   <DropdownMenuItem render={<Link to="/" />}>
                     <ChevronLeft /> {t('All projects')}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={openInstructions}>
-                    <ScrollText /> {t('Project instructions')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setGitOpen(true)}>
-                    <GitBranch /> {t('Git remote…')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
-                    <HistoryIcon /> {t('History')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setCiting({ target: null, suggest: false })}>
-                    <BookMarked /> {t('Add a reference…')}
-                  </DropdownMenuItem>
+                  {!locked && (
+                    <>
+                      <DropdownMenuItem onClick={openInstructions}>
+                        <ScrollText /> {t('Project instructions')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setGitOpen(true)}>
+                        <GitBranch /> {t('Git remote…')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
+                        <HistoryIcon /> {t('History')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setCiting({ target: null, suggest: false })}>
+                        <BookMarked /> {t('Add a reference…')}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
@@ -1013,7 +1179,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                   { value: 'chats', label: t('Chats'), icon: MessageSquare },
                 ]}
               />
-              {sideTab === 'files' ? (
+              {locked ? null : sideTab === 'files' ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
@@ -1080,6 +1246,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                       onSetMain={setMainFile}
                       onDownload={(p) => run(() => download(fileURL(id, p), p.split('/').pop()!))}
                       mainFile={project?.main_file}
+                      readOnly={locked}
                     />
                   </div>
                 </ResizablePanel>
@@ -1124,14 +1291,16 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
               </ResizablePanelGroup>
             ) : (
               <div className="min-h-0 flex-1 overflow-auto px-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="mb-1 w-full justify-start text-muted-foreground"
-                  onClick={newChat}
-                >
-                  <Plus /> {t('New chat')}
-                </Button>
+                {!locked && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mb-1 w-full justify-start text-muted-foreground"
+                    onClick={newChat}
+                  >
+                    <Plus /> {t('New chat')}
+                  </Button>
+                )}
                 {chats.map((c) => (
                   <button
                     key={c.id}
@@ -1253,7 +1422,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                         size="sm"
                         className="rounded-r-none"
                         onClick={compile}
-                        disabled={compiling || !project?.main_file}
+                        disabled={compiling || locked || !project?.main_file}
                       />
                     }
                   >
@@ -1266,6 +1435,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                 </Tooltip>
                 <DropdownMenu>
                   <DropdownMenuTrigger
+                    disabled={locked}
                     render={
                       <Button
                         size="icon-sm"
@@ -1323,7 +1493,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                   onCursor={setCursorLine}
                   insert={insert}
                   onInserted={() => setInsert(undefined)}
-                  onCite={(target, suggest) => setCiting({ target, suggest })}
+                  onCite={locked ? undefined : (target, suggest) => setCiting({ target, suggest })}
                   instructions={quickInstructions}
                   proposal={proposal}
                   onProposed={(ok) => {
@@ -1333,7 +1503,8 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                         t('The text changed in the meantime: the citation was added to the bibliography only.'),
                       )
                   }}
-                  quick={aiReady}
+                  quick={aiReady && !locked}
+                  readOnly={locked}
                   jump={jump}
                 />
               )}
@@ -1370,7 +1541,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                   result={result}
                   error={compileError}
                   onJump={jumpTo}
-                  onFix={aiReady ? fixWithAI : undefined}
+                  onFix={aiReady && !locked ? fixWithAI : undefined}
                 />
               }
             />
@@ -1561,6 +1732,63 @@ function BinaryView({ file, path }: { file: Extract<OpenedFile, { text: false }>
       <p>
         {file.type || t('Binary file')} · {(file.size / 1024).toFixed(1)} KB · {t('read-only')}
       </p>
+    </div>
+  )
+}
+
+// What the workspace says when its project is in the trash or was deleted.
+function GoneBanner({
+  gone,
+  unsaved,
+  restoring,
+  onRestore,
+}: {
+  gone: Gone
+  unsaved: [path: string, content: string][]
+  restoring: boolean
+  onRestore: () => void
+}) {
+  const trashed = gone.state === 'trashed'
+  const left = trashed && gone.entry ? daysLeft(gone.entry.purge_at) : 0
+  const copy = (path: string, content: string) =>
+    navigator.clipboard.writeText(content).then(
+      () => toast.success(t('Copied {path}', { path })),
+      () => toast.error(t("Couldn't copy {path}.", { path })),
+    )
+  return (
+    <div
+      role="status"
+      className={cn(
+        'mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border px-4 py-2.5 text-sm',
+        trashed ? 'border-warning/40 bg-warning/10' : 'border-destructive/40 bg-destructive/10',
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="font-medium">
+          {trashed ? t('This project is in the trash. Restore it to keep working.') : t('This project was deleted.')}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {trashed && gone.entry && <>{tn(left, 'Deleted for good in {n} day', 'Deleted for good in {n} days')}. </>}
+          {unsaved.length > 0 &&
+            (trashed
+              ? t('Your unsaved edits are kept here and saved when you restore it. Leaving this page discards them.')
+              : t('Its unsaved text is still here. Copy it before you leave this page.'))}
+        </p>
+      </div>
+      {trashed ? (
+        <Button size="sm" onClick={onRestore} disabled={restoring}>
+          {restoring ? <Loader2 className="animate-spin" /> : <RotateCcw />} {t('Restore')}
+        </Button>
+      ) : (
+        unsaved.map(([path, content]) => (
+          <Button key={path} size="sm" variant="secondary" onClick={() => copy(path, content)}>
+            <Copy /> {t('Copy {path}', { path })}
+          </Button>
+        ))
+      )}
+      <Link to="/" className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }))}>
+        {t('All projects')}
+      </Link>
     </div>
   )
 }
