@@ -43,6 +43,7 @@ type Tectonic struct {
 	CacheDir string // TECTONIC_CACHE_DIR; empty = Tectonic's default
 	Timeout  time.Duration
 	Fonts    *fonts.Resolver // optional automatic family resolution; shared across builds
+	Sandbox  *Sandbox        // run tectonic inside it; nil = run it directly
 }
 
 const maxOutput = 1 << 20
@@ -91,13 +92,25 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 		args = append(args, "--bundle", t.Bundle)
 	}
 
-	cmd := exec.CommandContext(runCtx, cmpOr(t.Bin, "tectonic"), args...)
-	cmd.Dir = filepath.Join(sourceDir, filepath.FromSlash(path.Dir(mainFile)))
-	// A minimal environment: the document must not be able to \input
-	// /proc/self/environ and read secrets like REFRACT_SECRET_KEY.
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
-	if t.CacheDir != "" {
-		cmd.Env = append(cmd.Env, "TECTONIC_CACHE_DIR="+t.CacheDir)
+	workDir := filepath.Join(sourceDir, filepath.FromSlash(path.Dir(mainFile)))
+	var cmd *exec.Cmd
+	if t.Sandbox != nil {
+		cmd, err = t.Sandbox.command(runCtx, sandboxJob{
+			Tectonic: cmpOr(t.Bin, "tectonic"), Args: args, Bundle: t.Bundle, Cache: t.CacheDir,
+			Project: projectDir, OutDir: outDir, WorkDir: workDir,
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		cmd = exec.CommandContext(runCtx, cmpOr(t.Bin, "tectonic"), args...)
+		cmd.Dir = workDir
+		// A minimal environment: the document must not be able to \input
+		// /proc/self/environ and read secrets like REFRACT_SECRET_KEY.
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
+		if t.CacheDir != "" {
+			cmd.Env = append(cmd.Env, "TECTONIC_CACHE_DIR="+t.CacheDir)
+		}
 	}
 	ownProcessGroup(cmd) // a timeout kills everything tectonic started
 	cmd.WaitDelay = 2 * time.Second
