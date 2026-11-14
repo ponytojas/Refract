@@ -1,0 +1,11 @@
+Subject: Confirma tu correo electrónico en Refract
+
+Hola:
+
+Alguien ha creado una cuenta de Refract en {{.Site}} con esta dirección ({{.Email}}). Para confirmar que es tuya, abre este enlace:
+
+{{.Link}}
+
+El enlace funciona durante 24 horas y una sola vez.
+
+Si no te has registrado, ignora este mensaje: la cuenta no puede crear proyectos hasta que se confirme la dirección.
