@@ -324,6 +324,14 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 			return nil, err
 		}
 	}
+	// Reserve the project before reading it: a trash holds the reservation
+	// while it changes the project, so a turn either starts first (and the
+	// trash is refused) or reads the project after it and finds nothing.
+	if !s.reserve(c.ProjectID) {
+		return nil, ErrBusy
+	}
+	defer s.free(c.ProjectID)
+	// Counted after the reservation: two asks at once can't both pass a count taken before it.
 	if lim.PendingReview > 0 {
 		var n int
 		if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM turns t JOIN chats c ON c.id = t.chat_id WHERE c.project_id = ? AND t.status = 'review'`, c.ProjectID).Scan(&n); err != nil {
@@ -333,13 +341,6 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 			return nil, ErrReviewPending
 		}
 	}
-	// Reserve the project before reading it: a trash holds the reservation
-	// while it changes the project, so a turn either starts first (and the
-	// trash is refused) or reads the project after it and finds nothing.
-	if !s.reserve(c.ProjectID) {
-		return nil, ErrBusy
-	}
-	defer s.free(c.ProjectID)
 	if lim.Running > 0 {
 		s.mu.Lock()
 		if s.turnsBy[uid] >= lim.Running {
@@ -369,6 +370,9 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 			}
 		}
 		return nil, err
+	}
+	if err := s.Projects.CheckStorage(ctx, p); err != nil {
+		return nil, err // before a title or a turn is recorded
 	}
 
 	history, err := s.history(ctx, chatID)

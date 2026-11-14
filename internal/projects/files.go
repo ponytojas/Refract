@@ -123,12 +123,16 @@ func (s *Service) WriteFile(ctx context.Context, id, p string, r io.Reader) erro
 	if err != nil {
 		return err
 	}
-	root, err := s.root(ctx, id)
+	proj, err := s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(s.Path(id))
 	if err != nil {
 		return err
 	}
 	defer root.Close()
-	if err := s.checkQuotaFor(ctx, id); err != nil {
+	if err := s.CheckStorage(ctx, proj); err != nil {
 		return err
 	}
 	if d := path.Dir(p); d != "." {
@@ -136,8 +140,12 @@ func (s *Service) WriteFile(ctx context.Context, id, p string, r io.Reader) erro
 			return err
 		}
 	}
-	if fi, err := root.Stat(p); err == nil && fi.IsDir() {
-		return fmt.Errorf("%w: %q is a folder", ErrBadPath, p)
+	var old int64 // what the file being replaced already counts for
+	if fi, err := root.Stat(p); err == nil {
+		if fi.IsDir() {
+			return fmt.Errorf("%w: %q is a folder", ErrBadPath, p)
+		}
+		old = fi.Size()
 	}
 	suffix := make([]byte, 6)
 	rand.Read(suffix)
@@ -160,7 +168,7 @@ func (s *Service) WriteFile(ctx context.Context, id, p string, r io.Reader) erro
 	if err := root.Rename(tmp, p); err != nil {
 		return err
 	}
-	s.grew(ctx, id, n)
+	s.grew(ctx, id, n-old) // a replaced file adds only the difference
 	return s.touch(ctx, id)
 }
 

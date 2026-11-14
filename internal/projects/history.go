@@ -103,6 +103,7 @@ func (s *Service) RestoreFile(ctx context.Context, id, rev, path string) (string
 	if err != nil {
 		return "", err
 	}
+	defer s.measure(ctx, id)
 	defer lockRepo(id)()
 	if _, err := s.checkpoint(ctx, id, "Checkpoint before restore", true); err != nil {
 		return "", err
@@ -125,6 +126,7 @@ func (s *Service) RestoreProject(ctx context.Context, id, hash string) (string, 
 	if !revision.MatchString(hash) || strings.HasSuffix(hash, "^") {
 		return "", ErrBadRevision
 	}
+	defer s.measure(ctx, id)
 	defer lockRepo(id)()
 	if _, err := s.checkpoint(ctx, id, "Checkpoint before restore", true); err != nil {
 		return "", err

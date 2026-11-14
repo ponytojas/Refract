@@ -259,6 +259,10 @@ export default {
   'The trash is empty': 'La papelera está vacía',
   'The assistant is working on this project. Stop it or wait until it finishes, then try again.':
     'El asistente está trabajando en este proyecto. Deténlo o espera a que termine y vuelve a intentarlo.',
+  'Your plan has reached its project limit, including projects in the trash. Delete one forever from the trash to add another.':
+    'Tu plan ha alcanzado su límite de proyectos, contando los de la papelera. Elimina uno para siempre desde la papelera para añadir otro.',
+  "Your plan's storage is full, counting projects in the trash. Delete projects forever from the trash to free space; deleted files stay in a project's history.":
+    'El almacenamiento de tu plan está lleno, contando los proyectos de la papelera. Elimina proyectos para siempre desde la papelera para liberar espacio; los archivos borrados siguen en el historial de un proyecto.',
   // Account lifecycle (A3)
   'Confirm your email address to create or import projects. Open the link we sent you, or send a new one from Settings → Account.':
     'Confirma tu correo electrónico para crear o importar proyectos. Abre el enlace que te enviamos, o pide uno nuevo en Ajustes → Cuenta.',

@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ponytojas/Refract/internal/auth"
@@ -37,7 +42,7 @@ func TestQuotaProjects(t *testing.T) {
 		}
 	}
 	_, err := s.Create(ownerCtx, "p")
-	if !errors.Is(err, ErrOverLimit) || !strings.Contains(err.Error(), "2 projects") {
+	if !errors.Is(err, ErrOverLimit) || !strings.Contains(err.Error(), "allows 2 projects") {
 		t.Fatalf("third create: %v", err)
 	}
 	other := auth.WithUser(context.Background(), auth.User{ID: "other"})
@@ -82,7 +87,7 @@ func TestQuotaStorage(t *testing.T) {
 		}
 	}
 	err = write(t, s, id, "c.bin", 10)
-	if !errors.Is(err, ErrOverLimit) || !strings.Contains(err.Error(), "storage is full") {
+	if !errors.Is(err, ErrOverLimit) || !strings.Contains(err.Error(), "storage") {
 		t.Fatalf("third write: %v", err)
 	}
 	if err := s.Trash(ownerCtx, id); err != nil {
@@ -116,7 +121,7 @@ func TestQuotaCountsTrash(t *testing.T) {
 	}
 }
 
-func TestQuotaCountsHistoryAndWorktrees(t *testing.T) {
+func TestQuotaCountsHistoryNotRefractDir(t *testing.T) {
 	s := newService(t)
 	s.QuotaFor = fixed(Quota{MaxBytes: 1 << 30})
 	res, err := s.Import(ownerCtx, "p", ZipSource(makeZip(t,
@@ -134,15 +139,127 @@ func TestQuotaCountsHistoryAndWorktrees(t *testing.T) {
 	if _, _, err := s.StartTurn(ownerCtx, id, "t1"); err != nil {
 		t.Fatal(err)
 	}
-	started := sizeOf(t, s, id)
-	if started < imported+300<<10 {
-		t.Fatalf("size after StartTurn = %d, imported = %d", started, imported)
-	}
-	if err := s.EndTurn(ownerCtx, id, "t1"); err != nil {
+	imported = sizeOf(t, s, id) // the turn's git bookkeeping is history
+	if err := os.WriteFile(filepath.Join(s.Path(id), ".refract", "cache.bin"), make([]byte, 1<<20), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if ended := sizeOf(t, s, id); ended >= started {
-		t.Fatalf("size after EndTurn = %d, started = %d", ended, started)
+	s.measure(ownerCtx, id)
+	if n := sizeOf(t, s, id); n != imported {
+		t.Fatalf("size with a turn worktree and cache in .refract = %d, want %d", n, imported)
+	}
+}
+
+func TestQuotaReplacingAFileAddsOnlyTheDifference(t *testing.T) {
+	s := newService(t)
+	s.QuotaFor = fixed(Quota{MaxBytes: 1 << 30})
+	p, err := s.Create(ownerCtx, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := write(t, s, p.ID, "a.txt", 1000); err != nil {
+		t.Fatal(err)
+	}
+	before := sizeOf(t, s, p.ID)
+	for range 5 {
+		if err := write(t, s, p.ID, "a.txt", 1000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := sizeOf(t, s, p.ID); n != before {
+		t.Fatalf("size after autosaves = %d, want %d", n, before)
+	}
+	if err := write(t, s, p.ID, "a.txt", 10); err != nil {
+		t.Fatal(err)
+	}
+	if n := sizeOf(t, s, p.ID); n != before {
+		t.Fatalf("shrinking lowered the estimate: %d, want %d", n, before)
+	}
+}
+
+func TestQuotaImportRefusedWhenItWouldPassTheLimit(t *testing.T) {
+	s := newService(t)
+	s.QuotaFor = fixed(Quota{MaxBytes: 800 << 10})
+	zip := func() Source {
+		return ZipSource(makeZip(t, entry{name: "main.tex", body: doc}, entry{name: "big.bin", body: randomString(300 << 10)}))
+	}
+	if _, err := s.Import(ownerCtx, "a", zip()); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Import(ownerCtx, "b", zip())
+	var ol *OverLimit
+	if !errors.Is(err, ErrOverLimit) || !errors.As(err, &ol) || ol.Kind != "storage" {
+		t.Fatalf("second import: %v", err)
+	}
+	if !strings.Contains(err.Error(), "from the trash") {
+		t.Fatalf("message doesn't say how to free space: %v", err)
+	}
+	var n int
+	s.DB.QueryRow(`SELECT count(*) FROM projects`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("%d projects after a refused import", n)
+	}
+}
+
+func TestQuotaParallelCreates(t *testing.T) {
+	s := newService(t)
+	s.QuotaFor = fixed(Quota{MaxProjects: 3})
+	var wg sync.WaitGroup
+	var ok atomic.Int32
+	for range 12 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := s.Create(ownerCtx, "p"); err == nil {
+				ok.Add(1)
+			} else if !errors.Is(err, ErrOverLimit) {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if ok.Load() != 3 {
+		t.Fatalf("%d creates succeeded, want 3", ok.Load())
+	}
+}
+
+func TestQuotaMeasureNeverUndercountsConcurrentSaves(t *testing.T) {
+	s := newService(t)
+	s.QuotaFor = fixed(Quota{MaxBytes: 1 << 30})
+	p, err := s.Create(ownerCtx, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				s.measure(ownerCtx, p.ID)
+			}
+		}
+	}()
+	for i := range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range 15 {
+				if err := write(t, s, p.ID, fmt.Sprintf("f%d-%d.txt", i, j), 1000); err != nil {
+					t.Error(err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(stop)
+	disk, err := dirSize(s.Path(p.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := sizeOf(t, s, p.ID); n < disk {
+		t.Fatalf("stored %d, on disk %d", n, disk)
 	}
 }
 
@@ -163,11 +280,10 @@ func TestQuotaOverCountIsCorrected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for range 3 {
-		if err := write(t, s, p.ID, "f.txt", 200<<10); err != nil {
-			t.Fatal(err)
-		}
+	if err := write(t, s, p.ID, "f.txt", 200<<10); err != nil {
+		t.Fatal(err)
 	}
+	s.grew(ownerCtx, p.ID, 400<<10) // drift an estimate can have
 	if n := sizeOf(t, s, p.ID); n < 600<<10 {
 		t.Fatalf("size before checkpoint = %d", n)
 	}
@@ -235,7 +351,7 @@ func TestMeasureAll(t *testing.T) {
 		}
 		ids = append(ids, p.ID)
 	}
-	if _, err := s.DB.Exec(`UPDATE projects SET size_bytes = 0`); err != nil {
+	if _, err := s.DB.Exec(`UPDATE projects SET size_bytes = 0, size_measured_at = 0`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.MeasureAll(ownerCtx); err != nil {
@@ -245,5 +361,15 @@ func TestMeasureAll(t *testing.T) {
 		if sizeOf(t, s, id) == 0 {
 			t.Fatalf("%s not measured", id)
 		}
+	}
+	// Measured projects are left alone.
+	if _, err := s.DB.Exec(`UPDATE projects SET size_bytes = 7`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MeasureAll(ownerCtx); err != nil {
+		t.Fatal(err)
+	}
+	if n := sizeOf(t, s, ids[0]); n != 7 {
+		t.Fatalf("measured again: %d", n)
 	}
 }

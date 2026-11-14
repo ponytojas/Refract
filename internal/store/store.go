@@ -105,10 +105,12 @@ var migrations = []string{
 		used_at    INTEGER NOT NULL DEFAULT 0
 	);
 	CREATE INDEX account_tokens_user ON account_tokens(user_id, purpose)`,
-	// Limits (S5): what each project takes on disk, history and turn worktrees
-	// included, summed per owner for the storage limit (0 until first
-	// measured); and the account's plan, which decides its limits when hosted.
+	// Limits (S5): what each project takes on disk (working tree and history,
+	// not .refract), summed per owner for the storage limit, and when it was
+	// last measured (0: never); and the account's plan, which decides its
+	// limits when hosted.
 	`ALTER TABLE projects ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE projects ADD COLUMN size_measured_at INTEGER NOT NULL DEFAULT 0;
 	ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'`,
 }
 

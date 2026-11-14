@@ -111,7 +111,7 @@ func TestOverLimitIsForbidden(t *testing.T) {
 	if w := post(); w.Code != http.StatusOK {
 		t.Fatalf("first: %d %s", w.Code, w.Body)
 	}
-	if w := post(); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "projects") {
+	if w := post(); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), `"kind":"over_projects"`) {
 		t.Fatalf("second: %d %s", w.Code, w.Body)
 	}
 }

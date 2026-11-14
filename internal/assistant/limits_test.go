@@ -7,6 +7,7 @@ import (
 
 	"github.com/ponytojas/Refract/internal/agent"
 	"github.com/ponytojas/Refract/internal/ai"
+	"github.com/ponytojas/Refract/internal/projects"
 )
 
 func turnLimits(l TurnLimits) func(context.Context, string) (TurnLimits, error) {
@@ -76,5 +77,22 @@ func TestTurnCountIsReleasedOnFailure(t *testing.T) {
 	s.Ask(ownerCtx, chat, "fails", Context{}, Choice{}, func(agent.Event) {})
 	if _, err := s.Ask(ownerCtx, chat, "again", Context{}, Choice{}, func(agent.Event) {}); errors.Is(err, ErrTooManyTurns) {
 		t.Fatal("turn count leaked")
+	}
+}
+
+func TestAskRefusedWhenStorageIsFull(t *testing.T) {
+	p := &fakeProvider{script: [][]ai.Event{done("ok")}}
+	s, ps, _, chat := setup(t, p)
+	ps.QuotaFor = func(context.Context, string) (projects.Quota, error) { return projects.Quota{MaxBytes: 10}, nil }
+	if _, err := s.DB.Exec(`UPDATE projects SET size_bytes = 100`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Ask(ownerCtx, chat, "hello", Context{}, Choice{}, func(agent.Event) {}); !errors.Is(err, projects.ErrOverLimit) {
+		t.Fatalf("ask: %v", err)
+	}
+	var turns int
+	s.DB.QueryRow(`SELECT count(*) FROM turns`).Scan(&turns)
+	if turns != 0 {
+		t.Fatalf("%d turns recorded for a refused ask", turns)
 	}
 }

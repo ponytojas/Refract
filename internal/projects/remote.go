@@ -235,6 +235,7 @@ func (s *Service) Push(ctx context.Context, id string) error {
 	unlock := lockRepo(id) // only while committing: never across the network
 	_, err = s.checkpoint(ctx, id, "Checkpoint before push", false)
 	unlock()
+	s.measure(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -264,7 +265,8 @@ func (s *Service) Pull(ctx context.Context, id string) (*PullResult, error) {
 	if err := s.checkQuotaFor(ctx, id); err != nil {
 		return nil, err
 	}
-	unlock := lockRepo(id) // released during the fetch, taken again for the merge
+	defer s.measure(ctx, id) // a pull can overshoot the limit; then growth is refused until under
+	unlock := lockRepo(id)   // released during the fetch, taken again for the merge
 	_, err = s.checkpoint(ctx, id, "Checkpoint before pull", false)
 	unlock()
 	if err != nil {
@@ -278,7 +280,6 @@ func (s *Service) Pull(ctx context.Context, id string) (*PullResult, error) {
 		return nil, err
 	}
 	defer lockRepo(id)()
-	defer s.measure(ctx, id)
 	return s.mergeFetched(ctx, id, r.Branch)
 }
 

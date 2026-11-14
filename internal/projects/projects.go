@@ -145,7 +145,7 @@ func (s *Service) create(ctx context.Context, name string, fill func(dir string)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkQuota(ctx, u.ID, true); err != nil {
+	if err := s.checkQuota(ctx, u.ID, true, 0); err != nil { // early, before the work of an import
 		return nil, err
 	}
 	name = strings.TrimSpace(name)
@@ -177,18 +177,31 @@ func (s *Service) create(ctx context.Context, name string, fill func(dir string)
 		return nil, err
 	}
 
+	var size, measuredAt int64
+	if s.QuotaFor != nil {
+		if size, err = dirSize(tmp); err != nil {
+			return nil, err
+		}
+		measuredAt = time.Now().Unix()
+	}
+
 	id := newID()
+	// Count and insert are one step per account, or parallel creates would all pass the count.
+	unlock := lockUser(u.ID)
+	defer unlock()
+	if err := s.checkQuota(ctx, u.ID, true, size); err != nil {
+		return nil, err
+	}
 	if err := os.Rename(tmp, s.Path(id)); err != nil {
 		return nil, err
 	}
 	now := time.Now()
 	p := &Project{ID: id, Name: name, MainFile: main, CreatedAt: now, UpdatedAt: now, Owner: u.ID}
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO projects (id, name, main_file, created_at, updated_at, owner) VALUES (?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.MainFile, now.Unix(), now.Unix(), p.Owner); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO projects (id, name, main_file, created_at, updated_at, owner, size_bytes, size_measured_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.MainFile, now.Unix(), now.Unix(), p.Owner, size, measuredAt); err != nil {
 		os.RemoveAll(s.Path(id))
 		return nil, err
 	}
-	s.measure(ctx, id)
 	res := &ImportResult{Project: p, Warnings: warnings, Skipped: skipped}
 	if main == "" {
 		res.Candidates = candidates
