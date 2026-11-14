@@ -43,6 +43,7 @@ func TestCheckDeployment(t *testing.T) {
 		{mode.SaaS, "password", "https://r.example.com", "none", 20 * time.Second, 60 * time.Second, "REFRACT_SANDBOX=bwrap"},
 		{mode.SaaS, "password", "https://r.example.com", "bwrap", 20 * time.Second, 90 * time.Second, "is over 95s: a proxy would cut the request first. Set REFRACT_COMPILE_TIMEOUT=60"},
 		{mode.SaaS, "password", "https://r.example.com", "bwrap", 20 * time.Second, 75 * time.Second, ""},
+		{mode.SaaS, "password", "https://r.example.com", "bwrap", 0, 60 * time.Second, "REFRACT_COMPILE_MAX_WAIT=0"},
 		{mode.SaaS, "password", "https://r.example.com", "bwrap", 40 * time.Second, 60 * time.Second, "Lower REFRACT_COMPILE_MAX_WAIT"},
 	} {
 		err := checkDeployment(tc.mode, tc.auth, tc.publicURL, tc.sandbox, tc.wait, tc.timeout)

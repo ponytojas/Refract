@@ -29,6 +29,9 @@ func checkDeployment(m mode.Mode, authMode, publicURL, sandbox string, maxWait, 
 	if sandbox != "bwrap" {
 		return errors.New("REFRACT_MODE=saas needs REFRACT_SANDBOX=bwrap: without it a document can read other accounts' files")
 	}
+	if maxWait <= 0 {
+		return errors.New("REFRACT_COMPILE_MAX_WAIT=0 (no limit) isn't allowed on the hosted service: a waiting request would outlast the proxy's limit")
+	}
 	// A compile is one request, and Cloudflare cuts a request with no response at about 100 s.
 	if maxWait+compileTimeout > proxyLimit {
 		hint := "Lower REFRACT_COMPILE_MAX_WAIT or REFRACT_COMPILE_TIMEOUT"

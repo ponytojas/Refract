@@ -17,6 +17,10 @@ func TestParseCompileConfig(t *testing.T) {
 	if err != nil || c.sandbox != "bwrap" || c.workers != 3 || c.maxWait != 5*time.Second || c.timeout != 60*time.Second {
 		t.Errorf("set = %+v, %v", c, err)
 	}
+	c, err = parseCompileConfig(env(map[string]string{"REFRACT_COMPILE_MAX_WAIT": "0"}))
+	if err != nil || c.maxWait != 0 {
+		t.Errorf("max wait 0 = %+v, %v; want it accepted", c, err)
+	}
 	for name, value := range map[string]string{
 		"REFRACT_SANDBOX":          "docker",
 		"REFRACT_COMPILE_WORKERS":  "0",

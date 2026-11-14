@@ -30,24 +30,22 @@ func parseCompileConfig(getenv func(string) string) (compileConfig, error) {
 		c.sandbox = v
 	}
 	for _, f := range []struct {
-		name string
-		set  func(n int)
+		name   string
+		unit   string // appended to "want a positive number"
+		allow0 bool   // 0 is accepted
+		set    func(n int)
 	}{
-		{"REFRACT_COMPILE_WORKERS", func(n int) { c.workers = n }},
-		{"REFRACT_COMPILE_MAX_WAIT", func(n int) { c.maxWait = time.Duration(n) * time.Second }},
-		{"REFRACT_COMPILE_TIMEOUT", func(n int) { c.timeout = time.Duration(n) * time.Second }},
+		{"REFRACT_COMPILE_WORKERS", "", false, func(n int) { c.workers = n }},
+		{"REFRACT_COMPILE_MAX_WAIT", " of seconds, or 0 for no limit", true, func(n int) { c.maxWait = time.Duration(n) * time.Second }},
+		{"REFRACT_COMPILE_TIMEOUT", " of seconds", false, func(n int) { c.timeout = time.Duration(n) * time.Second }},
 	} {
 		v := getenv(f.name)
 		if v == "" {
 			continue
 		}
 		n, err := strconv.Atoi(v)
-		if err != nil || n <= 0 {
-			unit := " of seconds"
-			if f.name == "REFRACT_COMPILE_WORKERS" {
-				unit = ""
-			}
-			return c, fmt.Errorf("%s=%q: want a positive number%s", f.name, v, unit)
+		if err != nil || n < 0 || (n == 0 && !f.allow0) {
+			return c, fmt.Errorf("%s=%q: want a positive number%s", f.name, v, f.unit)
 		}
 		f.set(n)
 	}
