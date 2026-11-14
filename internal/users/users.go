@@ -19,7 +19,15 @@ import (
 
 type Service struct {
 	DB  *sql.DB
-	Key []byte // to re-seal adopted credentials
+	Key []byte           // to re-seal adopted credentials
+	Now func() time.Time // tests set it; nil means time.Now
+}
+
+func (s *Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 // legacy settings of the single-user version, now per user: key → sealed?
@@ -28,46 +36,56 @@ var legacy = map[string]bool{"siwc.credentials": true, "siwc.welcome_seen": fals
 // Resolve returns the user for email, creating it if needed. The first user
 // adopts everything that predates users: projects and per-user settings.
 func (s *Service) Resolve(ctx context.Context, email string) (auth.User, error) {
+	u, _, err := s.resolve(ctx, email)
+	return u, err
+}
+
+// resolve is Resolve that also returns the account's language for emails ("" while unknown).
+// Accounts created here come from an identity the operator trusts (Cloudflare
+// Access, OpenID Connect, local, the CLI), so they start verified.
+func (s *Service) resolve(ctx context.Context, email string) (auth.User, string, error) {
 	if email == "" {
-		return auth.User{}, errors.New("no identity")
+		return auth.User{}, "", errors.New("no identity")
 	}
 	// Looked up on every request (no cache), so removing or renaming an
 	// account takes effect at once, also in the running server.
 	u := auth.User{Email: email}
-	err := s.DB.QueryRowContext(ctx, `SELECT id FROM users WHERE email = ?`, email).Scan(&u.ID)
+	var lang string
+	err := s.DB.QueryRowContext(ctx, `SELECT id, lang FROM users WHERE email = ?`, email).Scan(&u.ID, &lang)
 	if err == nil {
-		return u, nil
+		return u, lang, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return auth.User{}, err
+		return auth.User{}, "", err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil) // immediate: two first requests can't both create
 	if err != nil {
-		return auth.User{}, err
+		return auth.User{}, "", err
 	}
 	defer tx.Rollback()
-	err = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE email = ?`, email).Scan(&u.ID)
+	err = tx.QueryRowContext(ctx, `SELECT id, lang FROM users WHERE email = ?`, email).Scan(&u.ID, &lang)
 	if errors.Is(err, sql.ErrNoRows) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&n); err != nil {
-			return auth.User{}, err
+			return auth.User{}, "", err
 		}
 		u.ID = newID()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)`, u.ID, email, time.Now().Unix()); err != nil {
-			return auth.User{}, err
+		at := s.now().Unix()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, created_at, email_verified_at) VALUES (?, ?, ?, ?)`, u.ID, email, at, at); err != nil {
+			return auth.User{}, "", err
 		}
 		if n == 0 {
 			if err := s.adopt(ctx, tx, u.ID); err != nil {
-				return auth.User{}, err
+				return auth.User{}, "", err
 			}
 		}
 	} else if err != nil {
-		return auth.User{}, err
+		return auth.User{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
-		return auth.User{}, err
+		return auth.User{}, "", err
 	}
-	return u, nil
+	return u, lang, nil
 }
 
 func (s *Service) adopt(ctx context.Context, tx *sql.Tx, id string) error {
@@ -104,13 +122,26 @@ func (s *Service) adopt(ctx context.Context, tx *sql.Tx, id string) error {
 // Middleware turns the auth layer's identity into the request's user.
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, err := s.Resolve(r.Context(), auth.Identity(r.Context()))
+		u, lang, err := s.resolve(r.Context(), auth.Identity(r.Context()))
 		if err != nil {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		if l := RequestLang(r); lang == "" && l != "" { // once per account
+			s.DB.ExecContext(r.Context(), `UPDATE users SET lang = ? WHERE id = ? AND lang = ''`, l, u.ID)
+		}
 		next.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), u)))
 	})
+}
+
+// RequestLang is the interface language the web app sends (X-Refract-Lang):
+// "en" or "es", or "" when absent or anything else.
+func RequestLang(r *http.Request) string {
+	switch l := r.Header.Get("X-Refract-Lang"); l {
+	case "en", "es":
+		return l
+	}
+	return ""
 }
 
 func newID() string {

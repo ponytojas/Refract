@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -162,6 +163,7 @@ func seed(t *testing.T, db *sql.DB, n int) {
 		{5, `INSERT INTO sessions (id, user_id, expires_at) VALUES ('s', 'u', 1)`},
 		{7, `INSERT INTO login_failures (key, count, since) VALUES ('ip:1', 1, 1)`},
 		{8, `INSERT INTO ai_usage (at, user_id, kind, model, input_tokens, cached_tokens, output_tokens, reasoning_tokens) VALUES (1, 'u', 'agent', 'm', 1, 0, 1, 0)`},
+		{10, `INSERT INTO account_tokens (hash, user_id, purpose, expires_at) VALUES ('h', 'u', 'verify', 1)`},
 	}
 	for _, r := range rows {
 		if r.since > n {
@@ -428,5 +430,44 @@ func TestFailedUpgradeChangesNothing(t *testing.T) {
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name = 'upgrade_test'`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("the first migration of a failed upgrade stayed: %d, %v", count, err)
+	}
+}
+
+// Accounts that exist when A3's migration runs count as verified, however odd their row.
+func TestAccountMigrationVerifiesExistingUsers(t *testing.T) {
+	idx := slices.IndexFunc(migrations, func(m string) bool { return strings.Contains(m, "account_tokens") })
+	if idx < 0 {
+		t.Fatal("no migration creates account_tokens")
+	}
+	path := filepath.Join(t.TempDir(), "r.db")
+	old := at(t, path, idx)
+	for _, q := range []string{
+		`INSERT INTO users (id, email, created_at) VALUES ('a', 'a@example.com', 7)`,
+		`INSERT INTO users (id, email, created_at) VALUES ('b', 'b@example.com', 0)`,
+		`INSERT INTO sessions (id, user_id, expires_at) VALUES ('s', 'a', 1)`,
+	} {
+		if _, err := old.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old.Close()
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for id, want := range map[string]int{"a": 7, "b": 1} {
+		var verified int
+		var lang string
+		if err := db.QueryRow(`SELECT email_verified_at, lang FROM users WHERE id = ?`, id).Scan(&verified, &lang); err != nil {
+			t.Fatal(err)
+		}
+		if verified != want || lang != "" {
+			t.Errorf("user %s: verified_at %d lang %q, want %d and empty", id, verified, lang, want)
+		}
+	}
+	var auth int
+	if err := db.QueryRow(`SELECT authenticated_at FROM sessions WHERE id = 's'`).Scan(&auth); err != nil || auth != 0 {
+		t.Errorf("authenticated_at = %d, %v; want 0", auth, err)
 	}
 }

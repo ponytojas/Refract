@@ -2,10 +2,12 @@ package users
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ponytojas/Refract/internal/auth"
 	"github.com/ponytojas/Refract/internal/store"
@@ -78,5 +80,81 @@ func TestMiddleware(t *testing.T) {
 	auth.Unauthenticated(h).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	if w.Code != 200 || got.Email != auth.LocalIdentity || got.ID == "" {
 		t.Errorf("local user = %+v (%d)", got, w.Code)
+	}
+}
+
+func TestResolveCreatesVerifiedAccounts(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	if _, err := s.Resolve(ctx, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.Lookup(ctx, "Ana@Example.com")
+	if err != nil || !a.Verified || a.Lang != "" || a.HasPassword {
+		t.Fatalf("account = %+v, %v; want verified, no language, no password", a, err)
+	}
+	if _, err := s.Lookup(ctx, "nobody@example.com"); !errors.Is(err, ErrNoAccount) {
+		t.Errorf("unknown account: %v", err)
+	}
+}
+
+func TestMiddlewareStoresLangOnce(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	h := auth.Unauthenticated(s.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})))
+	call := func(lang string) {
+		r := httptest.NewRequest("GET", "/", nil)
+		if lang != "" {
+			r.Header.Set("X-Refract-Lang", lang)
+		}
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}
+	langOf := func() string {
+		a, err := s.Lookup(ctx, auth.LocalIdentity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a.Lang
+	}
+	call("fr")
+	if l := langOf(); l != "" {
+		t.Fatalf("an unknown language was stored: %q", l)
+	}
+	call("es")
+	call("en")
+	if l := langOf(); l != "es" {
+		t.Errorf("lang = %q, want the first one (es)", l)
+	}
+}
+
+func TestSetLangRejectsOthers(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	u, _ := s.Resolve(ctx, "ana@example.com")
+	if err := s.SetLang(ctx, u.ID, "fr"); err == nil {
+		t.Error("accepted fr")
+	}
+	if err := s.SetLang(ctx, u.ID, "es"); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.AccountByID(ctx, u.ID); a.Lang != "es" {
+		t.Errorf("lang = %q", a.Lang)
+	}
+}
+
+func TestNewSessionRecordsAuthentication(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	at := time.Unix(1_800_000_000, 0)
+	s.Now = func() time.Time { return at }
+	u, _ := s.Resolve(ctx, "ana@example.com")
+	tok, err := s.NewSession(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.AuthenticatedAt(ctx, tok)
+	if err != nil || !got.Equal(at) {
+		t.Errorf("AuthenticatedAt = %v, %v; want %v", got, err, at)
+	}
+	// A session from before A3 carries no time.
+	s.DB.Exec(`UPDATE sessions SET authenticated_at = 0`)
+	if got, _ := s.AuthenticatedAt(ctx, tok); !got.IsZero() {
+		t.Errorf("old session: %v", got)
 	}
 }

@@ -324,7 +324,10 @@ func (s *Service) List(ctx context.Context) (map[string]bool, error) {
 }
 
 // sessionID is what the database keeps: a leaked database holds no usable cookies.
-func sessionID(token string) string {
+func sessionID(token string) string { return digest(token) }
+
+// digest is the sha256 (hex) of a token: what the database keeps of cookies and links.
+func digest(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
@@ -334,9 +337,9 @@ func (s *Service) NewSession(ctx context.Context, userID string) (string, error)
 	b := make([]byte, 32)
 	rand.Read(b)
 	token := base64.RawURLEncoding.EncodeToString(b)
-	now := time.Now()
+	now := s.now()
 	s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at < ?`, now.Unix())
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)`, sessionID(token), userID, now.Add(SessionTTL).Unix())
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO sessions (id, user_id, expires_at, authenticated_at) VALUES (?, ?, ?, ?)`, sessionID(token), userID, now.Add(SessionTTL).Unix(), now.Unix())
 	return token, err
 }
 
