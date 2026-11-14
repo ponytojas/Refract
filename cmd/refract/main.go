@@ -180,7 +180,7 @@ func run() error {
 	}
 	// Every compile (the editor's and the assistant's) goes through one queue.
 	queue := &compile.Queue{Next: tectonic, Workers: cfg.workers, MaxWait: cfg.maxWait}
-	slog.Info("compile", "sandbox", cfg.sandbox, "workers", cfg.workers, "max_wait", cfg.maxWait, "timeout", cfg.timeout)
+	slog.Info("compile", "sandbox", cfg.sandbox, "workers", cfg.workers, "max_wait", cfg.maxWait.String(), "timeout", cfg.timeout.String())
 	ca := &compileAPI{svc: pa.svc, synctex: &compile.SyncTeX{}, runner: &compile.Runner{Compiler: queue}}
 
 	outbound := &http.Client{Timeout: 30 * time.Second}

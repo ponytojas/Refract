@@ -257,3 +257,44 @@ echo pdf > "$out/main.pdf"
 		t.Errorf("failing tectonic: Check = %v; want its output in the error", err)
 	}
 }
+
+// Real Tectonic in the sandbox, with a local bundle and a cache holding the
+// format file (packaging/server/prepare-bundle.sh): needs both in the
+// environment, as in "Compile sandbox" of the README. Fontconfig complaining
+// about the missing /etc/fonts must not become a reported problem.
+func TestSandboxRealTectonic(t *testing.T) {
+	sandboxOrSkip(t)
+	bundle, cache := os.Getenv("REFRACT_TECTONIC_BUNDLE"), os.Getenv("TECTONIC_CACHE_DIR")
+	if fi, err := os.Stat(bundle); err != nil || !fi.IsDir() || cache == "" {
+		t.Skip("needs REFRACT_TECTONIC_BUNDLE (a local folder) and TECTONIC_CACHE_DIR with the format file")
+	}
+	if _, err := exec.LookPath("tectonic"); err != nil {
+		t.Skip("tectonic not installed")
+	}
+	tc := &Tectonic{Bundle: bundle, CacheDir: cache, Timeout: 90 * time.Second, Sandbox: &Sandbox{}}
+	dir := t.TempDir()
+	write(t, dir, "main.tex", "\\documentclass{article}\n\\usepackage{amsmath,graphicx,hyperref,tikz}\n\\begin{document}\n\\input{sec/one}\n$e^{i\\pi}=-1$\n\\begin{tikzpicture}\\draw (0,0)--(1,1);\\end{tikzpicture}\n\\end{document}\n")
+	write(t, dir, "sec/one.tex", "Hello.\n")
+	if err := tc.Sandbox.Check(context.Background(), tc); err != nil {
+		t.Fatal(err)
+	}
+	res, err := tc.Compile(context.Background(), dir, "main.tex")
+	if err != nil || !res.OK || res.PDF == "" {
+		t.Fatalf("compile: %+v %v", res, err)
+	}
+	if len(res.Problems) != 0 {
+		t.Errorf("problems = %+v; output:\n%s", res.Problems, res.Output)
+	}
+	// An error is located in the source, with the host's path preserved.
+	write(t, dir, "sec/one.tex", "Line\n\\oops\n")
+	res, err = tc.Compile(context.Background(), dir, "main.tex")
+	if err != nil || res.OK || len(res.Problems) == 0 || res.Problems[0].File != "sec/one.tex" || res.Problems[0].Line != 2 {
+		t.Fatalf("compile: %+v %v", res, err)
+	}
+	// The document can't read what is outside the project.
+	write(t, dir, "sec/one.tex", "\\input{/etc/passwd}\n")
+	res, _ = tc.Compile(context.Background(), dir, "main.tex")
+	if res.OK || !strings.Contains(res.Output, "not found") && !strings.Contains(res.Output, "failed") {
+		t.Errorf("\\input{/etc/passwd}: %+v", res)
+	}
+}
