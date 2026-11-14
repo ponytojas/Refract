@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -131,21 +132,16 @@ func (a *loginAPI) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		fail("failed", errors.New(e))
 		return
 	}
-	email, err := a.oidc.Finish(r.Context(), c.Value, q.Get("state"), q.Get("code"))
+	email, verified, err := a.oidc.Finish(r.Context(), c.Value, q.Get("state"), q.Get("code"))
 	if err != nil {
 		fail("failed", err)
 		return
 	}
-	exists, err := a.users.Exists(r.Context(), email)
-	if err != nil {
-		fail("failed", err)
+	u, refusal, err := a.admitOIDC(r.Context(), email, verified)
+	if refusal != "" {
+		fail(refusal, errors.New(email))
 		return
 	}
-	if !exists && !auth.Allowed(a.allowed, email) {
-		fail("not_allowed", errors.New(email))
-		return
-	}
-	u, err := a.users.Resolve(r.Context(), email)
 	if err != nil {
 		fail("failed", err)
 		return
@@ -158,6 +154,40 @@ func (a *loginAPI) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	users.SetSessionCookie(w, r, token)
 	slog.Info("signed in with oidc", "user", u.ID)
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// admitOIDC decides whether a provider sign-in may proceed, and into which
+// account. refusal is the login_error code when it may not. verified is
+// whether the provider vouched for the address (email_verified true).
+//
+// Signing in by address alone is only safe when the account can't be someone
+// else's: an account with a password needs the provider's word that the
+// address is its owner's. And a provider that does vouch for an address whose
+// account was never confirmed (it started as a sign-up) takes it over: the
+// password set at sign-up goes, since it may not be the owner's.
+func (a *loginAPI) admitOIDC(ctx context.Context, email string, verified bool) (u auth.User, refusal string, err error) {
+	acct, err := a.users.Lookup(ctx, email)
+	switch {
+	case errors.Is(err, users.ErrNoAccount):
+		if !auth.Allowed(a.allowed, email) {
+			return auth.User{}, "not_allowed", nil
+		}
+		u, err = a.users.Resolve(ctx, email) // an account made for an identity the operator allowed: verified
+		return u, "", err
+	case err != nil:
+		return auth.User{}, "", err
+	}
+	if acct.HasPassword {
+		if !verified {
+			return auth.User{}, "unverified_email", nil
+		}
+		if !acct.Verified {
+			if err := a.users.ConfirmByProvider(ctx, acct.ID); err != nil {
+				return auth.User{}, "", err
+			}
+		}
+	}
+	return auth.User{ID: acct.ID, Email: acct.Email}, "", nil
 }
 
 func (a *loginAPI) account(w http.ResponseWriter, r *http.Request) {

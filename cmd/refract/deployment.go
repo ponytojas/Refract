@@ -16,7 +16,7 @@ func checkDeployment(m mode.Mode, authMode, publicURL string) error {
 		return nil
 	}
 	if authMode == "none" {
-		return errors.New("REFRACT_MODE=saas can't run with REFRACT_AUTH=none: every visitor would be the same account. Set REFRACT_AUTH=password")
+		return errors.New("REFRACT_MODE=saas can't run with REFRACT_AUTH=none: every visitor would be the same account. Set REFRACT_AUTH=builtin")
 	}
 	if publicURL == "" {
 		return errors.New("REFRACT_MODE=saas needs REFRACT_PUBLIC_URL, the address users open Refract at (e.g. https://refract.example.com)")

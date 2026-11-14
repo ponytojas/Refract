@@ -56,7 +56,7 @@ func fakeIdP(t *testing.T, claims map[string]any) (*httptest.Server, *string) {
 	return srv, lastAuth
 }
 
-func signIn(t *testing.T, claims map[string]any, tamper func(cookie, state string) (string, string)) (string, error) {
+func signIn(t *testing.T, claims map[string]any, tamper func(cookie, state string) (string, string)) (string, bool, error) {
 	srv, lastAuth := fakeIdP(t, claims)
 	o := &OIDC{Issuer: srv.URL, ClientID: "refract", ClientSecret: "s", RedirectURL: "https://refract.test/api/auth/oidc/callback"}
 	ctx := context.Background()
@@ -77,32 +77,36 @@ func signIn(t *testing.T, claims map[string]any, tamper func(cookie, state strin
 }
 
 func TestOIDC(t *testing.T) {
-	email, err := signIn(t, map[string]any{"email": "Ana@Example.com", "email_verified": true}, nil)
-	if err != nil || email != "ana@example.com" {
-		t.Fatalf("got %q %v", email, err)
+	email, verified, err := signIn(t, map[string]any{"email": "Ana@Example.com", "email_verified": true}, nil)
+	if err != nil || email != "ana@example.com" || !verified {
+		t.Fatalf("got %q %v %v", email, verified, err)
 	}
-	if _, err := signIn(t, map[string]any{"email": "ana@example.com", "email_verified": false}, nil); err == nil {
+	// A provider that doesn't say is let through, but not counted as vouching.
+	if email, verified, err := signIn(t, map[string]any{"email": "ana@example.com"}, nil); err != nil || email != "ana@example.com" || verified {
+		t.Fatalf("absent claim: %q %v %v", email, verified, err)
+	}
+	if _, _, err := signIn(t, map[string]any{"email": "ana@example.com", "email_verified": false}, nil); err == nil {
 		t.Fatal("unverified email accepted")
 	}
-	if _, err := signIn(t, map[string]any{}, nil); err == nil {
+	if _, _, err := signIn(t, map[string]any{}, nil); err == nil {
 		t.Fatal("token without email accepted")
 	}
 	wrongState := func(c, s string) (string, string) { return c, s + "x" }
-	if _, err := signIn(t, map[string]any{"email": "ana@example.com"}, wrongState); err == nil {
+	if _, _, err := signIn(t, map[string]any{"email": "ana@example.com"}, wrongState); err == nil {
 		t.Fatal("state mismatch accepted")
 	}
 	wrongNonce := func(c, s string) (string, string) {
 		p := strings.SplitN(c, ".", 3)
 		return p[0] + ".other." + p[2], s
 	}
-	if _, err := signIn(t, map[string]any{"email": "ana@example.com"}, wrongNonce); err == nil {
+	if _, _, err := signIn(t, map[string]any{"email": "ana@example.com"}, wrongNonce); err == nil {
 		t.Fatal("nonce mismatch accepted")
 	}
 	wrongVerifier := func(c, s string) (string, string) {
 		p := strings.SplitN(c, ".", 3)
 		return p[0] + "." + p[1] + ".other-verifier-other-verifier-other-verifier", s
 	}
-	if _, err := signIn(t, map[string]any{"email": "ana@example.com"}, wrongVerifier); err == nil {
+	if _, _, err := signIn(t, map[string]any{"email": "ana@example.com"}, wrongVerifier); err == nil {
 		t.Fatal("PKCE verifier mismatch accepted")
 	}
 }

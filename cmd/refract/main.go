@@ -110,7 +110,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := checkDeployment(deployment, cmp.Or(os.Getenv("REFRACT_AUTH"), "cloudflare"), os.Getenv("REFRACT_PUBLIC_URL")); err != nil {
+	authKind := authMode(os.Getenv("REFRACT_AUTH"))
+	if err := checkDeployment(deployment, authKind, os.Getenv("REFRACT_PUBLIC_URL")); err != nil {
 		return err
 	}
 
@@ -129,7 +130,7 @@ func run() error {
 	defer db.Close()
 
 	people := &users.Service{DB: db, Key: key}
-	guard, login, err := authMiddleware(people)
+	guard, login, err := authMiddleware(people, authKind)
 	if err != nil {
 		return err
 	}
@@ -299,22 +300,41 @@ func serve(ctx context.Context, srv *http.Server, ln net.Listener, drain, settle
 	return serveErr
 }
 
-// authMiddleware picks the web UI guard from REFRACT_AUTH. It fails closed:
-// running without auth must be requested explicitly. login is set for
-// REFRACT_AUTH=password, which signs users in itself.
-func authMiddleware(people *users.Service) (guard func(http.Handler) http.Handler, login *loginAPI, err error) {
-	switch mode := cmp.Or(os.Getenv("REFRACT_AUTH"), "cloudflare"); mode {
+// authMode reads REFRACT_AUTH: cloudflare by default; password is builtin's old name.
+func authMode(v string) string {
+	switch v = cmp.Or(v, "cloudflare"); v {
+	case "password":
+		return "builtin"
+	}
+	return v
+}
+
+// publicBase is REFRACT_PUBLIC_URL without a trailing slash: the address
+// people open Refract at, the base of links in emails. An http or https URL with a host.
+func publicBase(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return "", errors.New("REFRACT_PUBLIC_URL must be the address users open Refract at (e.g. https://refract.example.com)")
+	}
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// authMiddleware picks the web UI guard from kind, REFRACT_AUTH after authMode.
+// It fails closed: running without auth must be requested explicitly. login is
+// set for REFRACT_AUTH=builtin, which signs users in itself.
+func authMiddleware(people *users.Service, kind string) (guard func(http.Handler) http.Handler, login *loginAPI, err error) {
+	switch kind {
 	case "cloudflare":
 		team, aud := os.Getenv("REFRACT_CF_TEAM_DOMAIN"), os.Getenv("REFRACT_CF_AUD")
 		if team == "" || aud == "" {
-			return nil, nil, errors.New("REFRACT_AUTH=cloudflare needs REFRACT_CF_TEAM_DOMAIN and REFRACT_CF_AUD (or set REFRACT_AUTH=password to sign in to Refract itself)")
+			return nil, nil, errors.New("REFRACT_AUTH=cloudflare needs REFRACT_CF_TEAM_DOMAIN and REFRACT_CF_AUD (or set REFRACT_AUTH=builtin to sign in to Refract itself)")
 		}
 		return auth.CloudflareAccess(context.Background(), team, aud), nil, nil
-	case "password":
+	case "builtin":
 		login = &loginAPI{users: people}
 		if issuer := os.Getenv("REFRACT_OIDC_ISSUER"); issuer != "" {
-			public, err := url.Parse(os.Getenv("REFRACT_PUBLIC_URL"))
-			if err != nil || (public.Scheme != "https" && public.Scheme != "http") || public.Host == "" {
+			public, err := publicBase(os.Getenv("REFRACT_PUBLIC_URL"))
+			if err != nil {
 				return nil, nil, errors.New("REFRACT_OIDC_ISSUER needs REFRACT_PUBLIC_URL, the address users open Refract at (e.g. https://refract.example.com)")
 			}
 			id, secret := os.Getenv("REFRACT_OIDC_CLIENT_ID"), os.Getenv("REFRACT_OIDC_CLIENT_SECRET")
@@ -326,7 +346,7 @@ func authMiddleware(people *users.Service) (guard func(http.Handler) http.Handle
 				Issuer:       issuer,
 				ClientID:     id,
 				ClientSecret: secret,
-				RedirectURL:  strings.TrimRight(public.String(), "/") + "/api/auth/oidc/callback",
+				RedirectURL:  public + "/api/auth/oidc/callback",
 			}
 			if v := os.Getenv("REFRACT_OIDC_ALLOWED"); v != "" {
 				login.allowed = strings.Split(v, ",")
@@ -337,6 +357,6 @@ func authMiddleware(people *users.Service) (guard func(http.Handler) http.Handle
 		slog.Warn("REFRACT_AUTH=none: the web UI is unprotected; only use this locally or behind your own auth")
 		return auth.Unauthenticated, nil, nil // one local user
 	default:
-		return nil, nil, fmt.Errorf("REFRACT_AUTH=%q: want cloudflare, password or none", mode)
+		return nil, nil, fmt.Errorf("REFRACT_AUTH=%q: want cloudflare, builtin or none", kind)
 	}
 }

@@ -67,45 +67,46 @@ func (o *OIDC) Start(ctx context.Context) (redirect, cookie string, err error) {
 }
 
 // Finish checks the provider's answer against the cookie from Start and
-// returns the signed-in email.
-func (o *OIDC) Finish(ctx context.Context, cookie, state, code string) (string, error) {
+// returns the signed-in email, and whether the provider vouched for it
+// (email_verified present and true). A claim that is present and false is refused.
+func (o *OIDC) Finish(ctx context.Context, cookie, state, code string) (email string, verified bool, err error) {
 	parts := strings.SplitN(cookie, ".", 3)
 	if len(parts) != 3 || state == "" || subtle.ConstantTimeCompare([]byte(parts[0]), []byte(state)) != 1 {
-		return "", errors.New("the sign-in expired or came from another browser: try again")
+		return "", false, errors.New("the sign-in expired or came from another browser: try again")
 	}
 	p, cfg, err := o.discover(ctx)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	tok, err := cfg.Exchange(ctx, code, oauth2.VerifierOption(parts[2]))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	raw, _ := tok.Extra("id_token").(string)
 	if raw == "" {
-		return "", errors.New("the provider sent no ID token")
+		return "", false, errors.New("the provider sent no ID token")
 	}
 	idt, err := p.Verifier(&oidc.Config{ClientID: o.ClientID}).Verify(ctx, raw)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if subtle.ConstantTimeCompare([]byte(idt.Nonce), []byte(parts[1])) != 1 {
-		return "", errors.New("the ID token is not for this sign-in")
+		return "", false, errors.New("the ID token is not for this sign-in")
 	}
 	var claims struct {
 		Email    string `json:"email"`
 		Verified *bool  `json:"email_verified"`
 	}
 	if err := idt.Claims(&claims); err != nil {
-		return "", err
+		return "", false, err
 	}
 	if claims.Email == "" {
-		return "", errors.New("the provider shared no email address")
+		return "", false, errors.New("the provider shared no email address")
 	}
 	if claims.Verified != nil && !*claims.Verified {
-		return "", errors.New("the email address is not verified with the provider")
+		return "", false, errors.New("the email address is not verified with the provider")
 	}
-	return strings.ToLower(claims.Email), nil
+	return strings.ToLower(claims.Email), claims.Verified != nil && *claims.Verified, nil
 }
 
 // Allowed reports whether email matches a list of addresses and "@domain"
