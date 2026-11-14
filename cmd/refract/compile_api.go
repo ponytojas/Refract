@@ -92,6 +92,10 @@ func (a *compileAPI) compile(w http.ResponseWriter, r *http.Request) {
 		kindError(w, http.StatusTooManyRequests, "compile_busy", err)
 		return
 	}
+	if errors.Is(err, compile.ErrOwnBusy) {
+		kindError(w, http.StatusTooManyRequests, "compile_own_busy", err)
+		return
+	}
 	if err != nil {
 		slog.Error("compile", "project", p.ID, "err", err)
 		httpError(w, err, http.StatusInternalServerError)

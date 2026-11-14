@@ -144,6 +144,8 @@ export default {
   'Too many failed attempts. Try again in a few minutes.':
     'Demasiados intentos fallidos. Vuelve a intentarlo dentro de unos minutos.',
   'The server is busy. Try again in a moment.': 'El servidor está ocupado. Inténtalo de nuevo en un momento.',
+  'Another of your compiles is still running. Try again when it finishes.':
+    'Otra de tus compilaciones sigue en curso. Inténtalo de nuevo cuando termine.',
   'Your session ended. Reload the page to sign in again.':
     'Tu sesión ha terminado. Recarga la página para volver a entrar.',
   'ChatGPT not connected': 'ChatGPT no conectado',

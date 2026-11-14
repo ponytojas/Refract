@@ -167,9 +167,9 @@ func TestQueueNewInteractiveReplacesWaiting(t *testing.T) {
 	q := &Queue{Next: g, Workers: 1, MaxWait: 10 * time.Second}
 	hold := start(q, as("other"), "hold")
 	waitStarted(t, g)
-	first := start(q, as("u"), "first")
+	first := start(q, as("u"), "proj")
 	settle()
-	second := start(q, as("u"), "second")
+	second := start(q, as("u"), "proj")
 	r := <-first
 	if r.err != nil || !r.res.Superseded {
 		t.Fatalf("first = %+v; want Superseded", r)
@@ -180,8 +180,8 @@ func TestQueueNewInteractiveReplacesWaiting(t *testing.T) {
 	default:
 	}
 	g.release <- struct{}{}
-	if d := waitStarted(t, g); d != "second" {
-		t.Fatalf("started %q; want second", d)
+	if d := waitStarted(t, g); d != "proj" {
+		t.Fatalf("started %q; want proj", d)
 	}
 	g.release <- struct{}{}
 	<-hold
@@ -307,4 +307,49 @@ func TestQueueGrantRacesGiveUp(t *testing.T) {
 		}
 		<-next
 	}
+}
+
+// A newer compile replaces the waiting one of the same project, not another project's.
+func TestQueueReplacesPerProject(t *testing.T) {
+	g := newGate()
+	q := &Queue{Next: g, Workers: 1, MaxWait: 10 * time.Second}
+	hold := start(q, as("a"), "hold")
+	waitStarted(t, g)
+	p1 := start(q, as("a"), "p1")
+	settle()
+	p2 := start(q, as("a"), "p2")
+	settle()
+	p1b := start(q, as("a"), "p1")
+	if r := <-p1; r.err != nil || !r.res.Superseded {
+		t.Fatalf("first p1 = %+v; want Superseded", r)
+	}
+	g.release <- struct{}{}
+	<-hold
+	var order []string
+	for range 2 {
+		order = append(order, waitStarted(t, g))
+		g.release <- struct{}{}
+	}
+	if r := <-p2; r.err != nil || r.res.Superseded {
+		t.Errorf("p2 = %+v; want it to run", r)
+	}
+	if r := <-p1b; r.err != nil || r.res.Superseded {
+		t.Errorf("second p1 = %+v; want it to run", r)
+	}
+	if order[0] != "p2" || order[1] != "p1" {
+		t.Errorf("order = %v; want p2 then p1", order)
+	}
+}
+
+func TestQueueOwnBusy(t *testing.T) {
+	g := newGate()
+	q := &Queue{Next: g, Workers: 2, MaxWait: 50 * time.Millisecond}
+	hold := start(q, as("a"), "hold")
+	waitStarted(t, g)
+	r := <-start(q, as("a"), "second")
+	if !errors.Is(r.err, ErrOwnBusy) {
+		t.Fatalf("outcome = %+v; want ErrOwnBusy", r)
+	}
+	g.release <- struct{}{}
+	<-hold
 }

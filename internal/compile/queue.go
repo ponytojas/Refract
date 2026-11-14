@@ -12,6 +12,10 @@ import (
 // ErrBusy means a compile waited MaxWait for its turn and gave up.
 var ErrBusy = errors.New("the server is busy compiling; try again in a moment")
 
+// ErrOwnBusy means a compile waited MaxWait while a slot was free for others:
+// only because another compile of the same account was still running.
+var ErrOwnBusy = errors.New("another of your compiles is still running; try again when it finishes")
+
 type assistantKey struct{}
 
 // AsAssistant marks the compiles made with the returned context as the
@@ -38,13 +42,14 @@ type Queue struct {
 }
 
 type account struct {
-	lastTurn    uint64 // when it last got a slot; the lowest goes first
-	interactive *waiter
+	lastTurn    uint64    // when it last got a slot; the lowest goes first
+	interactive []*waiter // at most one per project, oldest first
 	assistant   []*waiter
 }
 
 type waiter struct {
 	key      string
+	dir      string        // the project
 	done     chan struct{} // closed once granted or replaced
 	granted  bool
 	replaced bool
@@ -59,7 +64,7 @@ func (q *Queue) Compile(ctx context.Context, projectDir, mainFile string) (*Resu
 		key = u.ID
 	}
 	assistant, _ := ctx.Value(assistantKey{}).(bool)
-	w := &waiter{key: key, done: make(chan struct{})}
+	w := &waiter{key: key, dir: projectDir, done: make(chan struct{})}
 
 	q.mu.Lock()
 	q.enqueue(w, assistant)
@@ -78,6 +83,11 @@ func (q *Queue) Compile(ctx context.Context, projectDir, mainFile string) (*Resu
 	case <-ctx.Done():
 	case <-expired:
 		giveUp = ErrBusy
+		q.mu.Lock()
+		if q.busy[key] && q.running < max(q.Workers, 1) {
+			giveUp = ErrOwnBusy // workers are idle: the account's own compile is what it waits for
+		}
+		q.mu.Unlock()
 	}
 	if giveUp != nil || ctx.Err() != nil {
 		q.mu.Lock()
@@ -120,11 +130,17 @@ func (q *Queue) enqueue(w *waiter, assistant bool) {
 		a.assistant = append(a.assistant, w)
 		return
 	}
-	if old := a.interactive; old != nil {
-		old.replaced = true
-		close(old.done)
+	// A newer compile replaces the waiting one of the same project only;
+	// the account's other projects queue behind each other.
+	for i, old := range a.interactive {
+		if old.dir == w.dir {
+			old.replaced = true
+			close(old.done)
+			a.interactive = append(a.interactive[:i], a.interactive[i+1:]...)
+			break
+		}
 	}
-	a.interactive = w
+	a.interactive = append(a.interactive, w)
 }
 
 // remove takes a waiting compile out of its account.
@@ -133,8 +149,11 @@ func (q *Queue) remove(w *waiter) {
 	if a == nil {
 		return
 	}
-	if a.interactive == w {
-		a.interactive = nil
+	for i, x := range a.interactive {
+		if x == w {
+			a.interactive = append(a.interactive[:i], a.interactive[i+1:]...)
+			break
+		}
 	}
 	for i, x := range a.assistant {
 		if x == w {
@@ -148,7 +167,7 @@ func (q *Queue) remove(w *waiter) {
 // forget drops an account that has nothing waiting.
 func (q *Queue) forget(key string) {
 	a := q.accounts[key]
-	if a == nil || a.interactive != nil || len(a.assistant) > 0 {
+	if a == nil || len(a.interactive) > 0 || len(a.assistant) > 0 {
 		return
 	}
 	delete(q.accounts, key)
@@ -176,7 +195,7 @@ func (q *Queue) dispatch() {
 		for _, interactive := range []bool{true, false} {
 			for _, k := range q.order {
 				a := q.accounts[k]
-				if q.busy[k] || (interactive && a.interactive == nil) || (!interactive && len(a.assistant) == 0) {
+				if q.busy[k] || (interactive && len(a.interactive) == 0) || (!interactive && len(a.assistant) == 0) {
 					continue
 				}
 				if pick == nil || a.lastTurn < pick.lastTurn {
@@ -191,8 +210,8 @@ func (q *Queue) dispatch() {
 			return
 		}
 		var w *waiter
-		if pick.interactive != nil {
-			w, pick.interactive = pick.interactive, nil
+		if len(pick.interactive) > 0 {
+			w, pick.interactive = pick.interactive[0], pick.interactive[1:]
 		} else {
 			w, pick.assistant = pick.assistant[0], pick.assistant[1:]
 		}
