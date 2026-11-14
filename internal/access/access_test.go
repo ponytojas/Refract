@@ -90,3 +90,47 @@ func TestChatAndTurnProject(t *testing.T) {
 		t.Errorf("unknown turn: %v", err)
 	}
 }
+
+func TestTrashedProjectsHaveNoRole(t *testing.T) {
+	c := setup(t)
+	if _, err := c.DB.Exec(`UPDATE projects SET deleted_at = 5 WHERE id = 'p1'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, ctx := range []context.Context{as("ana"), as("ben"), context.Background()} {
+		if role, err := c.ProjectRole(ctx, "p1"); role != None || err != nil {
+			t.Errorf("ProjectRole = %v, %v; want None", role, err)
+		}
+		if err := c.Require(ctx, "p1", Viewer); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Require = %v, want ErrNotFound", err)
+		}
+	}
+	// A trashed project's chat and turn lead to it, and Require then refuses.
+	p, err := c.ChatProject(context.Background(), "c1")
+	if err != nil || !errors.Is(c.Require(as("ana"), p, Viewer), ErrNotFound) {
+		t.Errorf("chat of a trashed project: %q, %v", p, err)
+	}
+	if role, err := c.TrashedRole(as("ana"), "p1"); role != Owner || err != nil {
+		t.Errorf("TrashedRole owner = %v, %v", role, err)
+	}
+	for _, ctx := range []context.Context{as("ben"), context.Background()} {
+		if role, err := c.TrashedRole(ctx, "p1"); role != None || err != nil {
+			t.Errorf("TrashedRole stranger = %v, %v", role, err)
+		}
+	}
+	if err := c.RequireTrashed(as("ben"), "p1", Owner); !errors.Is(err, ErrNotFound) {
+		t.Errorf("RequireTrashed stranger = %v", err)
+	}
+	if err := c.RequireTrashed(as("ana"), "p1", Owner); err != nil {
+		t.Errorf("RequireTrashed owner = %v", err)
+	}
+	// A live project is not in the trash.
+	if role, err := c.TrashedRole(as(""), "old"); role != None || err != nil {
+		t.Errorf("TrashedRole of a live project = %v, %v", role, err)
+	}
+	if _, err := c.DB.Exec(`UPDATE projects SET deleted_at = 0`); err != nil {
+		t.Fatal(err)
+	}
+	if role, _ := c.TrashedRole(as("ana"), "p1"); role != None {
+		t.Errorf("TrashedRole of a live project = %v", role)
+	}
+}

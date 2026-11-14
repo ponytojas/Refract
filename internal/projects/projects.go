@@ -73,7 +73,7 @@ func (s *Service) List(ctx context.Context) ([]Project, error) {
 	if err != nil {
 		return []Project{}, nil
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+projectCols+` FROM projects WHERE owner = ? ORDER BY updated_at DESC`, u.ID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+projectCols+` FROM projects WHERE owner = ? AND deleted_at = 0 ORDER BY updated_at DESC`, u.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,9 +92,10 @@ func (s *Service) List(ctx context.Context) ([]Project, error) {
 // Get returns a project, whoever owns it. Who may reach it is decided before:
 // every API route that addresses a project goes through access.Require (the
 // route table in cmd/refract), and background work rechecks before writing.
-// Code calling the service directly must do the same.
+// Code calling the service directly must do the same. Projects in the trash
+// are not found here; only the trash methods see them.
 func (s *Service) Get(ctx context.Context, id string) (*Project, error) {
-	p, err := scan(s.DB.QueryRowContext(ctx, `SELECT `+projectCols+` FROM projects WHERE id = ?`, id))
+	p, err := scan(s.DB.QueryRowContext(ctx, `SELECT `+projectCols+` FROM projects WHERE id = ? AND deleted_at = 0`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

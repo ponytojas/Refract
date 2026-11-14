@@ -1,7 +1,8 @@
 // Package access decides what the request's user may do with a project. It
 // is the one check every project, chat and turn route goes through (see the
 // route table in cmd/refract), and it fails closed: no user, an unknown
-// project or anything unexpected means no access.
+// project or anything unexpected means no access. Projects in the trash are
+// not found, even by their owner; only the two trash routes see them.
 package access
 
 import (
@@ -43,15 +44,27 @@ func UserFrom(ctx context.Context) (auth.User, error) {
 
 type Checker struct{ DB *sql.DB }
 
-// ProjectRole is the user's role on the project; None when there is no user
-// or no such project.
+// ProjectRole is the user's role on the project; None when there is no user,
+// no such project, or the project is in the trash.
 func (c *Checker) ProjectRole(ctx context.Context, projectID string) (Role, error) {
+	return c.role(ctx, projectID, "deleted_at = 0")
+}
+
+// TrashedRole is the user's role on a project in the trash: Owner for its
+// owner; None for anyone else, and for projects that are not in the trash.
+func (c *Checker) TrashedRole(ctx context.Context, projectID string) (Role, error) {
+	return c.role(ctx, projectID, "deleted_at > 0")
+}
+
+// role finds the project under cond, which is always one of the constants
+// above, never user input.
+func (c *Checker) role(ctx context.Context, projectID, cond string) (Role, error) {
 	u, err := UserFrom(ctx)
 	if err != nil {
 		return None, nil
 	}
 	var owner string
-	switch err := c.DB.QueryRowContext(ctx, `SELECT owner FROM projects WHERE id = ?`, projectID).Scan(&owner); {
+	switch err := c.DB.QueryRowContext(ctx, `SELECT owner FROM projects WHERE id = ? AND `+cond, projectID).Scan(&owner); {
 	case errors.Is(err, sql.ErrNoRows):
 		return None, nil
 	case err != nil:
@@ -66,6 +79,15 @@ func (c *Checker) ProjectRole(ctx context.Context, projectID string) (Role, erro
 // Require returns nil when the user has at least role min on the project.
 func (c *Checker) Require(ctx context.Context, projectID string, min Role) error {
 	role, err := c.ProjectRole(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	return allow(role, min)
+}
+
+// RequireTrashed is Require for a project in the trash.
+func (c *Checker) RequireTrashed(ctx context.Context, projectID string, min Role) error {
+	role, err := c.TrashedRole(ctx, projectID)
 	if err != nil {
 		return err
 	}
