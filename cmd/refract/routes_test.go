@@ -198,6 +198,51 @@ func TestTrashedProjectsAreInvisible(t *testing.T) {
 	}
 }
 
+// The owner of a trashed project is told so on every project, chat and turn
+// route; everyone else, and every other 404, gets the plain body.
+func TestOwnerIsToldTheProjectIsTrashed(t *testing.T) {
+	acc := accessDB(t)
+	rt := table(acc)
+	as := func(user string) context.Context { return auth.WithUser(context.Background(), auth.User{ID: user}) }
+	trashed := owned{project: ana.trashed, chat: ana.trashedChat, turn: ana.trashedTurn}
+	missing := owned{"missing-project", "missing-chat", "missing-turn", "missing-trashed", "missing-tc", "missing-tt"}
+	call := func(r route, ctx context.Context, ids owned) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		rt.mux.ServeHTTP(w, request(r, ids).WithContext(ctx))
+		return w
+	}
+	for _, r := range rt.routes {
+		if r.Scope == scopeUser {
+			continue
+		}
+		if r.Scope == scopeTrash {
+			// The trash routes keep the plain 404 for a live project.
+			if w := call(r, as("ana"), owned{trashed: ana.project}); w.Code != 404 || strings.Contains(w.Body.String(), "project_trashed") {
+				t.Errorf("%s on a live project: %d %s", r.Pattern, w.Code, w.Body)
+			}
+			continue
+		}
+		w := call(r, as("ana"), trashed)
+		if w.Code != 404 || !strings.Contains(w.Body.String(), `"kind":"project_trashed"`) {
+			t.Errorf("%s as the owner: %d %s", r.Pattern, w.Code, w.Body)
+		}
+		stranger, unknown := call(r, as("ben"), trashed), call(r, as("ben"), missing)
+		if stranger.Code != 404 || stranger.Body.String() != unknown.Body.String() {
+			t.Errorf("%s as a stranger: %d %q, unknown id: %q", r.Pattern, stranger.Code, stranger.Body, unknown.Body)
+		}
+	}
+	// After a purge the kind is "other" again.
+	acc.DB.Exec(`DELETE FROM projects WHERE id = ?`, ana.trashed)
+	for _, r := range rt.routes {
+		if r.Scope != scopeProject {
+			continue
+		}
+		if w := call(r, as("ana"), trashed); strings.Contains(w.Body.String(), "project_trashed") {
+			t.Errorf("%s after a purge: %s", r.Pattern, w.Body)
+		}
+	}
+}
+
 func TestRouteScopeIsValidated(t *testing.T) {
 	for _, r := range []route{
 		{Pattern: "GET /api/projects/{id}/files", Scope: scopeUser},

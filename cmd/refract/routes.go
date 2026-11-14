@@ -171,6 +171,15 @@ func (rt *router) guard(r route, h http.Handler) http.Handler {
 			err = check(ctx, project, r.Min)
 		}
 		if err != nil {
+			// The owner of a project in the trash is told so, so the workspace
+			// they have open can say it. Anyone else gets the plain not-found,
+			// the same as for an unknown id; if the lookup fails, so do they.
+			if r.Scope != scopeTrash && project != "" && errors.Is(err, access.ErrNotFound) {
+				if role, rerr := rt.acc.TrashedRole(ctx, project); rerr == nil && role == access.Owner {
+					kindError(w, http.StatusNotFound, "project_trashed", errors.New("not found"))
+					return
+				}
+			}
 			accessError(w, err)
 			return
 		}
