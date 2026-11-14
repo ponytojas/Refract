@@ -4,10 +4,10 @@ import { api, errorText, RequestError } from './api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { lang, t } from '@/lib/i18n'
+import { lang, languageNames, t } from '@/lib/i18n'
 import { linkToken } from '@/lib/account'
 import { setMode } from '@/lib/mode'
-import { Link, usePath } from '@/lib/router'
+import { Link, reloadTo, usePath } from '@/lib/router'
 
 // Why an OIDC sign-in came back refused (?login_error=…).
 const oidcErrors: Record<string, string> = {
@@ -107,8 +107,7 @@ const accountPages = ['/signup', '/forgot', '/verify', '/reset']
 
 // Signed in on one of the account pages: go to the app. Elsewhere the page reloads in place.
 function enterApp() {
-  if (accountPages.includes(location.pathname)) location.assign('/')
-  else location.reload()
+  reloadTo(accountPages.includes(location.pathname) ? '/' : undefined)
 }
 
 function SignIn({ config }: { config: Config }) {
@@ -259,13 +258,16 @@ function SignUp() {
           <span id="email-lang" className="text-sm text-muted-foreground">
             {t('Language for emails')}
           </span>
-          <Select value={emailLang} onValueChange={(v) => v && setEmailLang(v as 'en' | 'es')}>
+          <Select items={languageNames} value={emailLang} onValueChange={(v) => v && setEmailLang(v as 'en' | 'es')}>
             <SelectTrigger className="w-full" aria-labelledby="email-lang">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="en">English</SelectItem>
-              <SelectItem value="es">Español</SelectItem>
+              {Object.entries(languageNames).map(([code, name]) => (
+                <SelectItem key={code} value={code}>
+                  {name}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -344,7 +346,7 @@ function Done({ title, message }: { title: string; message: string }) {
     <Screen title={title}>
       <div className={cardClass} aria-live="polite">
         <p className="text-sm">{message}</p>
-        <Button className="w-full" onClick={() => location.assign('/')}>
+        <Button className="w-full" onClick={() => reloadTo('/')}>
           {t('Open Refract')}
         </Button>
       </div>

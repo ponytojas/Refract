@@ -1,28 +1,12 @@
-import { useState } from 'react'
 import { Loader2, MailWarning } from 'lucide-react'
-import { toast } from 'sonner'
-import { api, errorText } from '@/api'
 import { Button } from '@/components/ui/button'
 import { useAccount } from '@/components/useAccount'
 import { t } from '@/lib/i18n'
 
 /** A strip above the project list while the account's email is unconfirmed (creating and importing need it). */
 export default function VerifyEmailNotice() {
-  const { account } = useAccount()
-  const [busy, setBusy] = useState(false)
+  const { account, sending, resend } = useAccount()
   if (!account || account.email_verified) return null
-
-  async function resend() {
-    setBusy(true)
-    try {
-      await api('/api/account/verify-email', { method: 'POST' })
-      toast.success(t('Sent. The link works for 24 hours.'))
-    } catch (e) {
-      toast.error(errorText(e))
-    } finally {
-      setBusy(false)
-    }
-  }
   return (
     <div
       role="status"
@@ -35,8 +19,8 @@ export default function VerifyEmailNotice() {
         })}
       </span>
       {account.mail && (
-        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={resend}>
-          {busy && <Loader2 className="animate-spin" />} {t('Send it again')}
+        <Button type="button" size="sm" variant="outline" disabled={sending} onClick={resend}>
+          {sending && <Loader2 className="animate-spin" />} {t('Send it again')}
         </Button>
       )}
     </div>

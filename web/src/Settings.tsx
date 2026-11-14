@@ -42,7 +42,8 @@ import {
   SettingsSwitch,
 } from '@/components/ui/chatcn/settings-panel'
 import { getPrefs, openSettings, setPref, usePrefs, useSettingsSection, type Prefs } from '@/lib/prefs'
-import { lang, t, tn } from '@/lib/i18n'
+import { lang, languageNames, t, tn } from '@/lib/i18n'
+import { reloadTo } from '@/lib/router'
 import { compact, modelLabel, ownUsage, totalTokens } from '@/lib/usage'
 import { useMonthUsage } from '@/components/useMonthUsage'
 import { shortcutGroups } from '@/lib/shortcuts'
@@ -327,20 +328,8 @@ function AssistantPane({ status, onChange }: Props) {
 // The account Refract signs in itself (REFRACT_AUTH=builtin): email, password and deleting it.
 function AccountPane() {
   const me = useMe()
-  const { account, reload } = useAccount()
-  const [sending, setSending] = useState(false)
-
-  async function resend() {
-    setSending(true)
-    try {
-      await api('/api/account/verify-email', { method: 'POST' })
-      toast.success(t('Sent. The link works for 24 hours.'))
-    } catch (err) {
-      toast.error(errorText(err))
-    } finally {
-      setSending(false)
-    }
-  }
+  const { account, sending, reload, resend } = useAccount()
+  useEffect(() => void reload(), [reload]) // sign-in age and project count may have changed
   async function setEmailLang(v: string) {
     try {
       await api('/api/account/lang', { method: 'PUT', body: { lang: v } })
@@ -360,7 +349,7 @@ function AccountPane() {
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">{me?.email}</span>
             {account && !account.email_verified && account.mail && (
-              <Button type="button" size="sm" variant="outline" disabled={sending} onClick={resend}>
+              <Button type="button" size="sm" variant="outline" disabled={sending} onClick={() => resend()}>
                 {sending && <Loader2 className="animate-spin" />} {t('Send the link again')}
               </Button>
             )}
@@ -373,10 +362,7 @@ function AccountPane() {
           <SettingsSegmented
             value={account?.lang || lang}
             onValueChange={setEmailLang}
-            options={[
-              { value: 'en', label: 'English' }, // language names stay in their own language
-              { value: 'es', label: 'Español' },
-            ]}
+            options={Object.entries(languageNames).map(([value, label]) => ({ value, label }))}
           />
         </SettingsRow>
       </SettingsGroup>
@@ -445,7 +431,13 @@ function PasswordGroup({ account }: { account: ReturnType<typeof useAccount>['ac
   )
 }
 
-function DeleteGroup({ account, reload }: { account: ReturnType<typeof useAccount>['account']; reload: () => void }) {
+function DeleteGroup({
+  account,
+  reload,
+}: {
+  account: ReturnType<typeof useAccount>['account']
+  reload: () => unknown
+}) {
   const [open, setOpen] = useState(false)
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -458,7 +450,7 @@ function DeleteGroup({ account, reload }: { account: ReturnType<typeof useAccoun
     setBusy(true)
     try {
       await api('/api/account/delete', { method: 'POST', body: { password } })
-      location.assign('/?account_deleted=1')
+      reloadTo('/?account_deleted=1')
     } catch (err) {
       toast.error(errorText(err))
       if (err instanceof RequestError && err.error.kind === 'reauth_required') reload()

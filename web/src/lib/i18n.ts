@@ -16,6 +16,9 @@ function resolve(): Lang {
 }
 
 export const lang: Lang = resolve()
+
+/** Each language's name in itself, as language pickers conventionally show it: never translated. */
+export const languageNames: Record<Lang, string> = { en: 'English', es: 'Español' }
 document.documentElement.lang = lang
 const dict: Record<string, string> = lang === 'es' ? es : {}
 

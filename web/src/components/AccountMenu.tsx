@@ -31,6 +31,7 @@ import { lang, t } from '@/lib/i18n'
 import { allowanceLeft, compact, modelLabel, ownUsage, renewalDate, totalTokens } from '@/lib/usage'
 import { useMonthUsage } from './useMonthUsage'
 import { chatgptOffered } from '@/lib/mode'
+import { reloadTo } from '@/lib/router'
 
 const themes: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: 'light', label: t('Light'), icon: Sun },
@@ -120,9 +121,7 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
           </DropdownMenuItem>
         )}
         {me?.can_sign_out && (
-          <DropdownMenuItem
-            onClick={() => api('/api/auth/logout', { method: 'POST' }).finally(() => location.assign('/'))}
-          >
+          <DropdownMenuItem onClick={() => api('/api/auth/logout', { method: 'POST' }).finally(() => reloadTo('/'))}>
             <LogOut /> {t('Sign out')}
           </DropdownMenuItem>
         )}
