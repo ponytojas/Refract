@@ -1,4 +1,5 @@
-// Package access decides what the request's user may do with a project. It
+// Package access decides what the request's user may do with a project, and
+// what the account may do at all. It
 // is the one check every project, chat and turn route goes through (see the
 // route table in cmd/refract), and it fails closed: no user, an unknown
 // project or anything unexpected means no access. Projects in the trash are
@@ -9,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/ponytojas/Refract/internal/auth"
 )
@@ -92,6 +94,43 @@ func (c *Checker) RequireTrashed(ctx context.Context, projectID string, min Role
 		return err
 	}
 	return allow(role, min)
+}
+
+// Need is something the signed-in account must have for a route, beyond any
+// role on a project: a verified email (A3). Entitlements of a plan come later.
+type Need int
+
+const VerifiedEmail Need = iota + 1
+
+var ErrUnverified = errors.New("verify your email address first")
+
+// Meets checks every need; nil when there are none. It fails closed: no user is
+// ErrNoUser, a missing users row is ErrUnverified, an unknown Need is an error.
+func (c *Checker) Meets(ctx context.Context, needs ...Need) error {
+	if len(needs) == 0 {
+		return nil
+	}
+	u, err := UserFrom(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range needs {
+		switch n {
+		case VerifiedEmail:
+			var at int64
+			switch err := c.DB.QueryRowContext(ctx, `SELECT email_verified_at FROM users WHERE id = ?`, u.ID).Scan(&at); {
+			case errors.Is(err, sql.ErrNoRows):
+				return ErrUnverified
+			case err != nil:
+				return err
+			case at == 0:
+				return ErrUnverified
+			}
+		default:
+			return fmt.Errorf("unknown need %d", n)
+		}
+	}
+	return nil
 }
 
 func allow(role, min Role) error {

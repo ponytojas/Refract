@@ -25,9 +25,9 @@ type projectsAPI struct {
 
 func (a *projectsAPI) routes(rt *router) {
 	rt.user("GET /api/projects", a.list)
-	rt.user("POST /api/projects", a.create)
-	rt.user("POST /api/projects/import", a.importZip)
-	rt.user("POST /api/projects/import-folder", a.importFolder)
+	rt.user("POST /api/projects", a.create, access.VerifiedEmail)
+	rt.user("POST /api/projects/import", a.importZip, access.VerifiedEmail)
+	rt.user("POST /api/projects/import-folder", a.importFolder, access.VerifiedEmail)
 	rt.user("GET /api/trash", a.trash)
 	rt.trashed("POST /api/projects/{id}/restore", access.Owner, a.untrash)
 	rt.trashed("DELETE /api/projects/{id}/purge", access.Owner, a.purge)
