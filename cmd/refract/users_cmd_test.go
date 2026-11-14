@@ -126,3 +126,36 @@ func TestUsersUnlock(t *testing.T) {
 		t.Fatalf("unlock --all: %q", out)
 	}
 }
+
+// An account the operator adds is one they vouch for, even if someone had
+// signed up with that address before.
+func TestUsersAddVerifies(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("REFRACT_DATA_DIR", dir)
+	t.Setenv("REFRACT_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	db, err := store.Open(filepath.Join(dir, "refract.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	people := &users.Service{DB: db, Key: make([]byte, 32)}
+	ctx := context.Background()
+	if _, err := people.SignUp(ctx, "ana@example.com", "correct horse", "en"); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := people.Lookup(ctx, "ana@example.com"); a.Verified {
+		t.Fatal("a sign-up starts verified")
+	}
+	db.Close()
+	var out bytes.Buffer
+	if err := runUsers([]string{"add", "ana@example.com"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	db, err = store.Open(filepath.Join(dir, "refract.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if a, err := (&users.Service{DB: db}).Lookup(ctx, "ana@example.com"); err != nil || !a.Verified {
+		t.Errorf("account = %+v, %v; want verified", a, err)
+	}
+}

@@ -274,8 +274,12 @@ func (s *Service) SignOut(ctx context.Context, email string) (int64, error) {
 	return res.RowsAffected()
 }
 
+// ErrOwnsProjects is returned when an account can't be removed because it still has projects.
+var ErrOwnsProjects = errors.New("the account still owns projects")
+
 // Delete removes an account: its sessions, its settings (AI connections,
-// GitHub) and the user. Projects must be deleted first (see refract users remove).
+// GitHub), its links and the user. Projects must be deleted first (see Remove,
+// and refract users remove).
 func (s *Service) Delete(ctx context.Context, email string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -288,27 +292,89 @@ func (s *Service) Delete(ctx context.Context, email string) error {
 	} else if err != nil {
 		return err
 	}
+	if err := deleteAccount(ctx, tx, id, normEmail(email)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func deleteAccount(ctx context.Context, tx *sql.Tx, id, email string) error {
 	var owned int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM projects WHERE owner = ?`, id).Scan(&owned); err != nil {
 		return err
 	}
 	if owned > 0 {
-		return fmt.Errorf("%s still owns %d projects", email, owned)
+		return fmt.Errorf("%s still owns %d projects: %w", email, owned, ErrOwnsProjects)
 	}
 	prefix := store.UserKey(id, "") // all of the user's settings start with it
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
-		return err
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`DELETE FROM sessions WHERE user_id = ?`, []any{id}},
+		{`DELETE FROM settings WHERE substr(key, 1, length(?)) = ?`, []any{prefix, prefix}},
+		{`DELETE FROM ai_usage WHERE user_id = ?`, []any{id}},
+		{`DELETE FROM login_failures WHERE key IN (?, ?)`, []any{"email:" + email, "mail:" + email}},
+		{`DELETE FROM users WHERE id = ?`, []any{id}}, // its links go with it
+	} {
+		if _, err := tx.ExecContext(ctx, q.sql, q.args...); err != nil {
+			return err
+		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE substr(key, 1, length(?)) = ?`, prefix, prefix); err != nil {
-		return err
+	return nil
+}
+
+// OwnedProject is a project an account owns, live or in the trash.
+type OwnedProject struct {
+	ID, Name string
+	Trashed  bool
+}
+
+func (s *Service) OwnedProjects(ctx context.Context, userID string) ([]OwnedProject, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, deleted_at > 0 FROM projects WHERE owner = ? ORDER BY name`, userID)
+	if err != nil {
+		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM ai_usage WHERE user_id = ?`, id); err != nil {
-		return err
+	defer rows.Close()
+	var out []OwnedProject
+	for rows.Next() {
+		var p OwnedProject
+		if err := rows.Scan(&p.ID, &p.Name, &p.Trashed); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id); err != nil {
-		return err
+	return out, rows.Err()
+}
+
+// Remove deletes an account and everything it owns, and returns how many
+// projects went. destroy deletes one project for good, live or in the trash,
+// files included. It stops at the first project it can't delete, leaving the
+// account and the rest in place. Then it removes the account as Delete does,
+// refusing with ErrOwnsProjects if a project appeared meanwhile.
+func (s *Service) Remove(ctx context.Context, userID string, destroy func(ctx context.Context, projectID string) error) (int, error) {
+	acct, err := s.AccountByID(ctx, userID)
+	if err != nil {
+		return 0, err
 	}
-	return tx.Commit()
+	owned, err := s.OwnedProjects(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	for i, p := range owned {
+		if err := destroy(ctx, p.ID); err != nil {
+			return i, fmt.Errorf("deleting project %s (%s): %w", p.Name, p.ID, err)
+		}
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return len(owned), err
+	}
+	defer tx.Rollback()
+	if err := deleteAccount(ctx, tx, userID, acct.Email); err != nil {
+		return len(owned), err
+	}
+	return len(owned), tx.Commit()
 }
 
 // HasPassword reports whether the user can sign in with a password.
