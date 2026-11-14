@@ -350,10 +350,21 @@ func (a *projectsAPI) checks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, ws)
 }
 
+// overLimitKind names a refused limit for the web: "over_projects" or "over_storage".
+func overLimitKind(err error) string {
+	var ol *projects.OverLimit
+	if errors.As(err, &ol) {
+		return "over_" + ol.Kind
+	}
+	return "other"
+}
+
 func projectError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, projects.ErrNotFound), errors.Is(err, fs.ErrNotExist), errors.Is(err, access.ErrNotFound):
 		httpError(w, err, http.StatusNotFound)
+	case errors.Is(err, projects.ErrOverLimit):
+		kindError(w, http.StatusForbidden, overLimitKind(err), err)
 	case errors.Is(err, access.ErrForbidden), errors.Is(err, access.ErrNoUser):
 		httpError(w, err, http.StatusForbidden)
 	case errors.Is(err, projects.ErrNoRemote):

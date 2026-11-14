@@ -17,6 +17,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - Deleting a project moves it to the trash for 30 days instead of removing it at once. Undo from the notification, or restore or delete forever from the new Trash page; projects older than 30 days in the trash are deleted for good.
 - A project open in the workspace when it goes to the trash (from another tab or device) becomes read-only with a banner and a Restore button: unsaved edits are kept and saved on restore, and if the project was deleted for good meanwhile, you can copy the unsaved text.
 
+- On the hosted service (`REFRACT_MODE=saas`), each account has a plan that limits its projects, storage (with history) and assistant turns. `refract users plan` sets it. Self-hosted installs have no limits.
 - Accounts can be created and managed by their owners. With `REFRACT_AUTH=builtin`, a mail server (`REFRACT_SMTP_URL`, `REFRACT_MAIL_FROM`) and `REFRACT_PUBLIC_URL`, `REFRACT_SIGNUP=open` adds a sign-up page; there is a confirmation email for new addresses, a "Forgot your password?" reset by email, and **Settings → Account** to confirm the address, choose the language of the emails, change the password and delete the account with everything in it, projects in the trash included. Links in emails work once, expire after 24 hours (confirming) or 1 hour (resetting) and are plain text, in English or Spanish.
 - `REFRACT_AUTH=builtin` is the new name of `REFRACT_AUTH=password`, which keeps working.
 

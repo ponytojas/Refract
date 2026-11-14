@@ -67,6 +67,7 @@ func initRepo(ctx context.Context, dir, message string) error {
 
 // Checkpoint commits the working tree if anything changed, and reports whether it did.
 func (s *Service) Checkpoint(ctx context.Context, id, message string) (bool, error) {
+	defer s.measure(ctx, id) // after the unlock: the walk must not hold the repository
 	defer lockRepo(id)()
 	return s.checkpoint(ctx, id, message, true)
 }

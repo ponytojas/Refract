@@ -144,6 +144,14 @@ export function describe(e: ApiError): string {
       return t('This project is in the trash. Restore it to keep working.')
     case 'project_busy':
       return t('The assistant is working on this project. Stop it or wait until it finishes, then try again.')
+    case 'over_projects':
+      return t(
+        'Your plan has reached its project limit, including projects in the trash. Delete one forever from the trash to add another.',
+      )
+    case 'over_storage':
+      return t(
+        "Your plan's storage is full, counting projects in the trash. Delete projects forever from the trash to free space; deleted files stay in a project's history.",
+      )
     case 'bad_login':
       return t('Wrong email or password.')
     case 'wrong_password':
