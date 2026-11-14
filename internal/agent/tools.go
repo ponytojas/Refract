@@ -284,7 +284,10 @@ func (t *Tools) compile(ctx context.Context, includeLog bool) (string, string, e
 	if t.MainFile == "" {
 		return "", "compile", errors.New("the project has no main file set")
 	}
-	res, err := t.Compiler.Compile(ctx, t.Dir, t.MainFile)
+	res, err := t.Compiler.Compile(compile.AsAssistant(ctx), t.Dir, t.MainFile)
+	if errors.Is(err, compile.ErrBusy) || errors.Is(err, compile.ErrOwnBusy) { // a result the model can act on, not an error that ends the turn
+		return "The server is busy compiling. Try the compile tool again in a moment.", "compile (server busy)", nil
+	}
 	if err != nil {
 		return "", "compile", err
 	}

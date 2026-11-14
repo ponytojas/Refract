@@ -228,6 +228,39 @@ location / {
 }
 ```
 
+### Compile sandbox
+
+Tectonic runs as the same user as the server, so a document could `\input` any file that user can read: the database, other accounts' projects, the server's environment. With `REFRACT_SANDBOX=bwrap` (Linux, [bubblewrap](https://github.com/containers/bubblewrap)) every compile runs in a sandbox instead: no network, a read-only view of the system, the TeX bundle and the one project being built (only `.refract/build` is writable), nothing else of the host, and limits of CPU time (the compile timeout plus a margin), 1 GiB of memory, 64 processes and 200 MiB per file. **`REFRACT_MODE=saas` requires it.** Whether or not it is on, compiles go through a queue: `REFRACT_COMPILE_WORKERS` at once, one per account (with `REFRACT_AUTH=none` everyone is the same account, so projects compile one after another), and a compile that waits longer than `REFRACT_COMPILE_MAX_WAIT` seconds is answered "the server is busy" (or, when only the account's own running compile is in the way, "another of your compiles is still running"). A newer compile replaces a waiting one of the same project; other projects of the account wait their turn. `REFRACT_COMPILE_MAX_WAIT=0` waits without limit, which `REFRACT_MODE=saas` refuses. The CPU limit is `REFRACT_COMPILE_TIMEOUT` plus 5 s, and a compile that hits it is reported as timed out. A project whose `.refract` or `.refract/build` is a symbolic link is not compiled.
+
+Because the sandbox has no network, Tectonic can't download packages: it needs the whole TeX bundle as a local folder, with its format file built once. On the server:
+
+```sh
+sudo apt install bubblewrap                       # and util-linux's prlimit, already there on Ubuntu
+packaging/server/prepare-bundle.sh /opt/refract/tex   # downloads 2.7 GB, needs 3 GB; tectonic on the PATH
+```
+
+then set `REFRACT_SANDBOX=bwrap`, `REFRACT_TECTONIC_BUNDLE=/opt/refract/tex/bundle` and `TECTONIC_CACHE_DIR=/opt/refract/tex/cache`. Run the script again when Tectonic or the bundle changes. [`packaging/server/refract.service`](packaging/server/refract.service) is a systemd unit for the hosted service, with the secret key given through `LoadCredential=`; its comments list what to prepare. The unit leaves out `RestrictNamespaces=`, `PrivateUsers=`, `ProtectKernelTunables=`, `ProtectProc=` and `ProcSubset=` because bubblewrap needs user namespaces and its own `/proc`.
+
+The process limit needs Linux 5.14 or later (which counts processes per user namespace) and a `bwrap` that is not setuid; Refract refuses to start with a setuid one. Fontconfig's configuration (`/etc/fonts`) and the loader cache (`/etc/ld.so.cache`) are mounted read-only; nothing else of `/etc` is.
+
+At startup Refract compiles a one-line document in the sandbox and refuses to start if that fails, printing Tectonic's last lines. If it fails:
+
+- **`bwrap: setting up uid map: Permission denied`, or `Operation not permitted`.** The host blocks unprivileged user namespaces. Ubuntu 24.04 and later do so through AppArmor (`kernel.apparmor_restrict_unprivileged_userns=1`) for programs without a profile. Recent releases (tested on 26.04) install a `bwrap-userns-restrict` profile with the `bubblewrap` package, and then nothing is needed. If your `bwrap` has none (or lives elsewhere), give it one that allows `userns`, for example in `/etc/apparmor.d/bwrap-refract`, then `sudo apparmor_parser -r /etc/apparmor.d/bwrap-refract`:
+
+  ```
+  abi <abi/4.0>,
+  include <tunables/global>
+  profile bwrap-refract /usr/bin/bwrap flags=(unconfined) {
+    userns,
+  }
+  ```
+
+  Setting `kernel.apparmor_restrict_unprivileged_userns=0` also works, but lifts the restriction for every program.
+- **`Permission denied` reading the bundle.** The bundle's files must be readable by the server's user: `prepare-bundle.sh` sets them to `0444`.
+- **A format file error, or `Read-only file system` under the cache.** The cache has no format file for this Tectonic and bundle: run `prepare-bundle.sh` again with the Tectonic the server uses.
+
+The Docker image keeps `REFRACT_SANDBOX=none`: bubblewrap needs user namespaces, which the default container profile blocks, so using it in a container takes a host or privileged setup (`--security-opt seccomp=unconfined --security-opt apparmor=unconfined`) and the bundle on a volume. Biber isn't available inside the sandbox.
+
 ### Data, backups and upgrades
 
 Everything lives in the `/data` volume:
@@ -349,10 +382,13 @@ All settings are environment variables.
 | `REFRACT_MODEL_AGENT` | Default model for the assistant. |
 | `REFRACT_MODEL_QUICK` | Default model for quick actions and citations. |
 | `REFRACT_COMPILE_TIMEOUT` | Seconds per compile. Default 90. |
+| `REFRACT_SANDBOX` | `none` (default) or `bwrap`: run every compile in a [sandbox](#compile-sandbox). Required with `REFRACT_MODE=saas`. |
+| `REFRACT_COMPILE_WORKERS` | Compiles running at once, across all accounts. Default: the number of CPUs minus one, at least 1. Each account runs one compile at a time. |
+| `REFRACT_COMPILE_MAX_WAIT` | Seconds a compile waits for its turn before the server answers "busy, try again". Default 20. With `REFRACT_MODE=saas`, this plus `REFRACT_COMPILE_TIMEOUT` must not exceed 95, because a proxy cuts a request with no response at about 100 s. |
 | `REFRACT_FONT_DOWNLOADS` | `0` disables Google Fonts requests; project, TeX bundle and cached fonts still work. Default: downloads enabled. |
 | `REFRACT_GITHUB_CLIENT_ID` | Client ID of your GitHub OAuth App, to connect GitHub accounts (see below). |
 | `REFRACT_OPENALEX_API_KEY` | A free [OpenAlex key](https://openalex.org/settings/api). Without one, paper searches share a small daily budget per IP address. |
-| `REFRACT_TECTONIC_BUNDLE` | Pinned Tectonic bundle URL. Set in the image. |
+| `REFRACT_TECTONIC_BUNDLE` | The Tectonic bundle: a URL (pinned in the image), or a local folder (required with the sandbox). |
 
 ### Connect GitHub
 
@@ -401,7 +437,7 @@ On Windows and Linux, read <kbd>Ctrl</kbd> for <kbd>⌘</kbd>. Hold <kbd>⌘</kb
 - **Browser:** a strict Content-Security-Policy lets the app run only its own scripts and connect only to its own server. Refract can't be embedded in other sites, and over https it sends `Strict-Transport-Security`.
 - **Secrets at rest:** ChatGPT credentials, API keys and git tokens are encrypted with AES-GCM under `REFRACT_SECRET_KEY`, each bound to its owner.
 - **Isolation between users:** projects, chats and connections are checked against their owner on every access.
-- **Compilation:** Tectonic runs with shell escape disabled (`--untrusted`) and a time limit. Imports are size-limited and can't write outside the project.
+- **Compilation:** Tectonic runs with shell escape disabled (`--untrusted`) and a time limit, and with `REFRACT_SANDBOX=bwrap` (required for the hosted service) inside a [sandbox](#compile-sandbox) with no network, no access to other projects or the database, and limits on memory, processes and CPU. Imports are size-limited and can't write outside the project.
 - **Outbound requests:** user-supplied AI provider URLs can't reach link-local addresses such as cloud metadata services. With `REFRACT_MODE=saas`, AI providers and git remotes can't reach the server's own network either: loopback, private, shared (CGNAT) and reserved addresses are refused, checked on every connection (so DNS answers and redirects are covered), and git connects only to the addresses it checked. A host firewall that limits outbound traffic is still a good second layer. Compiling a document that names a font found neither in the project nor in the TeX bundle downloads it from Google Fonts, sending only the family name; `REFRACT_FONT_DOWNLOADS=0` turns that off.
 
 Found a vulnerability? Please report it privately through the repository's **Security** tab (*Report a vulnerability*) rather than in a public issue.

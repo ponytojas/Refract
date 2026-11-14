@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -258,4 +259,44 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestPrepareOutDirRefusesSymlinks(t *testing.T) {
+	outside := t.TempDir()
+	for _, link := range []string{".refract", ".refract/build"} {
+		proj := t.TempDir()
+		if link == ".refract/build" {
+			if err := os.Mkdir(filepath.Join(proj, ".refract"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Symlink(outside, filepath.Join(proj, filepath.FromSlash(link))); err != nil {
+			t.Fatal(err)
+		}
+		err := prepareOutDir(proj)
+		if !errors.Is(err, ErrUnsafeBuildDir) || !strings.Contains(err.Error(), "symbolic link") {
+			t.Errorf("%s as a symlink: err = %v; want a refusal", link, err)
+		}
+		tc := &Tectonic{Bin: "/bin/true", Timeout: time.Second}
+		if _, err := tc.Compile(context.Background(), proj, "main.tex"); err == nil {
+			t.Errorf("%s as a symlink: Compile ran", link)
+		}
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("something was written outside the project: %v", entries)
+	}
+	proj := t.TempDir()
+	if err := prepareOutDir(proj); err != nil {
+		t.Fatalf("clean project: %v", err)
+	}
+	if fi, err := os.Stat(filepath.Join(proj, ".refract", "build")); err != nil || !fi.IsDir() {
+		t.Errorf("build folder not created: %v", err)
+	}
+}
+
+func TestDropFontconfigNoise(t *testing.T) {
+	in := "a\nFontconfig error: Cannot load default config file: No such file: (null)\nb"
+	if got := dropFontconfigNoise(in); got != "a\nb" {
+		t.Errorf("got %q", got)
+	}
 }

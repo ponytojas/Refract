@@ -321,3 +321,21 @@ func TestProjectInstructionsStayInTheWorktree(t *testing.T) {
 		t.Error("REFRACT.md followed a symlink out of the worktree")
 	}
 }
+
+type failingCompiler struct{ err error }
+
+func (c failingCompiler) Compile(context.Context, string, string) (*compile.Result, error) {
+	return nil, c.err
+}
+
+func TestCompileBusyIsAToolResult(t *testing.T) {
+	tl := &Tools{Dir: t.TempDir(), MainFile: "main.tex", Compiler: failingCompiler{compile.ErrBusy}}
+	out, activity := tl.Call(context.Background(), "compile", "{}")
+	if strings.HasPrefix(out, "Error:") || strings.Contains(activity, "failed") || !strings.Contains(out, "busy") {
+		t.Errorf("output %q, activity %q; want a normal result asking to try again", out, activity)
+	}
+	other := &Tools{Dir: t.TempDir(), MainFile: "main.tex", Compiler: failingCompiler{errors.New("boom")}}
+	if out, _ := other.Call(context.Background(), "compile", "{}"); !strings.HasPrefix(out, "Error:") {
+		t.Errorf("other errors stay errors: %q", out)
+	}
+}

@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -110,7 +109,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := checkDeployment(deployment, cmp.Or(os.Getenv("REFRACT_AUTH"), "cloudflare"), os.Getenv("REFRACT_PUBLIC_URL")); err != nil {
+	cfg, err := parseCompileConfig(os.Getenv)
+	if err != nil {
+		return err
+	}
+	if err := checkDeployment(deployment, cmp.Or(os.Getenv("REFRACT_AUTH"), "cloudflare"), os.Getenv("REFRACT_PUBLIC_URL"), cfg.sandbox, cfg.maxWait, cfg.timeout); err != nil {
 		return err
 	}
 
@@ -161,22 +164,24 @@ func run() error {
 		tmp: filepath.Join(dataDir, "tmp"),
 	}
 
-	timeout := 90 * time.Second
-	if v := os.Getenv("REFRACT_COMPILE_TIMEOUT"); v != "" {
-		secs, err := strconv.Atoi(v)
-		if err != nil || secs <= 0 {
-			return fmt.Errorf("REFRACT_COMPILE_TIMEOUT=%q: want a positive number of seconds", v)
-		}
-		timeout = time.Duration(secs) * time.Second
-	}
 	fontResolver := fonts.NewResolver(filepath.Join(dataDir, "font-cache"))
 	fontResolver.Offline = os.Getenv("REFRACT_FONT_DOWNLOADS") == "0"
-	ca := &compileAPI{svc: pa.svc, synctex: &compile.SyncTeX{}, runner: &compile.Runner{Compiler: &compile.Tectonic{
+	tectonic := &compile.Tectonic{
 		Bundle:   os.Getenv("REFRACT_TECTONIC_BUNDLE"),
 		CacheDir: os.Getenv("TECTONIC_CACHE_DIR"),
-		Timeout:  timeout,
+		Timeout:  cfg.timeout,
 		Fonts:    fontResolver,
-	}}}
+	}
+	if cfg.sandbox == "bwrap" {
+		tectonic.Sandbox = &compile.Sandbox{}
+		if err := tectonic.Sandbox.Check(ctx, tectonic); err != nil {
+			return err
+		}
+	}
+	// Every compile (the editor's and the assistant's) goes through one queue.
+	queue := &compile.Queue{Next: tectonic, Workers: cfg.workers, MaxWait: cfg.maxWait}
+	slog.Info("compile", "sandbox", cfg.sandbox, "workers", cfg.workers, "max_wait", cfg.maxWait.String(), "timeout", cfg.timeout.String())
+	ca := &compileAPI{svc: pa.svc, synctex: &compile.SyncTeX{}, runner: &compile.Runner{Compiler: queue}}
 
 	outbound := &http.Client{Timeout: 30 * time.Second}
 	papers := &cite.Service{
@@ -188,7 +193,7 @@ func run() error {
 		DB:       db,
 		Projects: pa.svc,
 		Agent: agent.Agent{
-			Compiler:      ca.runner.Compiler,
+			Compiler:      queue,
 			MaxIterations: 25,
 			Papers:        papers,
 			Timeout:       15 * time.Minute,
