@@ -122,6 +122,8 @@ export function describe(e: ApiError): string {
       return t('The current password is wrong.')
     case 'too_many_attempts':
       return t('Too many failed attempts. Try again in a few minutes.')
+    case 'compile_busy':
+      return t('The server is busy. Try again in a moment.')
     case 'login_required':
       return t('Your session ended. Reload the page to sign in again.')
     case 'invalid_key':
