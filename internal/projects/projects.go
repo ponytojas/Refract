@@ -293,10 +293,11 @@ func addToZip(zw *zip.Writer, dir, rel string) error {
 
 type scanner interface{ Scan(...any) error }
 
-func scan(row scanner) (*Project, error) {
+// scan reads a projectCols row; extra are further columns selected after them.
+func scan(row scanner, extra ...any) (*Project, error) {
 	var p Project
 	var created, updated int64
-	if err := row.Scan(&p.ID, &p.Name, &p.MainFile, &created, &updated, &p.Owner); err != nil {
+	if err := row.Scan(append([]any{&p.ID, &p.Name, &p.MainFile, &created, &updated, &p.Owner}, extra...)...); err != nil {
 		return nil, err
 	}
 	p.CreatedAt, p.UpdatedAt = time.Unix(created, 0), time.Unix(updated, 0)

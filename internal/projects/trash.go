@@ -282,14 +282,13 @@ func (s *Service) ListTrash(ctx context.Context) ([]TrashedProject, error) {
 	defer rows.Close()
 	out := []TrashedProject{}
 	for rows.Next() {
-		var p Project
-		var created, updated, deleted int64
-		if err := rows.Scan(&p.ID, &p.Name, &p.MainFile, &created, &updated, &p.Owner, &deleted); err != nil {
+		var deleted int64
+		p, err := scan(rows, &deleted)
+		if err != nil {
 			return nil, err
 		}
-		p.CreatedAt, p.UpdatedAt = time.Unix(created, 0), time.Unix(updated, 0)
 		at := time.Unix(deleted, 0)
-		out = append(out, TrashedProject{Project: p, DeletedAt: at, PurgeAt: at.Add(TrashDays * 24 * time.Hour)})
+		out = append(out, TrashedProject{Project: *p, DeletedAt: at, PurgeAt: at.Add(TrashDays * 24 * time.Hour)})
 	}
 	return out, rows.Err()
 }
