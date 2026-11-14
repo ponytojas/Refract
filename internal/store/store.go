@@ -88,6 +88,8 @@ var migrations = []string{
 		reasoning_tokens INTEGER NOT NULL  -- part of output_tokens spent reasoning
 	);
 	CREATE INDEX ai_usage_user ON ai_usage(user_id, at)`,
+	// Trash (T3): when the project was deleted, as Unix seconds; 0 while it is live.
+	`ALTER TABLE projects ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0`,
 }
 
 // Open opens (creating if needed) the database at path and applies pending migrations.

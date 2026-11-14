@@ -109,20 +109,24 @@ func runUsers(args []string, out io.Writer) error {
 	return nil
 }
 
-// removeUser deletes an account with its projects (chats go with them),
+// removeUser deletes an account with its projects, those in the trash too (chats go with them),
 // settings and sessions. Without confirm it only says what would go.
 func removeUser(ctx context.Context, svc *users.Service, projectsDir, email string, confirm bool, out io.Writer) error {
 	email = strings.ToLower(strings.TrimSpace(email))
-	rows, err := svc.DB.QueryContext(ctx, `SELECT p.id, p.name FROM projects p JOIN users u ON u.id = p.owner WHERE u.email = ? ORDER BY p.name`, email)
+	rows, err := svc.DB.QueryContext(ctx, `SELECT p.id, p.name, p.deleted_at FROM projects p JOIN users u ON u.id = p.owner WHERE u.email = ? ORDER BY p.name`, email)
 	if err != nil {
 		return err
 	}
 	var ids, names []string
 	for rows.Next() {
 		var id, name string
-		if err := rows.Scan(&id, &name); err != nil {
+		var deleted int64
+		if err := rows.Scan(&id, &name, &deleted); err != nil {
 			rows.Close()
 			return err
+		}
+		if deleted > 0 {
+			name += " (in the trash)"
 		}
 		ids, names = append(ids, id), append(names, name)
 	}
@@ -139,7 +143,7 @@ func removeUser(ctx context.Context, svc *users.Service, projectsDir, email stri
 	}
 	ps := &projects.Service{DB: svc.DB, Dir: projectsDir}
 	for _, id := range ids {
-		if err := ps.Delete(ctx, id); err != nil { // no user in ctx: any project
+		if err := ps.Destroy(ctx, id); err != nil { // no user in ctx: any project
 			return fmt.Errorf("deleting project %s: %w", id, err)
 		}
 	}

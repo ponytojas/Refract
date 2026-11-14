@@ -15,6 +15,7 @@ type FileState = {
 
 export class Autosaver {
   private files = new Map<string, FileState>()
+  private paused = false
   private save: SaveFn
   private delay: number
   private retryDelay: number
@@ -45,7 +46,7 @@ export class Autosaver {
     clearTimeout(f.timer)
     f.timer = undefined
     while (f.inflight) await f.inflight
-    if (f.pending === undefined) return
+    if (f.pending === undefined || this.paused) return
     const content = f.pending
     f.pending = undefined
     this.set(path, f, 'saving')
@@ -56,13 +57,45 @@ export class Autosaver {
       .catch(() => {
         // Keep the content unless something newer arrived meanwhile, and retry.
         if (f.pending === undefined) f.pending = content
-        this.set(path, f, 'error')
+        // Paused (the project can't be written): not an error to retry, just unsaved.
+        this.set(path, f, this.paused ? 'dirty' : 'error')
         this.schedule(path, f, this.retryDelay)
       })
       .finally(() => {
         f.inflight = undefined
       })
     await f.inflight
+  }
+
+  /**
+   * Stops saving without losing anything: pending content stays in memory, no
+   * timer fires, and a failing save isn't retried. isDirty() stays true, so
+   * leaving the page still warns.
+   */
+  pause() {
+    this.paused = true
+    for (const [path, f] of this.files) {
+      clearTimeout(f.timer)
+      f.timer = undefined
+      if (f.pending !== undefined && f.status !== 'dirty') this.set(path, f, 'dirty')
+    }
+  }
+
+  /** Starts saving again and saves everything that is pending. */
+  resume(): Promise<void> {
+    this.paused = false
+    return this.flushAll()
+  }
+
+  get isPaused(): boolean {
+    return this.paused
+  }
+
+  /** The unsaved content, per file. */
+  unsaved(): [path: string, content: string][] {
+    return [...this.files].flatMap(([path, f]) =>
+      f.pending === undefined ? [] : [[path, f.pending] as [string, string]],
+    )
   }
 
   flushAll(): Promise<void> {
@@ -103,6 +136,7 @@ export class Autosaver {
   }
 
   private schedule(path: string, f: FileState, ms: number) {
+    if (this.paused) return
     clearTimeout(f.timer)
     f.timer = setTimeout(() => {
       f.timer = undefined

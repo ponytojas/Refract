@@ -73,6 +73,7 @@ type Props = {
   onOpen: (open: boolean) => void
   focus?: number // bump to focus the input
   request?: { text: string; n: number } // send this (n changes on every request)
+  readOnly?: boolean // a project in the trash: nothing can be sent; the draft is kept
 }
 
 const finished: Partial<Record<Turn['status'], { label: string; tone: string }>> = {
@@ -159,7 +160,7 @@ export default function Assistant(p: Props) {
   }, [draft, open, bubble])
 
   async function newChat() {
-    if (running) return
+    if (running || p.readOnly) return
     p.onChatId('')
     setError('')
     p.onOpen(true)
@@ -168,7 +169,7 @@ export default function Assistant(p: Props) {
 
   async function send(text = draft) {
     const message = text.trim()
-    if (!message || running) return
+    if (!message || running || p.readOnly) return
     setError('')
     setRunning(true)
     p.onOpen(true)
@@ -210,7 +211,7 @@ export default function Assistant(p: Props) {
           if (ev.type === 'activity') update((t) => ({ ...t, activity: [...t.activity, ev.activity] }))
           if (ev.type === 'turn') {
             setTurns((ts) => [...ts.filter((t) => t.id !== 'pending' && t.id !== ev.turn.id), ev.turn])
-            if (ev.turn.status === 'review') p.onReview(ev.turn)
+            if (ev.turn.status === 'review' && !p.readOnly) p.onReview(ev.turn)
           }
           if (ev.type === 'error') update((t) => ({ ...t, status: 'failed', error: ev.error }))
         },
@@ -416,7 +417,7 @@ export default function Assistant(p: Props) {
                       variant="ghost"
                       size="icon-sm"
                       className="text-muted-foreground"
-                      disabled={running}
+                      disabled={running || p.readOnly}
                       onClick={() => {
                         setPref('chatDocked', !p.docked)
                         p.onOpen(true)
@@ -486,7 +487,7 @@ export default function Assistant(p: Props) {
                     turn={t}
                     status={p.status}
                     reviewing={p.reviewing === t.id}
-                    onReview={() => p.onReview(t)}
+                    onReview={p.readOnly ? undefined : () => p.onReview(t)}
                   />
                 ))}
               </ConversationContent>
@@ -508,7 +509,7 @@ export default function Assistant(p: Props) {
               </span>
             )}
             <span className="flex-1" />
-            {pendingReview && !running && p.reviewing !== pendingReview.id && (
+            {pendingReview && !running && !p.readOnly && p.reviewing !== pendingReview.id && (
               <Button size="xs" variant="secondary" onClick={() => p.onReview(pendingReview)}>
                 {t('Review')}
               </Button>
@@ -541,7 +542,14 @@ export default function Assistant(p: Props) {
               ref={input}
               rows={1}
               value={draft}
-              placeholder={open ? t('Ask for a change, or ask about the document…') : t('Ask anything')}
+              placeholder={
+                p.readOnly
+                  ? t('Restore the project to use the assistant.')
+                  : open
+                    ? t('Ask for a change, or ask about the document…')
+                    : t('Ask anything')
+              }
+              disabled={p.readOnly}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKey}
               aria-label={t('Message the assistant')}
@@ -618,7 +626,7 @@ export default function Assistant(p: Props) {
                   size="icon-sm"
                   className="rounded-full"
                   onClick={() => send()}
-                  disabled={!draft.trim()}
+                  disabled={!draft.trim() || p.readOnly}
                   aria-label={t('Send')}
                 >
                   <ArrowUp />
@@ -664,7 +672,7 @@ function TurnView({
   turn: Turn
   status: ChatGPTStatus | null
   reviewing: boolean
-  onReview: () => void
+  onReview?: () => void // absent: nothing can be applied (read-only)
 }) {
   const [showSteps, setShowSteps] = useState(false)
   const request = turn.message.split('\n\n[Open file:')[0]
@@ -736,9 +744,11 @@ function TurnView({
             ))}
             {turn.files.length > 5 && <li>{t('… and {n} more', { n: turn.files.length - 5 })}</li>}
           </ul>
-          <Button size="sm" className="mt-3 w-full" variant={reviewing ? 'secondary' : 'default'} onClick={onReview}>
-            {reviewing ? t('Reviewing…') : t('Review changes')}
-          </Button>
+          {onReview && (
+            <Button size="sm" className="mt-3 w-full" variant={reviewing ? 'secondary' : 'default'} onClick={onReview}>
+              {reviewing ? t('Reviewing…') : t('Review changes')}
+            </Button>
+          )}
         </div>
       )}
 

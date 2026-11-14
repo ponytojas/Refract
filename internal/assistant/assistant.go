@@ -25,6 +25,7 @@ import (
 
 var (
 	ErrNotFound  = errors.New("not found")
+	ErrTrashed   = errors.New("the project is in the trash")
 	ErrBusy      = errors.New("the assistant is already working on this project")
 	ErrState     = errors.New("this turn is not waiting for review")
 	ErrReviewing = errors.New("this turn is already being accepted or rejected")
@@ -81,8 +82,37 @@ type Service struct {
 	Access   *access.Checker                               // rechecks the user after a long turn, before writing
 
 	mu        sync.Mutex
-	running   map[string]bool // project id → a turn is running
+	running   map[string]bool // project id → a turn is running, or the project is held
 	reviewing map[string]bool // turn id → an accept or reject is in progress
+}
+
+// reserve marks a project as busy; false when a turn runs or it is held.
+func (s *Service) reserve(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running == nil {
+		s.running = map[string]bool{}
+	}
+	if s.running[id] {
+		return false
+	}
+	s.running[id] = true
+	return true
+}
+
+func (s *Service) free(id string) {
+	s.mu.Lock()
+	delete(s.running, id)
+	s.mu.Unlock()
+}
+
+// Hold keeps new turns off a project until release is called, for work that
+// takes it away from its user (trash, purge). It fails while a turn runs.
+func (s *Service) Hold(projectID string) (release func(), ok bool) {
+	if !s.reserve(projectID) {
+		return nil, false
+	}
+	return func() { s.free(projectID) }, true
 }
 
 // review reserves a turn for one accept or reject at a time: both read the
@@ -269,25 +299,24 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 	if err != nil {
 		return nil, err
 	}
-	p, err := s.Projects.Get(ctx, c.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	if s.running == nil {
-		s.running = map[string]bool{}
-	}
-	if s.running[p.ID] {
-		s.mu.Unlock()
+	// Reserve the project before reading it: a trash holds the reservation
+	// while it changes the project, so a turn either starts first (and the
+	// trash is refused) or reads the project after it and finds nothing.
+	if !s.reserve(c.ProjectID) {
 		return nil, ErrBusy
 	}
-	s.running[p.ID] = true
-	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		delete(s.running, p.ID)
-		s.mu.Unlock()
-	}()
+	defer s.free(c.ProjectID)
+	p, err := s.Projects.Get(ctx, c.ProjectID)
+	if err != nil {
+		if errors.Is(err, projects.ErrNotFound) {
+			// A trash between the route's check and the reservation: say so, so the workspace can lock.
+			var deleted int64
+			if s.DB.QueryRowContext(ctx, `SELECT deleted_at FROM projects WHERE id = ?`, c.ProjectID).Scan(&deleted) == nil && deleted > 0 {
+				return nil, ErrTrashed
+			}
+		}
+		return nil, err
+	}
 
 	history, err := s.history(ctx, chatID)
 	if err != nil {
@@ -359,7 +388,8 @@ func (s *Service) Ask(ctx context.Context, chatID, text string, ec Context, want
 
 	// A turn runs for minutes: write its changes only if the user still owns
 	// the project. Nothing changes owners today; a feature that does must not
-	// do it while a turn runs (s.running), or this check and the write race.
+	// do it while a turn runs or holds the project (s.running, Hold), or this
+	// check and the write race. Trashing and purging do hold it.
 	if err := s.Access.Require(bg, p.ID, access.Owner); err != nil {
 		return s.lost(bg, p.ID, t)
 	}

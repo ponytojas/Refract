@@ -4,7 +4,6 @@ package projects
 
 import (
 	"github.com/ponytojas/Refract/internal/access"
-	"github.com/ponytojas/Refract/internal/store"
 
 	"archive/zip"
 	"context"
@@ -57,6 +56,13 @@ type Service struct {
 	// addresses only, and git connects to the address that was checked.
 	PublicRemotes bool
 
+	// Now is the clock for the trash (tests set it); nil means time.Now.
+	Now func() time.Time
+	// HoldTurns keeps new assistant turns off a project until release is called
+	// (assistant.Service.Hold); ok is false while a turn is running. Nil (the CLI,
+	// tests) holds nothing.
+	HoldTurns func(id string) (release func(), ok bool)
+
 	bgMu     sync.Mutex     // guards stopping, and orders bg.Add before bg.Wait
 	stopping bool           // Drain started: no new OnCommit calls
 	bg       sync.WaitGroup // OnCommit calls still running
@@ -73,7 +79,7 @@ func (s *Service) List(ctx context.Context) ([]Project, error) {
 	if err != nil {
 		return []Project{}, nil
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+projectCols+` FROM projects WHERE owner = ? ORDER BY updated_at DESC`, u.ID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+projectCols+` FROM projects WHERE owner = ? AND deleted_at = 0 ORDER BY updated_at DESC`, u.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,9 +98,10 @@ func (s *Service) List(ctx context.Context) ([]Project, error) {
 // Get returns a project, whoever owns it. Who may reach it is decided before:
 // every API route that addresses a project goes through access.Require (the
 // route table in cmd/refract), and background work rechecks before writing.
-// Code calling the service directly must do the same.
+// Code calling the service directly must do the same. Projects in the trash
+// are not found here; only the trash methods see them.
 func (s *Service) Get(ctx context.Context, id string) (*Project, error) {
-	p, err := scan(s.DB.QueryRowContext(ctx, `SELECT `+projectCols+` FROM projects WHERE id = ?`, id))
+	p, err := scan(s.DB.QueryRowContext(ctx, `SELECT `+projectCols+` FROM projects WHERE id = ? AND deleted_at = 0`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -226,18 +233,6 @@ func (s *Service) update(ctx context.Context, id, query, value string) error {
 	return nil
 }
 
-// Delete removes the project and its history.
-func (s *Service) Delete(ctx context.Context, id string) error {
-	if _, err := s.Get(ctx, id); err != nil {
-		return err
-	}
-	if _, err := s.DB.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id); err != nil {
-		return err
-	}
-	store.SetSetting(ctx, s.DB, remoteKey(id), "") // its remote and token
-	return os.RemoveAll(s.Path(id))
-}
-
 // Check re-runs the portability checks on a project.
 func (s *Service) Check(ctx context.Context, id string) ([]Warning, error) {
 	if _, err := s.Get(ctx, id); err != nil {
@@ -298,10 +293,11 @@ func addToZip(zw *zip.Writer, dir, rel string) error {
 
 type scanner interface{ Scan(...any) error }
 
-func scan(row scanner) (*Project, error) {
+// scan reads a projectCols row; extra are further columns selected after them.
+func scan(row scanner, extra ...any) (*Project, error) {
 	var p Project
 	var created, updated int64
-	if err := row.Scan(&p.ID, &p.Name, &p.MainFile, &created, &updated, &p.Owner); err != nil {
+	if err := row.Scan(append([]any{&p.ID, &p.Name, &p.MainFile, &created, &updated, &p.Owner}, extra...)...); err != nil {
 		return nil, err
 	}
 	p.CreatedAt, p.UpdatedAt = time.Unix(created, 0), time.Unix(updated, 0)

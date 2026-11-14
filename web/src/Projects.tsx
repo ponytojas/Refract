@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
   ArrowDownUp,
+  ArrowLeft,
   ChevronDown,
   Download,
   FileArchive,
@@ -9,13 +10,23 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
   Upload,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { api, download, errorText, type ChatGPTStatus, type ImportResult, type Project } from './api'
-import { Button } from '@/components/ui/button'
+import {
+  api,
+  download,
+  errorText,
+  type ChatGPTStatus,
+  type ImportResult,
+  type Project,
+  type Trash,
+  type TrashedProject,
+} from './api'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   DropdownMenu,
@@ -46,15 +57,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import AccountMenu from '@/components/AccountMenu'
 import PaperIcon from '@/components/PaperIcon'
 import { ago } from '@/lib/time'
+import { daysLeft } from '@/lib/trash'
 import { cn } from '@/lib/utils'
-import { t } from '@/lib/i18n'
+import { t, tn } from '@/lib/i18n'
 import { useCommands } from '@/lib/commands'
 import { DropdownItems, WithContextMenu, type MenuEntry } from '@/components/Menu'
-import { Link, navigate, pageReady, previousPath } from '@/lib/router'
+import { Link, navigate, pageReady, previousPath, usePath } from '@/lib/router'
 
 type Sort = { key: 'name' | 'updated'; desc: boolean }
 
-export default function Projects({ status }: { status: ChatGPTStatus | null }) {
+export default function Projects(props: { status: ChatGPTStatus | null }) {
+  return usePath() === '/trash' ? <TrashView {...props} /> : <ProjectList {...props} />
+}
+
+function ProjectList({ status }: { status: ChatGPTStatus | null }) {
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>({ key: 'updated', desc: true })
@@ -62,7 +78,6 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
   const [busy, setBusy] = useState(false)
   const [naming, setNaming] = useState<{ mode: 'new' } | { mode: 'rename'; project: Project } | null>(null)
   const [name, setName] = useState('')
-  const [deleting, setDeleting] = useState<Project | null>(null)
   const [reports, setReports] = useState<ImportResult[]>([])
   const zipInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
@@ -83,7 +98,7 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
       onSelect: () => download(`/api/projects/${p.id}/export`, `${p.name}.zip`).catch((e) => toast.error(errorText(e))),
     },
     '-',
-    { label: t('Delete'), icon: Trash2, destructive: true, onSelect: () => setDeleting(p) },
+    { label: t('Move to trash'), icon: Trash2, onSelect: () => moveToTrash(p) },
   ]
 
   useCommands(() => [
@@ -113,6 +128,7 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
       keywords: 'upload',
       run: () => folderInput.current?.click(),
     },
+    { id: 'p:trash', group: 'Navigate', label: t('Trash'), icon: Trash2, run: () => navigate('/trash') },
     ...(projects ?? []).map((p) => ({
       id: `project:${p.id}`,
       group: 'Projects',
@@ -234,16 +250,29 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
     }
   }
 
-  async function confirmDelete() {
-    if (!deleting) return
+  // The row leaves at once; Undo (in the toast) brings the project back.
+  async function moveToTrash(p: Project) {
+    setProjects((list) => list && list.filter((x) => x.id !== p.id))
     try {
-      await api(`/api/projects/${deleting.id}`, { method: 'DELETE' })
-      toast.success(t('Deleted {name}', { name: deleting.name }))
+      await api(`/api/projects/${p.id}`, { method: 'DELETE' })
+    } catch (e) {
       load()
+      toast.error(errorText(e))
+      return
+    }
+    toast(t('Moved {name} to the trash', { name: p.name }), {
+      duration: 10000,
+      action: { label: t('Undo'), onClick: () => restore(p) },
+    })
+  }
+
+  async function restore(p: Project) {
+    try {
+      await api(`/api/projects/${p.id}/restore`, { method: 'POST' })
     } catch (e) {
       toast.error(errorText(e))
     }
-    setDeleting(null)
+    load()
   }
 
   function onDrop(e: DragEvent) {
@@ -280,6 +309,9 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
               className="rounded-full pl-9"
             />
           </div>
+          <Link to="/trash" className={cn(buttonVariants({ variant: 'ghost' }), 'rounded-full')}>
+            <Trash2 /> {t('Trash')}
+          </Link>
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="secondary" className="rounded-full" disabled={busy} />}>
               {busy ? t('Importing…') : t('Import')} <ChevronDown className="text-muted-foreground" />
@@ -454,23 +486,6 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('Delete {name}?', { name: deleting?.name ?? '' })}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('The project and its whole history are removed from this server. Export it first if you may need it.')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={confirmDelete}>
-              {t('Delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       <Dialog open={reports.length > 0} onOpenChange={(o) => !o && setReports([])}>
         <DialogContent className="max-h-[80vh] overflow-auto sm:max-w-2xl">
           <DialogHeader>
@@ -484,6 +499,144 @@ export default function Projects({ status }: { status: ChatGPTStatus | null }) {
           ))}
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function TrashView({ status }: { status: ChatGPTStatus | null }) {
+  const [trash, setTrash] = useState<Trash | null>(null)
+  const [forever, setForever] = useState<TrashedProject | null>(null)
+
+  const load = () =>
+    api<Trash>('/api/trash')
+      .then(setTrash)
+      .catch((e) => toast.error(errorText(e)))
+  useEffect(() => {
+    document.title = `${t('Trash')} · Refract`
+    load()
+  }, [])
+  useEffect(() => {
+    if (trash) pageReady()
+  }, [trash])
+
+  const without = (id: string) =>
+    setTrash((cur) => cur && { ...cur, projects: cur.projects.filter((x) => x.id !== id) })
+
+  async function restore(p: TrashedProject) {
+    try {
+      await api(`/api/projects/${p.id}/restore`, { method: 'POST' })
+    } catch (e) {
+      toast.error(errorText(e))
+      load()
+      return
+    }
+    without(p.id)
+    toast.success(t('Restored {name}', { name: p.name }), {
+      action: { label: t('Open'), onClick: () => navigate(`/p/${p.id}`) },
+    })
+  }
+
+  async function deleteForever() {
+    const p = forever
+    if (!p) return
+    setForever(null)
+    try {
+      await api(`/api/projects/${p.id}/purge`, { method: 'DELETE' })
+    } catch (e) {
+      toast.error(errorText(e))
+      load()
+      return
+    }
+    without(p.id)
+    toast.success(t('Deleted {name} for good', { name: p.name }))
+  }
+
+  const days = trash?.days ?? 30
+  const list = trash?.projects ?? []
+  return (
+    <div className="flex h-full flex-col p-2">
+      <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs">
+        <header className="flex flex-col gap-1 px-5 py-4">
+          <Link
+            to="/"
+            className="mb-1 flex w-fit items-center gap-1.5 text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground"
+          >
+            <ArrowLeft className="size-3.5" /> {t('All projects')}
+          </Link>
+          <h1 className="flex items-center gap-2.5 text-lg font-semibold tracking-tight">
+            <Trash2 className="size-5 text-muted-foreground" />
+            {t('Trash')}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {tn(
+              days,
+              'Deleted projects stay here for {n} day, then they are deleted for good.',
+              'Deleted projects stay here for {n} days, then they are deleted for good.',
+            )}
+          </p>
+        </header>
+        <ul className="min-h-0 flex-1 overflow-auto border-t">
+          {list.map((p, i) => {
+            const left = daysLeft(p.purge_at)
+            return (
+              <li
+                key={p.id}
+                className="flex enter items-center gap-4 border-b px-5 py-2.5 last:border-b-0"
+                style={{ transitionDelay: `${Math.min(i, 8) * 30}ms` }}
+              >
+                <PaperIcon />
+                <span
+                  className="min-w-0 flex-1"
+                  title={t('Deleted on {date}', { date: new Date(p.deleted_at).toLocaleString() })}
+                >
+                  <span className="block truncate text-sm font-medium">{p.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {tn(left, 'Deleted for good in {n} day', 'Deleted for good in {n} days')}
+                  </span>
+                </span>
+                <Button variant="secondary" size="sm" aria-label={t('Restore')} onClick={() => restore(p)}>
+                  <RotateCcw /> <span className="hidden sm:inline">{t('Restore')}</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={t('Delete forever')}
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => setForever(p)}
+                >
+                  <Trash2 /> <span className="hidden sm:inline">{t('Delete forever')}</span>
+                </Button>
+              </li>
+            )
+          })}
+        </ul>
+        {trash && list.length === 0 && (
+          <div className="absolute inset-0 top-28 flex enter flex-col items-center justify-center gap-3 text-center">
+            <Trash2 className="size-10 opacity-40" />
+            <p className="text-sm font-medium">{t('The trash is empty')}</p>
+          </div>
+        )}
+      </main>
+      <footer className="flex items-center px-1 pt-2">
+        <AccountMenu status={status} />
+      </footer>
+
+      <AlertDialog open={!!forever} onOpenChange={(o) => !o && setForever(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('Delete {name} forever?', { name: forever?.name ?? '' })}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("Its files, history and chats are removed from this server. This can't be undone.")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={deleteForever}>
+              {t('Delete forever')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

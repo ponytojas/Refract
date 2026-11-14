@@ -31,7 +31,10 @@ import { t } from '@/lib/i18n'
 
 const wrapping = new Compartment()
 const counter = new Compartment()
+const lock = new Compartment()
 const wrapExt = (on: boolean) => (on ? EditorView.lineWrapping : [])
+// Read-only, and every change refused: this also stops what the code dispatches itself (menu Cut and Paste, proposals, quick actions).
+const lockExt = (on: boolean) => (on ? [EditorState.readOnly.of(true), EditorState.changeFilter.of(() => false)] : [])
 
 type Props = {
   projectId: string
@@ -59,6 +62,7 @@ type Props = {
   onProposed?: (ok: boolean) => void // false: the text there changed meanwhile
   symbols: RefObject<ProjectSymbols> // what completion offers; a ref, so a refresh doesn't render
   mainFile?: string
+  readOnly?: boolean // nothing can change the text (a project in the trash); selecting and copying still work
 }
 
 // One EditorView; each open file keeps its own EditorState, swapped on tab switch.
@@ -86,6 +90,7 @@ export default function Editor({
   onProposed,
   symbols,
   mainFile,
+  readOnly = false,
 }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
@@ -197,6 +202,7 @@ export default function Editor({
     excessWords,
     counter.of(wordCountEnabled.of(countEnabled)),
     wrapping.of(wrapExt(getPrefs().wrap)),
+    lock.of(lockExt(false)),
     // Highest precedence: basicSetup binds Mod-Enter to "insert blank line".
     Prec.highest(
       keymap.of([
@@ -300,6 +306,11 @@ export default function Editor({
   useEffect(() => {
     view.current!.dispatch({ effects: wrapping.reconfigure(wrapExt(wrap)) })
   }, [wrap, path])
+
+  // Stored states keep the lock they were created with, so it is applied to whichever is shown.
+  useEffect(() => {
+    view.current!.dispatch({ effects: lock.reconfigure(lockExt(readOnly)) })
+  }, [readOnly, path])
 
   useEffect(() => {
     view.current!.dispatch({ effects: counter.reconfigure(wordCountEnabled.of(countEnabled)) })

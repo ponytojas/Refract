@@ -103,3 +103,73 @@ test('rename carries pending content to the new path; drop discards it', async (
   assert.equal(d.disk.has('old.tex'), false)
   assert.equal(d.disk.has('gone.tex'), false)
 })
+
+test('nothing is saved while paused', async () => {
+  const d = fakeDisk()
+  const a = new Autosaver(d.save, { delay: 5 })
+  a.change('m.tex', 'one')
+  a.pause()
+  a.change('m.tex', 'two')
+  await a.flush('m.tex')
+  await a.flushAll()
+  await new Promise((r) => setTimeout(r, 25))
+  assert.equal(d.queue.length, 0)
+  assert.equal(a.isPaused, true)
+  assert.equal(a.isDirty(), true)
+  assert.equal(a.status('m.tex'), 'dirty')
+})
+
+test('a save that fails after pause() is dirty, not retried', async () => {
+  const d = fakeDisk()
+  const statuses: string[] = []
+  const a = new Autosaver(d.save, { delay: 1_000_000, retryDelay: 5, onStatus: (_, s) => statuses.push(s) })
+  a.change('m.tex', 'keep me')
+  const f = a.flush('m.tex')
+  await tick()
+  a.pause()
+  d.queue.shift()!.reject(new Error('404'))
+  await f
+  await new Promise((r) => setTimeout(r, 30))
+  assert.equal(d.queue.length, 0, 'no retry')
+  assert.equal(a.status('m.tex'), 'dirty')
+  assert.equal(statuses.includes('error'), false)
+  assert.deepEqual(a.unsaved(), [['m.tex', 'keep me']])
+})
+
+test('resume saves the latest pending content of every file', async () => {
+  const d = fakeDisk()
+  const a = new Autosaver(d.save, { delay: 1_000_000 })
+  a.pause()
+  a.change('a.tex', 'a1')
+  a.change('a.tex', 'a2')
+  a.change('b.tex', 'b1')
+  const r = a.resume()
+  await tick()
+  await d.settle()
+  await r
+  assert.equal(d.disk.get('a.tex'), 'a2')
+  assert.equal(d.disk.get('b.tex'), 'b1')
+  assert.equal(a.isPaused, false)
+  assert.equal(a.isDirty(), false)
+  a.change('a.tex', 'a3') // saving works again
+  assert.equal(a.status('a.tex'), 'dirty')
+  a.pause() // clears the timer so the test can end
+})
+
+test('unsaved lists what is pending', async () => {
+  const d = fakeDisk()
+  const a = new Autosaver(d.save, { delay: 1_000_000 })
+  assert.deepEqual(a.unsaved(), [])
+  a.change('a.tex', 'a1')
+  a.change('b.tex', 'b1')
+  assert.deepEqual(a.unsaved(), [
+    ['a.tex', 'a1'],
+    ['b.tex', 'b1'],
+  ])
+  const f = a.flush('a.tex')
+  await tick()
+  await d.settle()
+  await f
+  assert.deepEqual(a.unsaved(), [['b.tex', 'b1']])
+  a.pause()
+})

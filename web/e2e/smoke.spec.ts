@@ -207,3 +207,53 @@ test('click a section in the outline moves the cursor', async ({ page, request }
     'Samples · paper/chapters/method.tex:3',
   )
 })
+
+// A project that goes to the trash while open: the workspace locks, keeps what was typed, and saves it on restore.
+test('a trashed project locks the workspace, and restoring saves the pending edits', async ({ page, request }) => {
+  const project = await (await request.post('/api/projects', { headers: api, data: { name: 'Trashed' } })).json()
+  expect(
+    (await request.put(`/api/projects/${project.id}/file?path=main.tex`, { headers: api, data: doc })).ok(),
+  ).toBeTruthy()
+  expect(
+    (await request.patch(`/api/projects/${project.id}`, { headers: api, data: { main_file: 'main.tex' } })).ok(),
+  ).toBeTruthy()
+
+  await page.goto(`/p/${project.id}`)
+  await page.getByRole('button', { name: 'main.tex' }).first().click()
+  const editor = page.locator('.cm-content')
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+End')
+
+  expect((await request.delete(`/api/projects/${project.id}`, { headers: api })).ok()).toBeTruthy()
+  await page.keyboard.type('% typed while trashed\n') // its autosave learns the project is gone
+
+  const banner = page.getByRole('status').filter({ hasText: 'This project is in the trash' })
+  await expect(banner).toBeVisible()
+  await expect(editor).toHaveAttribute('aria-readonly', 'true')
+  await expect(page.getByRole('button', { name: 'Compile', exact: true })).toBeDisabled()
+  const before = await editor.innerText()
+  await page.keyboard.type('more text that must not appear')
+  expect(await editor.innerText()).toBe(before)
+
+  await banner.getByRole('button', { name: 'Restore' }).click()
+  await expect(banner).toBeHidden()
+  await expect(editor).not.toHaveAttribute('aria-readonly', 'true')
+  await expect
+    .poll(async () => (await request.get(`/api/projects/${project.id}/file?path=main.tex`, { headers: api })).text())
+    .toContain('% typed while trashed')
+})
+
+// Opening a trashed project lands in the banner, not in an error; once it is deleted for good, restoring says so.
+test('opening a trashed project shows the banner, and a purged one says it was deleted', async ({ page, request }) => {
+  const project = await (await request.post('/api/projects', { headers: api, data: { name: 'Gone' } })).json()
+  expect((await request.delete(`/api/projects/${project.id}`, { headers: api })).ok()).toBeTruthy()
+
+  await page.goto(`/p/${project.id}`)
+  const banner = page.getByRole('status').filter({ hasText: 'This project is in the trash' })
+  await expect(banner).toBeVisible()
+  await expect(page.locator('[data-sonner-toast]')).toHaveCount(0)
+
+  expect((await request.delete(`/api/projects/${project.id}/purge`, { headers: api })).ok()).toBeTruthy()
+  await banner.getByRole('button', { name: 'Restore' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'This project was deleted.' })).toBeVisible()
+})

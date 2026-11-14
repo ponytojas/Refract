@@ -247,4 +247,21 @@ export default {
     'Escríbelas debajo como frases normales. El texto dentro de estas marcas de comentario se ignora.',
   'You can also ask the assistant to remember something: it proposes an edit to this file.':
     'También puedes pedir al asistente que recuerde algo: propondrá un cambio en este archivo.',
+  // Trashed project (T3b)
+  'This project is in the trash. Restore it to keep working.':
+    'Este proyecto está en la papelera. Restáuralo para seguir trabajando.',
+  'Restore the project to use the assistant.': 'Restaura el proyecto para usar el asistente.',
+  'Your unsaved edits are kept here and saved when you restore it. Leaving this page discards them.':
+    'Tus cambios sin guardar se conservan aquí y se guardan al restaurarlo. Si sales de esta página, se pierden.',
+  'This project was deleted.': 'Este proyecto se eliminó.',
+  'Its unsaved text is still here. Copy it before you leave this page.':
+    'Su texto sin guardar sigue aquí. Cópialo antes de salir de esta página.',
+  'Leave this page? Your unsaved text will be lost.': '¿Salir de esta página? Se perderá tu texto sin guardar.',
+  "Couldn't save: the project's files are missing on the server.":
+    'No se pudo guardar: faltan los archivos del proyecto en el servidor.',
+  'Restore the project to open files that were not already open.':
+    'Restaura el proyecto para abrir archivos que no estaban abiertos.',
+  'Copy {path}': 'Copiar {path}',
+  'Copied {path}': 'Se copió {path}',
+  "Couldn't copy {path}.": 'No se pudo copiar {path}.',
 } as Record<string, string>

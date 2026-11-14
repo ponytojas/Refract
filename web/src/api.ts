@@ -15,6 +15,24 @@ export class RequestError extends Error {
   }
 }
 
+/** Fired when an API call learns that a project is in the trash (the server says so to its owner); detail.project is its id. */
+export const TRASHED_EVENT = 'refract:trashed'
+
+/** Whether an error means "this project is in the trash". */
+export const isTrashed = (e: unknown): boolean => e instanceof RequestError && e.error.kind === 'project_trashed'
+
+function signalTrashed(path: string) {
+  const project = /^\/api\/projects\/([^/?]+)/.exec(path)?.[1]
+  window.dispatchEvent(new CustomEvent(TRASHED_EVENT, { detail: { project } }))
+}
+
+// The one place every failed API call becomes an error, so none misses the trashed signal.
+function failure(res: Response, data: { error?: ApiError } | null, path: string): RequestError {
+  const e = new RequestError(data?.error ?? { kind: 'other', message: `HTTP ${res.status}` }, res.status)
+  if (isTrashed(e)) signalTrashed(path)
+  return e
+}
+
 // body: an object is sent as JSON; a string, Blob or FormData is sent as is.
 export async function api<T>(
   path: string,
@@ -28,8 +46,8 @@ export async function api<T>(
     signal: init.signal,
   })
   if (res.status === 204) return undefined as T
-  const data = await res.json().catch(() => ({ error: { kind: 'other', message: `HTTP ${res.status}` } }))
-  if (!res.ok) throw new RequestError(data.error)
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw failure(res, data, path)
   return data as T
 }
 
@@ -43,7 +61,7 @@ export async function stream(path: string, body: unknown, onEvent: (ev: any) => 
   })
   if (!res.ok || !res.body) {
     const data = await res.json().catch(() => null)
-    onEvent({ type: 'error', error: data?.error ?? { kind: 'other', message: `HTTP ${res.status}` } })
+    onEvent({ type: 'error', error: failure(res, data, path).error })
     return
   }
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -56,7 +74,12 @@ export async function stream(path: string, body: unknown, onEvent: (ev: any) => 
     while ((i = buf.indexOf('\n\n')) >= 0) {
       const chunk = buf.slice(0, i)
       buf = buf.slice(i + 2)
-      if (chunk.startsWith('data: ')) onEvent(JSON.parse(chunk.slice(6)))
+      if (chunk.startsWith('data: ')) {
+        const ev = JSON.parse(chunk.slice(6))
+        // The trash can also land after the stream has started.
+        if (ev.type === 'error' && ev.error?.kind === 'project_trashed') signalTrashed(path)
+        onEvent(ev)
+      }
     }
   }
 }
@@ -116,6 +139,10 @@ export function describe(e: ApiError): string {
       return t('ChatGPT plan usage is not available for this account: {message}', { message: e.message })
     case 'model_unavailable':
       return t('This model is not available. Pick another one.')
+    case 'project_trashed':
+      return t('This project is in the trash. Restore it to keep working.')
+    case 'project_busy':
+      return t('The assistant is working on this project. Stop it or wait until it finishes, then try again.')
     case 'bad_login':
       return t('Wrong email or password.')
     case 'wrong_password':
@@ -154,6 +181,8 @@ export async function download(path: string, filename: string) {
 }
 
 export type Project = { id: string; name: string; main_file: string; created_at: string; updated_at: string }
+export type TrashedProject = Project & { deleted_at: string; purge_at: string }
+export type Trash = { days: number; projects: TrashedProject[] }
 export type Warning = { file: string; line: number; kind: string; message: string }
 export type ImportResult = { project: Project; warnings: Warning[]; skipped?: string[]; candidates?: string[] }
 
@@ -169,8 +198,7 @@ export const fileURL = (id: string, path: string) => `/api/projects/${id}/file?p
 export async function readFile(id: string, path: string): Promise<OpenedFile> {
   const res = await fetch(fileURL(id, path), { headers })
   if (!res.ok) {
-    const data = await res.json().catch(() => null)
-    throw new RequestError(data?.error ?? { kind: 'other', message: `HTTP ${res.status}` }, res.status)
+    throw failure(res, await res.json().catch(() => null), fileURL(id, path))
   }
   if (res.headers.get('X-Refract-Text') === '1') return { text: true, content: await res.text() }
   const blob = await res.blob()
@@ -186,8 +214,7 @@ export async function writeFile(id: string, path: string, body: string | Blob) {
     keepalive: size < 60_000, // lets a save started while the page unloads still finish
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => null)
-    throw new RequestError(data?.error ?? { kind: 'other', message: `HTTP ${res.status}` })
+    throw failure(res, await res.json().catch(() => null), fileURL(id, path))
   }
 }
 

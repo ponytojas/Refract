@@ -187,7 +187,7 @@ func TestImportCreatesRepoAndDetectsMain(t *testing.T) {
 	if got.Name != "My thesis" || got.MainFile != "chapters/one.tex" {
 		t.Fatalf("project = %+v", got)
 	}
-	if err := s.Delete(ctx, p.ID); err != nil {
+	if err := s.Destroy(ctx, p.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
