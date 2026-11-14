@@ -1,14 +1,17 @@
 package compile
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,14 +24,22 @@ type Sandbox struct {
 	Prlimit string // "prlimit" if empty
 
 	// Limits applied to Tectonic and everything it starts; zero = the default.
-	CPUSeconds   int   // 60
+	CPUSeconds   int   // the compile timeout plus a margin (60 s without one)
 	FileSize     int64 // 200 MiB, the largest file a process may write
 	Processes    int   // 64, threads included
 	AddressSpace int64 // 1 GiB
+
+	once         sync.Once
+	prepErr      error
+	bwrapPath    string
+	prlimitPath  string
+	tectonicPath string
+	base         []string // the fixed part of the bwrap arguments
 }
 
 const (
 	defaultCPU       = 60
+	cpuMargin        = 5
 	defaultFileSize  = 200 << 20
 	defaultProcesses = 64
 	defaultAddress   = 1 << 30
@@ -44,25 +55,38 @@ type sandboxJob struct {
 	Project  string // the project folder, or an assistant turn's worktree: read-only
 	OutDir   string // inside Project: the only writable place
 	WorkDir  string
+	Timeout  time.Duration // the compile's wall-clock limit; sets the CPU limit
 }
 
-// command builds the bwrap command line for one compile.
-func (s *Sandbox) command(ctx context.Context, j sandboxJob) (*exec.Cmd, error) {
-	bin, err := exec.LookPath(j.Tectonic)
+// prepare resolves, once, the programs and the root-level symlinks the
+// sandbox is built from, and refuses a setuid bwrap (see "Compile sandbox").
+func (s *Sandbox) prepare(tectonic string) error {
+	s.once.Do(func() { s.prepErr = s.resolve(tectonic) })
+	return s.prepErr
+}
+
+func (s *Sandbox) resolve(tectonic string) error {
+	var err error
+	if s.bwrapPath, err = exec.LookPath(cmp.Or(s.Bwrap, "bwrap")); err != nil {
+		return err
+	}
+	if s.prlimitPath, err = exec.LookPath(cmp.Or(s.Prlimit, "prlimit")); err != nil {
+		return err
+	}
+	if fi, err := os.Stat(s.bwrapPath); err == nil && fi.Mode()&os.ModeSetuid != 0 {
+		return fmt.Errorf("%s is setuid: the process limit relies on user namespaces and a bwrap that isn't setuid (%s)", s.bwrapPath, sandboxHelp)
+	}
+	bin, err := exec.LookPath(tectonic)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if bin, err = filepath.Abs(bin); err != nil {
-		return nil, err
+		return err
 	}
-	if bin, err = filepath.EvalSymlinks(bin); err != nil {
-		return nil, err
+	if s.tectonicPath, err = filepath.EvalSymlinks(bin); err != nil {
+		return err
 	}
-	if !filepath.IsAbs(j.Bundle) || !filepath.IsAbs(j.Cache) {
-		return nil, fmt.Errorf("the sandbox needs REFRACT_TECTONIC_BUNDLE and TECTONIC_CACHE_DIR to be absolute paths (%s)", sandboxHelp)
-	}
-
-	args := []string{"--unshare-all", "--die-with-parent", "--new-session", "--clearenv", "--ro-bind", "/usr", "/usr"}
+	s.base = []string{"--unshare-all", "--die-with-parent", "--new-session", "--clearenv", "--ro-bind", "/usr", "/usr"}
 	for _, p := range []string{"/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32"} {
 		fi, err := os.Lstat(p)
 		switch {
@@ -70,16 +94,42 @@ func (s *Sandbox) command(ctx context.Context, j sandboxJob) (*exec.Cmd, error) 
 		case fi.Mode()&os.ModeSymlink != 0:
 			target, err := os.Readlink(p)
 			if err != nil {
-				return nil, err
+				return err
 			}
-			args = append(args, "--symlink", target, p)
+			s.base = append(s.base, "--symlink", target, p)
 		case fi.IsDir():
-			args = append(args, "--ro-bind", p, p)
+			s.base = append(s.base, "--ro-bind", p, p)
 		}
 	}
+	// Fontconfig's configuration and the loader's cache: nothing else of /etc.
+	for _, p := range []string{"/etc/fonts", "/etc/ld.so.cache"} {
+		if _, err := os.Stat(p); err == nil {
+			s.base = append(s.base, "--ro-bind", p, p)
+		}
+	}
+	return nil
+}
+
+// command builds the bwrap command line for one compile.
+func (s *Sandbox) command(ctx context.Context, j sandboxJob) (*exec.Cmd, error) {
+	if err := s.prepare(j.Tectonic); err != nil {
+		return nil, err
+	}
+	if !filepath.IsAbs(j.Bundle) || !filepath.IsAbs(j.Cache) {
+		return nil, fmt.Errorf("the sandbox needs REFRACT_TECTONIC_BUNDLE and TECTONIC_CACHE_DIR to be absolute paths (%s)", sandboxHelp)
+	}
+	cpu := s.CPUSeconds
+	if cpu == 0 {
+		cpu = defaultCPU
+		if j.Timeout > 0 { // a little over the wall-clock limit, so that one normally comes first
+			cpu = int((j.Timeout+time.Second-1)/time.Second) + cpuMargin
+		}
+	}
+
+	args := slices.Clone(s.base)
 	// --tmpfs /tmp comes first: a project under /tmp is mounted on top of it.
 	args = append(args, "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-		"--ro-bind", bin, bin,
+		"--ro-bind", s.tectonicPath, s.tectonicPath,
 		"--ro-bind", j.Bundle, j.Bundle,
 		"--ro-bind", j.Cache, j.Cache,
 		"--ro-bind", j.Project, j.Project,
@@ -88,35 +138,17 @@ func (s *Sandbox) command(ctx context.Context, j sandboxJob) (*exec.Cmd, error) 
 		"--chdir", j.WorkDir,
 		// The limits are applied inside: RLIMIT_NPROC counts every thread of the
 		// user, so around bwrap a busy server would fail to start it.
-		"--", cmpOr(s.Prlimit, "prlimit"),
-		"--cpu="+strconv.Itoa(orInt(s.CPUSeconds, defaultCPU)),
-		"--fsize="+strconv.FormatInt(orInt64(s.FileSize, defaultFileSize), 10),
-		"--nproc="+strconv.Itoa(orInt(s.Processes, defaultProcesses)),
-		"--as="+strconv.FormatInt(orInt64(s.AddressSpace, defaultAddress), 10),
-		"--", bin)
+		"--", s.prlimitPath,
+		"--cpu="+strconv.Itoa(cpu),
+		"--fsize="+strconv.FormatInt(cmp.Or(s.FileSize, defaultFileSize), 10),
+		"--nproc="+strconv.Itoa(cmp.Or(s.Processes, defaultProcesses)),
+		"--as="+strconv.FormatInt(cmp.Or(s.AddressSpace, defaultAddress), 10),
+		"--", s.tectonicPath)
 	args = append(args, j.Args...)
 
-	bwrap, err := exec.LookPath(cmpOr(s.Bwrap, "bwrap"))
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.CommandContext(ctx, bwrap, args...)
+	cmd := exec.CommandContext(ctx, s.bwrapPath, args...)
 	cmd.Env = []string{} // bwrap sets the sandbox's own
 	return cmd, nil
-}
-
-func orInt(v, def int) int {
-	if v != 0 {
-		return v
-	}
-	return def
-}
-
-func orInt64(v, def int64) int64 {
-	if v != 0 {
-		return v
-	}
-	return def
 }
 
 // Check verifies, at startup, that compiles will work inside the sandbox:
@@ -124,13 +156,16 @@ func orInt64(v, def int64) int64 {
 // compiles. The last step catches a host that blocks user namespaces,
 // bundle files that aren't readable, and a missing or mismatched format file.
 func (s *Sandbox) Check(ctx context.Context, t *Tectonic) error {
-	for _, tool := range []struct{ name, env string }{{cmpOr(s.Bwrap, "bwrap"), "bubblewrap"}, {cmpOr(s.Prlimit, "prlimit"), "util-linux"}} {
+	for _, tool := range []struct{ name, env string }{{cmp.Or(s.Bwrap, "bwrap"), "bubblewrap"}, {cmp.Or(s.Prlimit, "prlimit"), "util-linux"}} {
 		if _, err := exec.LookPath(tool.name); err != nil {
 			return fmt.Errorf("REFRACT_SANDBOX=bwrap needs %s on the PATH: install the %s package (%s)", tool.name, tool.env, sandboxHelp)
 		}
 	}
-	if _, err := exec.LookPath(cmpOr(t.Bin, "tectonic")); err != nil {
+	if _, err := exec.LookPath(cmp.Or(t.Bin, "tectonic")); err != nil {
 		return fmt.Errorf("REFRACT_SANDBOX=bwrap needs tectonic on the PATH (%s)", sandboxHelp)
+	}
+	if err := s.prepare(cmp.Or(t.Bin, "tectonic")); err != nil {
+		return fmt.Errorf("REFRACT_SANDBOX=bwrap: %w", err)
 	}
 	if fi, err := os.Stat(t.Bundle); t.Bundle == "" || err != nil || !fi.IsDir() {
 		return fmt.Errorf("REFRACT_SANDBOX=bwrap needs REFRACT_TECTONIC_BUNDLE=%q to be a local folder with the TeX bundle, because the sandbox has no network (%s)", t.Bundle, sandboxHelp)

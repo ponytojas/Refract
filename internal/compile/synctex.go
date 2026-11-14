@@ -2,6 +2,7 @@ package compile
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -90,7 +91,7 @@ func buildPaths(projectDir, mainFile string) (pdf, root string, err error) {
 func (s *SyncTeX) run(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, cmpOr(s.Bin, "synctex"), args...)
+	cmd := exec.CommandContext(ctx, cmp.Or(s.Bin, "synctex"), args...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
 	out, err := cmd.CombinedOutput()
 	if err != nil && len(out) == 0 {

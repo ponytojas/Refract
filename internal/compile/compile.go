@@ -4,8 +4,10 @@ package compile
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -26,6 +28,7 @@ type Result struct {
 	Problems   []Problem `json:"problems"`
 	Output     string    `json:"output"` // Tectonic's stderr summary
 	TimedOut   bool      `json:"timed_out"`
+	CPULimit   bool      `json:"-"`          // TimedOut because the sandbox's CPU limit stopped it
 	Superseded bool      `json:"superseded"` // cancelled: a newer compile of the same project, or the caller went away
 	DurationMS int64     `json:"duration_ms"`
 	PDF        string    `json:"pdf,omitempty"` // project-relative path of the PDF, when produced
@@ -55,7 +58,7 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 		return nil, err
 	}
 	outDir := filepath.Join(projectDir, filepath.FromSlash(BuildDir))
-	if err := os.MkdirAll(outDir, 0o755); err != nil { // tectonic requires it to exist
+	if err := prepareOutDir(projectDir); err != nil { // tectonic requires it to exist
 		return nil, err
 	}
 	base := path.Base(mainFile)
@@ -96,14 +99,14 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 	var cmd *exec.Cmd
 	if t.Sandbox != nil {
 		cmd, err = t.Sandbox.command(runCtx, sandboxJob{
-			Tectonic: cmpOr(t.Bin, "tectonic"), Args: args, Bundle: t.Bundle, Cache: t.CacheDir,
-			Project: projectDir, OutDir: outDir, WorkDir: workDir,
+			Tectonic: cmp.Or(t.Bin, "tectonic"), Args: args, Bundle: t.Bundle, Cache: t.CacheDir,
+			Project: projectDir, OutDir: outDir, WorkDir: workDir, Timeout: t.Timeout,
 		})
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		cmd = exec.CommandContext(runCtx, cmpOr(t.Bin, "tectonic"), args...)
+		cmd = exec.CommandContext(runCtx, cmp.Or(t.Bin, "tectonic"), args...)
 		cmd.Dir = workDir
 		// A minimal environment: the document must not be able to \input
 		// /proc/self/environ and read secrets like REFRACT_SECRET_KEY.
@@ -132,10 +135,14 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 		res.TimedOut = true
 	}
 	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) && t.Sandbox != nil && cpuLimited(exitErr) && !res.Superseded && !res.TimedOut {
+		res.TimedOut, res.CPULimit = true, true
+	}
 	if runErr != nil && !errors.As(runErr, &exitErr) && !res.TimedOut && !res.Superseded {
 		return nil, runErr // tectonic missing, not a document problem
 	}
 
+	res.Output = dropFontconfigNoise(res.Output)
 	res.Problems = parseStderr(res.Output)
 	if log, err := os.ReadFile(filepath.Join(outDir, stem+".log")); err == nil {
 		res.Problems = append(res.Problems, parseLog(string(log))...)
@@ -149,7 +156,9 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 	}
 	if !res.OK && !hasError(res.Problems) {
 		msg := "Compilation failed."
-		if res.TimedOut {
+		if res.CPULimit {
+			msg = "Compilation used too much CPU time and was stopped. Look for an infinite loop."
+		} else if res.TimedOut {
 			msg = "Compilation timed out after " + t.Timeout.String() + " and was stopped. Look for an infinite loop."
 		} else if res.Superseded {
 			msg = "Cancelled by a newer compile."
@@ -159,6 +168,57 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 	return res, nil
 }
 
+// prepareOutDir creates .refract/build without following symlinks and refuses
+// a project where any part of it is one: a pulled repository could otherwise
+// point it at a folder outside the project, which the sandbox mounts writable.
+func prepareOutDir(projectDir string) error {
+	cur := projectDir
+	for _, part := range strings.Split(BuildDir, "/") {
+		cur = filepath.Join(cur, part)
+		fi, err := os.Lstat(cur)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			if err := os.Mkdir(cur, 0o755); err != nil {
+				return err
+			}
+		case err != nil:
+			return err
+		case fi.Mode()&os.ModeSymlink != 0:
+			return fmt.Errorf("refusing to compile: %s is a symbolic link; delete it and compile again", filepath.ToSlash(strings.TrimPrefix(cur, projectDir+string(filepath.Separator))))
+		case !fi.IsDir():
+			return fmt.Errorf("refusing to compile: %s is not a folder", filepath.ToSlash(strings.TrimPrefix(cur, projectDir+string(filepath.Separator))))
+		}
+	}
+	real, err := filepath.EvalSymlinks(filepath.Join(projectDir, filepath.FromSlash(BuildDir)))
+	if err != nil {
+		return err
+	}
+	root, err := filepath.EvalSymlinks(projectDir)
+	if err != nil {
+		return err
+	}
+	if rel, err := filepath.Rel(root, real); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to compile: %s resolves outside the project", BuildDir)
+	}
+	return nil
+}
+
+// dropFontconfigNoise removes the warning Tectonic prints when the system has
+// no fontconfig configuration: it is harmless and means nothing to the user.
+func dropFontconfigNoise(out string) string {
+	if !strings.Contains(out, "Fontconfig error: Cannot load default config file") {
+		return out
+	}
+	lines := strings.Split(out, "\n")
+	kept := lines[:0]
+	for _, l := range lines {
+		if !strings.Contains(l, "Fontconfig error: Cannot load default config file") {
+			kept = append(kept, l)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
 func hasError(ps []Problem) bool {
 	for _, p := range ps {
 		if p.Severity == "error" {
@@ -166,13 +226,6 @@ func hasError(ps []Problem) bool {
 		}
 	}
 	return false
-}
-
-func cmpOr(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // limitedBuffer keeps the first maxOutput bytes and discards the rest.

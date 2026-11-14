@@ -105,7 +105,7 @@ ls %[2]s %[2]s/projects > "$out/listing" 2>&1
 try other-project cat %[3]s/main.tex
 try write-git touch %[4]s/.git/x
 try write-project touch %[4]s/x
-try write-etc touch /etc/x
+try write-etc touch /usr/x
 try read-project cat %[4]s/main.tex
 try write-build touch "$out/ok"
 echo "ifaces $(tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ' | tr '\n' ,)" >> "$r"
@@ -296,5 +296,74 @@ func TestSandboxRealTectonic(t *testing.T) {
 	res, _ = tc.Compile(context.Background(), dir, "main.tex")
 	if res.OK || !strings.Contains(res.Output, "not found") && !strings.Contains(res.Output, "failed") {
 		t.Errorf("\\input{/etc/passwd}: %+v", res)
+	}
+}
+
+func TestSandboxRefusesSymlinkedBuildDir(t *testing.T) {
+	e := newSandboxEnv(t, `touch "$HOME/x"`)
+	outside := filepath.Join(e.root, "outside")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(e.project, ".refract"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(e.project, ".refract", "build")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.tect.Compile(context.Background(), e.project, "main.tex"); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("err = %v; want a refusal", err)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("outside folder was written: %v", entries)
+	}
+}
+
+// The CPU limit follows the compile timeout, and hitting it reads as a timeout.
+func TestSandboxCPULimitFollowsTimeout(t *testing.T) {
+	e := newSandboxEnv(t, `
+while [ $# -gt 0 ]; do case "$1" in --outdir) out=$2;; esac; shift; done
+grep "Max cpu time" /proc/self/limits > "$out/limits"
+while :; do :; done
+`)
+	e.tect.Timeout = 3 * time.Second
+	e.tect.Sandbox.CPUSeconds = 0
+	res, err := e.tect.Compile(context.Background(), e.project, "main.tex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(e.project, filepath.FromSlash(BuildDir), "limits"))
+	if !strings.Contains(string(b), " 8 ") {
+		t.Errorf("limits = %q; want 8 s (timeout 3 s + margin)", b)
+	}
+	if !res.TimedOut {
+		t.Errorf("result = %+v; want TimedOut", res)
+	}
+
+	// With a CPU limit below the timeout, the CPU limit stops it first.
+	e.tect.Timeout = 20 * time.Second
+	e.tect.Sandbox.CPUSeconds = 1
+	res, err = e.tect.Compile(context.Background(), e.project, "main.tex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.TimedOut || !res.CPULimit || res.DurationMS > 10000 {
+		t.Errorf("result = %+v; want TimedOut by the CPU limit", res)
+	}
+}
+
+func TestSandboxEtcNarrow(t *testing.T) {
+	e := newSandboxEnv(t, `
+while [ $# -gt 0 ]; do case "$1" in --outdir) out=$2;; esac; shift; done
+ls /etc > "$out/etc"
+`)
+	if _, err := e.tect.Compile(context.Background(), e.project, "main.tex"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(e.project, filepath.FromSlash(BuildDir), "etc"))
+	for _, name := range strings.Fields(string(b)) {
+		if name != "fonts" && name != "ld.so.cache" {
+			t.Errorf("/etc/%s is visible in the sandbox", name)
+		}
 	}
 }
