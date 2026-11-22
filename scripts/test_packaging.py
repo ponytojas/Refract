@@ -1,5 +1,6 @@
 """Packaging contracts: checksums, nested executables, Debian payload and metadata."""
 
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -351,6 +352,9 @@ class ToolsArchiveTests(unittest.TestCase):
             tex_seed.attribute(["nolic.tex"], packages, overrides)
         with self.assertRaises(SystemExit):
             tex_seed.attribute(["unknown.tex"], packages, overrides)
+        # The most specific glob wins, whichever line comes first.
+        overrides = {("glob", "hyph-*.tex"): ["in-file"], ("glob", "hyph-quote-*.tex"): ["derived"]}
+        self.assertEqual(tex_seed.attribute(["hyph-quote-xx.tex"], packages, overrides)["hyph-quote-xx.tex"][0][1], ["derived"])
 
     def test_tex_seed_licence_texts_exist_and_covers_match_the_repository(self):
         for name, (filename, _) in tex_seed.TEXTS.items():
@@ -363,6 +367,37 @@ class ToolsArchiveTests(unittest.TestCase):
         labels = [label for label, _, _ in tex_seed.covered_projects()]
         self.assertIn("article/en", labels)
         self.assertEqual(len(labels), len(set(labels)))
+
+    def test_tex_seed_verify_checks_files_and_refuses_unsafe_paths(self):
+        lock = tools_archive.load_lock()
+
+        def seed_with(files, extra=None):
+            seed = Path(tempfile.mkdtemp())
+            self.addCleanup(shutil.rmtree, seed, True)
+            hashes = {}
+            for rel, body in files.items():
+                (seed / rel).parent.mkdir(parents=True, exist_ok=True)
+                (seed / rel).write_bytes(body)
+                hashes[rel] = hashlib.sha256(body).hexdigest()
+            hashes.update(extra or {})
+            listing = "".join(f"{v}  {r}\n" for r, v in sorted(hashes.items()))
+            covers = {"templates": [label for label, _, _ in tex_seed.covered_projects()],
+                      "documents": [d.stem for d in tex_seed.covered_documents()]}
+            (seed / "seed.json").write_text(json.dumps({
+                "schema": 1, "id": hashlib.sha256(listing.encode()).hexdigest(), "tectonic": lock["TECTONIC_VERSION"],
+                "bundle": {"url": lock["TECTONIC_BUNDLE_URL"], "digest": lock["TECTONIC_BUNDLE_DIGEST"]},
+                "covers": covers, "files": hashes}))
+            return seed
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            tex_seed.verify(seed_with({"cache/bundles/a.tex": b"a"}))
+        for extra in ({"../escape": "0" * 64}, {"/abs": "0" * 64}, {"cache/../x": "0" * 64}, {"other/x": "0" * 64}):
+            with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                tex_seed.verify(seed_with({"cache/bundles/a.tex": b"a"}, extra))
+        seed = seed_with({"cache/bundles/a.tex": b"a"})
+        (seed / "cache/bundles/a.tex").write_bytes(b"b")
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            tex_seed.verify(seed)
 
     def test_tools_workflow_builds_and_smokes_the_seed(self):
         tools = (ROOT / ".github/workflows/tools.yml").read_text()

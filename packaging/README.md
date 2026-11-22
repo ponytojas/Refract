@@ -119,7 +119,8 @@ identical to a clean machine.
 
 To build one locally (macOS arm64 example): `scripts/build-tools.sh darwin arm64 v0.0.0-dev dist`,
 then extract it and run `scripts/smoke-tools.sh <folder> darwin` and `scripts/smoke-tex-seed.sh <folder> darwin`.
-`build-tools.sh` needs `TEX_SEED_DIR` set to the output of `scripts/build-tex-seed.sh`.
+`build-tools.sh` takes the seed from `TEX_SEED_DIR` (the output of `scripts/build-tex-seed.sh`); when it
+is unset and the target's Tectonic runs on the host, it builds the seed itself (needs network).
 
 ## TeX seed
 
@@ -153,8 +154,7 @@ changes (a new template, another package used, a new bundle or Tectonic), and
 reproducible and reviewable. To cover another template, add it under `internal/projects/templates/`
 (or a document under `packaging/tex-seed/documents/`), run with `--update`, and commit `files.txt`.
 In CI the `seed` job of `tools.yml` builds it once with the pinned Linux Tectonic and hands it to every
-`build` job (`TEX_SEED_DIR`, required by `scripts/build-tools.sh`, which also serves the Windows
-cross-build).
+`build` job (`TEX_SEED_DIR`; the Windows cross-build cannot build it itself).
 
 **Coverage.** The five built-in templates (article, beamer, cv, letter, thesis) in English and Spanish
 (10 projects) and three documents: `blank-10pt`, `blank-12pt` (a bare `article` at those sizes) and
@@ -178,9 +178,12 @@ nothing else: ship `tex-seed/` next to the tools, read-only. `scripts/smoke-offl
 **Smoke test.** `scripts/smoke-tex-seed.sh <extracted-dir> <os>` (run by the `smoke` job after the
 tools smoke test) verifies `seed.json` against the files, then, with a read-only runtime, an empty home
 and a copy of the seed as the only cache, compiles every covered project and document, asserting no
-`downloading` line, a `%PDF` output and SyncTeX data, and a `synctex view` / `synctex edit` round trip.
-The network is blocked: macOS `sandbox-exec`, Linux `sudo unshare -n` (then `setpriv` back to the
-user), Windows a firewall rule on `tectonic.exe` plus `--only-cached`.
+`downloading` or error line, a `%PDF` output and SyncTeX data, and a `synctex view` / `synctex edit` round trip.
+The network is blocked and a probe proves it: macOS `sandbox-exec`, Linux `sudo unshare -n` (then
+`setpriv` back to the user). Windows has no per-process sandbox: the test adds a firewall rule on
+`tectonic.exe` when it runs as an administrator (not probed) and always passes `--only-cached`, which
+fails the compile on any file missing from the seed instead of downloading it. That proves the
+coverage, not the offline behaviour; the log states which blocking held.
 
 **Offline smoke test.** `scripts/smoke-offline.sh <refract> <extracted-dir> <os>` (the `smoke` job builds the binary
 and runs it on macOS and Linux) runs the whole of `refract local` with the network blocked, from a read-only

@@ -10,8 +10,10 @@
 # compiled); linux targets build on Linux of the same architecture (static synctex);
 # the windows target is cross-built on Linux amd64 with llvm-mingw (needs unzip, zip).
 # Needs curl, git, tar, python3.
-# TEX_SEED_DIR (required): the output of scripts/build-tex-seed.sh (tex-seed/ and
-# licenses/tex/); every archive carries it. The workflow builds it once, on Linux.
+# TEX_SEED_DIR: the output of scripts/build-tex-seed.sh (tex-seed/ and licenses/tex/);
+# every archive carries it. The workflow builds it once, on Linux, and passes it in. When
+# it is unset and the target's Tectonic runs on this host (a local build), the seed is
+# built here with that Tectonic (needs network); a cross build without it fails.
 #
 # The archive is extracted into <exe dir>/../libexec/refract/ (macOS, Linux) or
 # next to the executable (Windows); see packaging/README.md for the layout.
@@ -21,9 +23,6 @@ set -eu
 [ $# -eq 4 ] || die "usage: build-tools.sh <os> <arch> <tag> <output-dir>"
 OS=$1 ARCH=$2 TAG=$3 DEST=$4
 EXE=
-: "${TEX_SEED_DIR:?set TEX_SEED_DIR to the output of scripts/build-tex-seed.sh}"
-[ -f "$TEX_SEED_DIR/tex-seed/seed.json" ] && [ -f "$TEX_SEED_DIR/licenses/tex/NOTICE.md" ] || die "$TEX_SEED_DIR is not a TeX seed build (scripts/build-tex-seed.sh)"
-python3 -I "$TOOLS_ROOT/scripts/tex-seed.py" verify "$TEX_SEED_DIR/tex-seed" >/dev/null
 [ "$OS" = windows ] && EXE=.exe
 
 if ! asset=$(tectonic_asset "$OS" "$ARCH"); then
@@ -125,6 +124,14 @@ OFFER
 esac
 
 # The TeX seed (see packaging/README.md, "TeX seed").
+if [ -z "${TEX_SEED_DIR:-}" ]; then
+  "$STAGE/tectonic$EXE" --version >/dev/null 2>&1 ||
+    die "set TEX_SEED_DIR to the output of scripts/build-tex-seed.sh (the $OS-$ARCH Tectonic does not run here to build it)"
+  TEX_SEED_DIR=$WORK/tex-seed
+  "$TOOLS_ROOT/scripts/build-tex-seed.sh" "$STAGE/tectonic$EXE" "$TEX_SEED_DIR"
+fi
+[ -f "$TEX_SEED_DIR/tex-seed/seed.json" ] && [ -f "$TEX_SEED_DIR/licenses/tex/NOTICE.md" ] || die "$TEX_SEED_DIR is not a TeX seed build (scripts/build-tex-seed.sh)"
+python3 -I "$TOOLS_ROOT/scripts/tex-seed.py" verify "$TEX_SEED_DIR/tex-seed" >/dev/null
 cp -R "$TEX_SEED_DIR/tex-seed" "$STAGE/tex-seed"
 mkdir -p "$STAGE/licenses/tex"
 cp -R "$TEX_SEED_DIR/licenses/tex/." "$STAGE/licenses/tex/"

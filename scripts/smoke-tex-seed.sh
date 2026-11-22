@@ -5,8 +5,11 @@
 # and SyncTeX must map source and PDF positions both ways.
 # Usage: scripts/smoke-tex-seed.sh <extracted-dir> <os>   (os: darwin|linux|windows)
 # Network blocked by: macOS sandbox-exec; Linux `sudo unshare -n` (then setpriv back to
-# this user); Windows a firewall rule on tectonic.exe (needs an administrator shell)
-# plus --only-cached. Run the checks of the seed build itself with build-tex-seed.sh.
+# this user); both are proven with a probe. Windows has no per-process sandbox: it adds a
+# firewall rule on tectonic.exe when it can (an administrator shell; the rule is not
+# probed) and always passes --only-cached, so a file missing from the seed fails the
+# compile instead of being downloaded. The log says which of these held.
+# Run the checks of the seed build itself with build-tex-seed.sh.
 set -eu
 DIR=$(cd "$1" && pwd)
 OS=$2
@@ -42,6 +45,7 @@ case "$OS" in
 esac
 
 ONLY=
+NET=
 case "$OS" in
   darwin)
     SB='(version 1)(allow default)(deny network*)'
@@ -54,8 +58,12 @@ case "$OS" in
     ONLY=--only-cached
     FWRULE=refract-smoke-tex-seed-$$
     TECT_WIN=$(cygpath -w "$DIR/tectonic.exe")
-    netsh advfirewall firewall add rule name="$FWRULE" dir=out action=block program="$TECT_WIN" >/dev/null \
-      || echo "smoke-tex-seed: no firewall rule (not an administrator): relying on --only-cached" >&2
+    if netsh advfirewall firewall add rule name="$FWRULE" dir=out action=block program="$TECT_WIN" >/dev/null 2>&1; then
+      NET="firewall rule on tectonic.exe (not probed) plus --only-cached"
+    else
+      FWRULE=
+      NET="NOT blocked (no firewall rule: not an administrator); --only-cached forbids downloads"
+    fi
     offline() { "$@"; }
     ;;
 esac
@@ -63,8 +71,10 @@ esac
 case "$OS" in
   darwin|linux)
     if offline curl -fsS --max-time 5 -o /dev/null "$URL" 2>/dev/null; then fail "the network is not blocked"; fi
+    NET="blocked and probed"
     ;;
 esac
+echo "smoke-tex-seed: network: $NET"
 
 n=0
 compile() { # label dir
@@ -88,6 +98,8 @@ compile() { # label dir
     "$DIR/tectonic$EXE" "$main" --outdir .out --synctex --keep-logs --untrusted -Z continue-on-errors $ONLY --bundle "$URL") >"$log" 2>&1 \
     || { cat "$log" >&2; fail "$label did not compile offline"; }
   if grep -qi 'downloading' "$log"; then grep -i downloading "$log" >&2; fail "$label downloaded files"; fi
+  # continue-on-errors exits 0 with a broken PDF when a file is missing: any error fails.
+  if grep -Eq '^error:|failed to download|not available in the cache' "$log"; then cat "$log" >&2; fail "$label reported errors"; fi
   stem=${main%.tex}
   [ "$(head -c 4 "$proj/.out/$stem.pdf")" = "%PDF" ] || fail "$label produced no PDF"
   [ -s "$proj/.out/$stem.synctex.gz" ] || fail "$label produced no synctex data"
@@ -127,4 +139,4 @@ edit=$(cd "$sync" && "$SYNC" edit -o "1:$x:$y:$pdf" 2>&1) || true
 printf '%s\n' "$edit" | grep -q '^Input:.*main\.tex' || { printf '%s\n' "$edit" >&2; fail "synctex edit found no source"; }
 printf '%s\n' "$edit" | grep -q '^Line:3$' || { printf '%s\n' "$edit" >&2; fail "synctex edit found the wrong line"; }
 echo "smoke-tex-seed: synctex round trip ok"
-echo "smoke-tex-seed: ok ($OS, $n documents)"
+echo "smoke-tex-seed: ok ($OS, $n documents, network: $NET)"
