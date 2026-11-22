@@ -78,9 +78,22 @@ stop() {
   wait "$SERVER_PID" 2>/dev/null || true
   SERVER_PID=
 }
-digest() { # a hash of the person's data: projects, database and key (content and mtime)
-  (cd "$DATA" && find projects refract.db secret.key -type f 2>/dev/null | LC_ALL=C sort \
-    | while read -r f; do printf '%s %s ' "$f" "$(python3 -I -c 'import os,sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$f")"; python3 -I -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$f"; done)
+digest() { # the person's data: projects, database and key (path, mtime and SHA-256 of every file)
+  python3 -I - "$DATA" <<'PY'
+import hashlib, os, sys
+root = sys.argv[1]
+paths = []
+for top in ("projects", "refract.db", "secret.key"):
+    full = os.path.join(root, top)
+    if os.path.isdir(full):
+        for d, _, names in os.walk(full):
+            paths += [os.path.join(d, n) for n in names]
+    elif os.path.exists(full):
+        paths.append(full)
+for p in sorted(paths):
+    with open(p, "rb") as f:
+        print(os.path.relpath(p, root), os.stat(p).st_mtime_ns, hashlib.sha256(f.read()).hexdigest())
+PY
 }
 
 # 1. First run on an empty profile, from a read-only install.
