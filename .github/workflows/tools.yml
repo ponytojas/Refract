@@ -129,6 +129,7 @@ jobs:
           go-version-file: go.mod
       - name: Offline first PDF with refract local
         if: matrix.os != 'windows'
+        timeout-minutes: 15
         run: |
           CGO_ENABLED=0 go build -o "$RUNNER_TEMP/refract" ./cmd/refract
           scripts/smoke-offline.sh "$RUNNER_TEMP/refract" "$PWD/runtime" '${{ matrix.os }}'
