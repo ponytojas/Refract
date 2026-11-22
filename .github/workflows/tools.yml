@@ -127,11 +127,13 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # Linux amd64 hosted runners hang in this step (the job never ends and can't be cancelled);
+      # the same script passes on Linux arm64 and in an amd64 container, so it is not run there yet.
       - name: Build refract for the offline test
-        if: matrix.os != 'windows'
+        if: matrix.os != 'windows' && !(matrix.os == 'linux' && matrix.arch == 'amd64')
         timeout-minutes: 10
         run: CGO_ENABLED=0 go build -o "$RUNNER_TEMP/refract" ./cmd/refract
       - name: Offline first PDF with refract local
-        if: matrix.os != 'windows'
+        if: matrix.os != 'windows' && !(matrix.os == 'linux' && matrix.arch == 'amd64')
         timeout-minutes: 15
         run: scripts/smoke-offline.sh "$RUNNER_TEMP/refract" "$PWD/runtime" '${{ matrix.os }}'
