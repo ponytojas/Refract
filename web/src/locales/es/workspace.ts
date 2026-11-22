@@ -150,6 +150,22 @@ export default {
   '{n} files read from outside the project': '{n} archivos leídos desde fuera del proyecto',
   'Compile to preview': 'Compila para previsualizar',
   'Compiling…': 'Compilando…',
+  'Downloading {n} file · {file}': 'Descargando {n} archivo · {file}',
+  'Downloading {n} files · {file}': 'Descargando {n} archivos · {file}',
+  'Can’t reach the package server…': 'No se puede acceder al servidor de paquetes…',
+  'Needs a download': 'Necesita una descarga',
+  'Download interrupted': 'Descarga interrumpida',
+  'This document needs files that aren’t on this computer yet':
+    'Este documento necesita archivos que aún no están en este equipo',
+  'Your document is saved. Connect to the internet and try again.':
+    'Tu documento está guardado. Conéctate a internet e inténtalo de nuevo.',
+  'Compile again': 'Compilar de nuevo',
+  'Still downloading when the time ran out. What was downloaded is kept: compile again to continue.':
+    'Se seguía descargando cuando se agotó el tiempo. Lo descargado se conserva: compila de nuevo para continuar.',
+  'Downloaded {n} file. It’s kept on this computer for offline use.':
+    'Se descargó {n} archivo. Se conserva en este equipo para usarlo sin conexión.',
+  'Downloaded {n} files. They’re kept on this computer for offline use.':
+    'Se descargaron {n} archivos. Se conservan en este equipo para usarlo sin conexión.',
   'Could not compile': 'No se pudo compilar',
   Cancelled: 'Cancelada',
   '{n} error': '{n} error',

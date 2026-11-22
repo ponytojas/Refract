@@ -1,0 +1,35 @@
+note: Running TeX ...
+note: downloading siunitx.sty
+warning: failure fetching "siunitx.sty" from network (1/3)
+caused by: error sending request for url (https://relay.fullyjustified.net/default_bundle_v33.tar)
+caused by: client error (Connect)
+caused by: tcp connect error
+caused by: Operation not permitted (os error 1)
+warning: failure fetching "siunitx.sty" from network (2/3)
+caused by: error sending request for url (https://relay.fullyjustified.net/default_bundle_v33.tar)
+caused by: client error (Connect)
+caused by: tcp connect error
+caused by: Operation not permitted (os error 1)
+warning: failure fetching "siunitx.sty" from network (3/3)
+caused by: error sending request for url (https://relay.fullyjustified.net/default_bundle_v33.tar)
+caused by: client error (Connect)
+caused by: tcp connect error
+caused by: Operation not permitted (os error 1)
+warning: open of input siunitx.sty failed
+caused by: failed to download "siunitx.sty"; please check your network connection.
+note: downloading siunitx.sty
+warning: failure fetching "siunitx.sty" from network (1/3)
+caused by: error sending request for url (https://relay.fullyjustified.net/default_bundle_v33.tar)
+caused by: client error (Connect)
+caused by: tcp connect error
+caused by: Operation not permitted (os error 1)
+warning: failure fetching "siunitx.sty" from network (2/3)
+caused by: error sending request for url (https://relay.fullyjustified.net/default_bundle_v33.tar)
+caused by: client error (Connect)
+caused by: tcp connect error
+caused by: Operation not permitted (os error 1)
+warning: failure fetching "siunitx.sty" from network (3/3)
+caused by: error sending request for url (https://relay.fullyjustified.net/default_bundle_v33.tar)
+caused by: client error (Connect)
+caused by: tcp connect error
+caused by: Operation not permitted (os error 1)

@@ -1,0 +1,17 @@
+note: generating format "latex"
+note: downloading tectonic-format-latex.tex
+note: downloading xelatex.ini
+note: downloading latex.ltx
+note: downloading texsys.cfg
+note: downloading expl3.ltx
+note: downloading expl3-code.tex
+note: downloading cmr10.tfm
+note: downloading UnicodeData.txt
+note: downloading glyphlist.txt
+note: Running TeX ...
+note: downloading article.cls
+note: downloading size10.clo
+note: downloading lmroman10-regular.otf
+note: Running xdvipdfmx ...
+note: downloading pdftex.map
+note: downloading kanjix.map

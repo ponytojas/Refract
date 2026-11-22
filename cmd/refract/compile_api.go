@@ -22,10 +22,23 @@ type compileAPI struct {
 
 func (a *compileAPI) routes(rt *router) {
 	rt.project("POST /api/projects/{id}/compile", access.Owner, a.compile)
+	rt.project("GET /api/projects/{id}/compile/activity", access.Owner, a.activity)
 	rt.project("GET /api/projects/{id}/pdf", access.Owner, a.output(".pdf", "application/pdf"))
 	rt.project("GET /api/projects/{id}/log", access.Owner, a.output(".log", "text/plain; charset=utf-8"))
 	rt.project("GET /api/projects/{id}/synctex/forward", access.Owner, a.forward)
 	rt.project("GET /api/projects/{id}/synctex/inverse", access.Owner, a.inverse)
+}
+
+// activity tells what the project's running compile is doing, so the page
+// can show downloads while the compile request is still open.
+func (a *compileAPI) activity(w http.ResponseWriter, r *http.Request) {
+	p, err := a.svc.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		projectError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, a.runner.Activity(p.ID))
 }
 
 // forward: ?file=&line=&col= → boxes on the PDF.

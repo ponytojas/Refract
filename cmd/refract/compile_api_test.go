@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/auth"
@@ -197,4 +199,71 @@ func TestOutputDownloadsAreConfined(t *testing.T) {
 		link(t, outside, build)
 		refused(t, id)
 	})
+}
+
+func TestCompileActivity(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs sh")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "tectonic")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'note: downloading siunitx.sty'\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(filepath.Join(dir, "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	svc := &projects.Service{DB: db, Dir: filepath.Join(dir, "projects"), Limits: projects.DefaultLimits}
+	runner := &compile.Runner{Compiler: &compile.Tectonic{Bin: bin, Timeout: time.Minute}}
+	mux := http.NewServeMux()
+	(&compileAPI{svc: svc, runner: runner}).routes(&router{mux: mux, acc: &access.Checker{DB: db}})
+
+	ana := auth.WithUser(context.Background(), auth.User{ID: "ana"})
+	bob := auth.WithUser(context.Background(), auth.User{ID: "bob"})
+	p, err := svc.Create(ana, "Paper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.WriteFile(ana, p.ID, "main.tex", strings.NewReader(`\documentclass{article}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetMainFile(ana, p.ID, "main.tex"); err != nil {
+		t.Fatal(err)
+	}
+	get := func(ctx context.Context) (int, compile.Activity) {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/projects/"+p.ID+"/compile/activity", nil).WithContext(ctx))
+		var a compile.Activity
+		json.Unmarshal(w.Body.Bytes(), &a)
+		return w.Code, a
+	}
+	if code, a := get(ana); code != 200 || a.State != "idle" {
+		t.Fatalf("idle: %d %+v", code, a)
+	}
+	ctx, cancel := context.WithCancel(ana)
+	done := make(chan struct{})
+	go func() {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/projects/"+p.ID+"/compile", nil).WithContext(ctx))
+		close(done)
+	}()
+	var a compile.Activity
+	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
+		if _, a = get(ana); a.State == "downloading" {
+			break
+		}
+	}
+	if a.State != "downloading" || a.File != "siunitx.sty" || a.Downloaded != 1 {
+		t.Fatalf("during: %+v", a)
+	}
+	if code, _ := get(bob); code != http.StatusNotFound {
+		t.Errorf("another user's project: %d, want 404", code)
+	}
+	cancel()
+	<-done
+	if _, a := get(ana); a.State != "idle" {
+		t.Errorf("after: %+v", a)
+	}
 }

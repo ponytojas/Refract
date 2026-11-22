@@ -5,7 +5,10 @@ import {
   ChevronRight,
   CircleX,
   FileWarning,
+  CloudOff,
+  Download,
   Loader2,
+  RefreshCw,
   ScrollText,
   Sparkles,
 } from 'lucide-react'
@@ -15,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { t, tn } from '@/lib/i18n'
+import { compileView, type Activity, type Downloads } from '@/lib/compile-state'
 
 export type Problem = { severity: 'error' | 'warning'; kind: string; file?: string; line?: number; message: string }
 export type CompileResult = {
@@ -26,12 +30,15 @@ export type CompileResult = {
   duration_ms: number
   pdf?: string
   checkpoint: boolean
+  downloads?: Downloads
 }
 
 type Props = {
   projectId: string
   compiling: boolean
   result: CompileResult | null
+  activity?: Activity | null
+  onRetry?: () => void // compile again, e.g. after reconnecting
   error: string
   onJump: (file: string, line: number) => void
   onFix?: (problems: Problem[]) => void // ask the assistant; absent when AI is unavailable
@@ -50,7 +57,16 @@ const groups = [
 ]
 
 // The compile state as a chip; click for problems and the log.
-export default function CompileStatus({ projectId, compiling, result, error, onJump, onFix }: Props) {
+export default function CompileStatus({
+  projectId,
+  compiling,
+  result,
+  activity = null,
+  onRetry,
+  error,
+  onJump,
+  onFix,
+}: Props) {
   const [checks, setChecks] = useState<Warning[]>([])
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState<number[]>([])
@@ -69,6 +85,7 @@ export default function CompileStatus({ projectId, compiling, result, error, onJ
   // Errors first: they stop the build; warnings keep the log's order.
   const main = problems
     .filter((x) => !groups.some((g) => g.kinds.includes(x.kind)))
+    .filter((x) => x.kind !== 'download') // the notice above the list says it better
     .sort((a, b) => Number(b.severity === 'error') - Number(a.severity === 'error'))
   const portability: Problem[] = checks.map((w) => ({
     severity: 'warning',
@@ -85,14 +102,27 @@ export default function CompileStatus({ projectId, compiling, result, error, onJ
       }
     : undefined
 
+  const view = compileView({ compiling, activity, result })
   let icon = <CheckCircle2 className="text-success" />
   let label = t('Compile to preview')
-  if (compiling) {
+  if (view.kind === 'downloading') {
+    icon = <Download className="animate-pulse text-muted-foreground" />
+    label = tn(view.count, 'Downloading {n} file · {file}', 'Downloading {n} files · {file}', { file: view.file })
+  } else if (view.kind === 'retrying') {
+    icon = <Loader2 className="animate-spin text-warning" />
+    label = t('Can’t reach the package server…')
+  } else if (compiling) {
     icon = <Loader2 className="animate-spin text-muted-foreground" />
     label = t('Compiling…')
   } else if (error) {
     icon = <CircleX className="text-destructive" />
     label = t('Could not compile')
+  } else if (view.kind === 'needs-download') {
+    icon = <CloudOff className="text-warning" />
+    label = t('Needs a download')
+  } else if (view.kind === 'interrupted') {
+    icon = <CloudOff className="text-warning" />
+    label = t('Download interrupted')
   } else if (result?.superseded) {
     label = t('Cancelled')
   } else if (result && errors > 0) {
@@ -100,6 +130,7 @@ export default function CompileStatus({ projectId, compiling, result, error, onJ
     label = tn(errors, '{n} error', '{n} errors')
   } else if (result) {
     label = t('Compiled · {seconds}s', { seconds: (result.duration_ms / 1000).toFixed(1) })
+    if (view.kind === 'downloaded') icon = <Download className="text-success" />
     if (warnings > 0) icon = <AlertTriangle className="text-warning" />
   } else if (!result && checks.length) {
     icon = <AlertTriangle className="text-warning" />
@@ -132,6 +163,10 @@ export default function CompileStatus({ projectId, compiling, result, error, onJ
             <span className="text-xs text-muted-foreground">· {tn(warnings, '{n} warning', '{n} warnings')}</span>
           )}
         </PopoverTrigger>
+        {/* The chip's name stays fixed: say the network states out loud, not every file downloaded */}
+        <span aria-live="polite" className="sr-only">
+          {['retrying', 'needs-download', 'interrupted'].includes(view.kind) ? label : ''}
+        </span>
         <PopoverContent align="start" className="max-h-[60vh] w-[26rem] overflow-auto p-0">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-sm font-medium">{t('Problems')}</span>
@@ -147,6 +182,56 @@ export default function CompileStatus({ projectId, compiling, result, error, onJ
             </span>
           </div>
           {error && <p className="px-3 py-2 text-sm text-destructive">{error}</p>}
+          {!compiling && view.kind === 'needs-download' && (
+            <div className="space-y-2 border-b bg-warning/10 px-3 py-3">
+              <p className="text-sm font-medium">{t('This document needs files that aren’t on this computer yet')}</p>
+              {view.files.length > 0 && (
+                <p className="font-mono text-xs break-words text-muted-foreground">{view.files.join(', ')}</p>
+              )}
+              <p className="text-sm text-muted-foreground">
+                {t('Your document is saved. Connect to the internet and try again.')}
+              </p>
+              {onRetry && (
+                <Button
+                  size="xs"
+                  onClick={() => {
+                    setOpen(false)
+                    onRetry()
+                  }}
+                >
+                  <RefreshCw /> {t('Try again')}
+                </Button>
+              )}
+            </div>
+          )}
+          {!compiling && view.kind === 'interrupted' && (
+            <div className="space-y-2 border-b bg-warning/10 px-3 py-3">
+              <p className="text-sm font-medium">{t('Download interrupted')}</p>
+              <p className="text-sm text-muted-foreground">
+                {t('Still downloading when the time ran out. What was downloaded is kept: compile again to continue.')}
+              </p>
+              {onRetry && (
+                <Button
+                  size="xs"
+                  onClick={() => {
+                    setOpen(false)
+                    onRetry()
+                  }}
+                >
+                  <RefreshCw /> {t('Compile again')}
+                </Button>
+              )}
+            </div>
+          )}
+          {!compiling && view.kind === 'downloaded' && (
+            <p className="border-b px-3 py-2 text-sm text-muted-foreground">
+              {tn(
+                view.count,
+                'Downloaded {n} file. It’s kept on this computer for offline use.',
+                'Downloaded {n} files. They’re kept on this computer for offline use.',
+              )}
+            </p>
+          )}
           <ul className="divide-y">
             <ProblemRows problems={main} onJump={(f, l) => (setOpen(false), onJump(f, l))} onFix={fix} />
             {groups.map((g, gi) => {

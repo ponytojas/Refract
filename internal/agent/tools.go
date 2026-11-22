@@ -303,7 +303,7 @@ func (t *Tools) compile(ctx context.Context, includeLog bool) (string, string, e
 	}
 	var b strings.Builder
 	switch {
-	case res.TimedOut:
+	case res.TimedOut && !res.Downloads.Interrupted: // an interrupted download explains itself among the errors
 		b.WriteString("Compilation timed out (possible infinite loop).\n")
 	case len(errs) == 0:
 		b.WriteString("Compiled without errors.\n")

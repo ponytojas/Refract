@@ -65,6 +65,7 @@ import CitationChecks, { type CitationFix } from './CitationChecks'
 import { Autosaver, type SaveStatus } from './autosave'
 import { noSymbols, type ProjectSymbols } from '@/lib/completion'
 import { Link, navigate, pageReady, useBeforeLeave } from '@/lib/router'
+import { pdfChanged, type Activity } from '@/lib/compile-state'
 import CompileStatus, { type CompileResult, type Problem } from './CompileStatus'
 import Editor from './Editor'
 import { moveLimits } from '@/lib/wordlimits'
@@ -183,6 +184,9 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   const [compiling, setCompiling] = useState(false)
   const [result, setResult] = useState<CompileResult | null>(null)
   const [compileError, setCompileError] = useState('')
+  const [activity, setActivity] = useState<Activity | null>(null)
+  const stopPolling = useRef(() => {}) // the running compile's activity polling
+  useEffect(() => () => stopPolling.current(), [])
   const [jump, setJump] = useState<{ path: string; line: number; n: number } | undefined>()
   const [pdfVersion, setPdfVersion] = useState(0)
   const [highlight, setHighlight] = useState<Highlight | undefined>()
@@ -500,14 +504,35 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     if (locked) return
     setCompiling(true)
     setCompileError('')
+    // A first compile may download for a minute: ask what it is doing, from 0.8 s in, every second.
+    stopPolling.current()
+    setActivity(null)
+    let polling = true
+    let poll: ReturnType<typeof setInterval> | undefined
+    const ask = () =>
+      api<Activity>(`/api/projects/${id}/compile/activity`)
+        .then((a) => polling && setActivity(a)) // an answer after the compile ended is stale
+        .catch(() => {})
+    const first = setTimeout(() => {
+      ask()
+      poll = setInterval(ask, 1000)
+    }, 800)
+    const stop = () => {
+      polling = false
+      clearTimeout(first)
+      clearInterval(poll)
+    }
+    stopPolling.current = stop
     try {
       await autosave.flushAll() // compile what is on screen
       const res = await api<CompileResult>(`/api/projects/${id}/compile`, { method: 'POST' })
       setResult(res)
-      if (res.pdf) setPdfVersion((v) => v + 1)
+      if (pdfChanged(res)) setPdfVersion((v) => v + 1)
     } catch (e) {
       setCompileError(errorText(e))
     } finally {
+      stop()
+      setActivity(null)
       setCompiling(false)
     }
   }
@@ -1644,6 +1669,8 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
                     projectId={id}
                     compiling={compiling}
                     result={result}
+                    activity={activity}
+                    onRetry={compile}
                     error={compileError}
                     onJump={jumpTo}
                     onFix={aiReady && !locked ? fixWithAI : undefined}
