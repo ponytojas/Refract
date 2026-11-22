@@ -365,3 +365,36 @@ func TestFindSeedSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestSeedReplacesDamagedSameSizeFileUnlessMarked(t *testing.T) {
+	cache := t.TempDir()
+	v1 := newSeed(t, "a", baseFiles())
+	if _, err := v1.Apply(cache); err != nil {
+		t.Fatal(err)
+	}
+	cls := filepath.Join(cache, "bundles", "data", testDigest, "article.cls")
+	if err := os.WriteFile(cls, []byte("CLASS"), 0o644); err != nil { // same size, other bytes
+		t.Fatal(err)
+	}
+	// The marker names this seed: sizes are trusted, nothing is read.
+	if res, err := v1.Apply(cache); err != nil || res.Copied != 0 {
+		t.Fatalf("marked cache %+v %v", res, err)
+	}
+	// An update (another seed id) checks the contents and repairs the file.
+	v2 := newSeed(t, "b", baseFiles())
+	if res, err := v2.Apply(cache); err != nil || res.Copied != 1 || res.Present != 3 {
+		t.Fatalf("update %+v %v", res, err)
+	}
+	if read(t, cls) != "class" {
+		t.Error("the damaged file was kept")
+	}
+	// So does a cache that lost its marker.
+	os.WriteFile(cls, []byte("CLASS"), 0o644)
+	os.Remove(filepath.Join(cache, SeedMarker))
+	if err := v2.Ensure(cache); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, cls) != "class" {
+		t.Error("Ensure kept the damaged file")
+	}
+}

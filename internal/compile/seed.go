@@ -59,7 +59,7 @@ type seedJSON struct {
 // SeedResult says what Apply did.
 type SeedResult struct {
 	Copied  int
-	Present int // already in the cache with the right size
+	Present int // already in the cache (right size; right SHA-256 unless the marker named this seed)
 	Bytes   int64
 }
 
@@ -119,10 +119,13 @@ func loadSeed(dir string) (*Seed, error) {
 	return &Seed{Dir: dir, ID: m.ID, BundleURL: m.Bundle.URL, BundleDigest: m.Bundle.Digest, files: files}, nil
 }
 
-// Apply fills cacheDir from the seed. A file already there with the size of
-// the seed's is left alone; anything else is copied through a temporary file
-// whose SHA-256 is checked, and renamed into place. Nothing is deleted. The
-// marker is written last, so a stopped or failed Apply is repeated in full.
+// Apply fills cacheDir from the seed. When the marker already names this seed,
+// a file there with the size of the seed's is left alone; otherwise (a first
+// run, an update, a cache that lost its marker) a file already there is kept
+// only when its SHA-256 matches, so a damaged copy is not trusted forever.
+// Anything else is copied through a temporary file whose SHA-256 is checked,
+// and renamed into place. Nothing is deleted. The marker is written last, so a
+// stopped or failed Apply is repeated in full.
 // The cache is opened as a root, so a symlink in it can't send a write
 // elsewhere; a symlink where a seed file belongs is an error.
 func (s *Seed) Apply(cacheDir string) (SeedResult, error) {
@@ -162,13 +165,14 @@ func (s *Seed) apply(cacheDir string) (SeedResult, error) {
 		return res, err
 	}
 	defer root.Close()
+	verify := !s.markedBy(root)
 	rels := make([]string, 0, len(s.files))
 	for rel := range s.files {
 		rels = append(rels, rel)
 	}
 	sort.Strings(rels)
 	for _, rel := range rels {
-		copied, n, err := s.install(root, rel)
+		copied, n, err := s.install(root, rel, verify)
 		if err != nil {
 			return res, err
 		}
@@ -186,7 +190,34 @@ func (s *Seed) apply(cacheDir string) (SeedResult, error) {
 	return res, nil
 }
 
-func (s *Seed) install(root *os.Root, rel string) (copied bool, n int64, err error) {
+// markedBy reports whether the cache's marker names this seed.
+func (s *Seed) markedBy(root *os.Root) bool {
+	f, err := root.Open(SeedMarker)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var m struct {
+		Seed string `json:"seed"`
+	}
+	return json.NewDecoder(io.LimitReader(f, 4096)).Decode(&m) == nil && m.Seed == s.ID
+}
+
+// matches reports whether the cache file rel has the seed's SHA-256.
+func (s *Seed) matches(root *os.Root, rel string) bool {
+	f, err := root.Open(rel)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return false
+	}
+	return hex.EncodeToString(h.Sum(nil)) == s.files[rel]
+}
+
+func (s *Seed) install(root *os.Root, rel string, verify bool) (copied bool, n int64, err error) {
 	src, err := os.Open(filepath.Join(s.Dir, filepath.FromSlash(path.Join("cache", rel))))
 	if err != nil {
 		return false, 0, err
@@ -203,7 +234,7 @@ func (s *Seed) install(root *os.Root, rel string) (copied bool, n int64, err err
 		return false, 0, err
 	}
 	switch have, err := root.Lstat(rel); {
-	case err == nil && have.Mode().IsRegular() && have.Size() == fi.Size():
+	case err == nil && have.Mode().IsRegular() && have.Size() == fi.Size() && (!verify || s.matches(root, rel)):
 		return false, 0, nil
 	case err == nil && !have.Mode().IsRegular():
 		return false, 0, fmt.Errorf("the cache has %s, which is not a regular file: move it away", rel)
