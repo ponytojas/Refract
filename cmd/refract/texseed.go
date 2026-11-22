@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"path/filepath"
+	"time"
 
 	"github.com/ponytojas/Refract/internal/compile"
 )
@@ -54,12 +55,13 @@ func setupTeXSeed(getenv func(string) string, dataDir, sandbox string) texSetup 
 		slog.Warn("TeX seed not used", "err", err)
 		return plain
 	}
+	start := time.Now()
 	res, err := seed.Apply(cache)
 	if err != nil {
 		slog.Error("TeX seed not applied; Tectonic downloads what documents need", "seed", seed.Dir, "cache", cache, "err", err)
 		return plain
 	}
-	slog.Info("TeX seed ready", "seed", seed.Dir, "cache", cache, "copied", res.Copied, "present", res.Present, "mb", res.Bytes>>20)
+	slog.Info("TeX seed ready", "seed", seed.Dir, "cache", cache, "copied", res.Copied, "present", res.Present, "mb", res.Bytes>>20, "ms", time.Since(start).Milliseconds())
 	if res.Copied > 0 {
 		excludeFromBackup(cache)
 	}
