@@ -20,6 +20,10 @@ on:
       - scripts/build-*.sh
       - scripts/smoke-tools.sh
       - scripts/smoke-tex-seed.sh
+      - scripts/smoke-offline.*
+      - internal/compile/seed*.go
+      - internal/tools/**
+      - cmd/refract/texseed.go
       - scripts/*tex-seed*
       - internal/projects/templates/**
       - packaging/tex-seed/**
@@ -117,3 +121,14 @@ jobs:
         run: scripts/smoke-tools.sh "$PWD/runtime" '${{ matrix.os }}'
       - name: Compile offline from the TeX seed
         run: scripts/smoke-tex-seed.sh "$PWD/runtime" '${{ matrix.os }}'
+      # The first PDF of `refract local` on an empty profile with the network blocked, from a
+      # read-only install: every template, a missing package, and an update that keeps the data.
+      # Windows is not covered: blocking its network needs an administrator.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Offline first PDF with refract local
+        if: matrix.os != 'windows'
+        run: |
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/refract" ./cmd/refract
+          scripts/smoke-offline.sh "$RUNNER_TEMP/refract" "$PWD/runtime" '${{ matrix.os }}'

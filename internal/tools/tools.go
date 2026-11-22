@@ -95,6 +95,21 @@ func exeName(name string) string {
 	return name
 }
 
+// Resource is the path of a file or folder shipped next to the tools (the
+// bundled folder's `name`), or "" when it isn't there or the location isn't
+// trusted (see trusted).
+func Resource(name string) string {
+	dir := Dir()
+	if dir == "" {
+		return ""
+	}
+	p := filepath.Join(dir, name)
+	if _, err := os.Stat(p); err != nil || !trusted(dir, p) {
+		return ""
+	}
+	return filepath.Clean(p)
+}
+
 // bundled is where name lives inside Dir().
 func bundled(dir, name string) string {
 	if name == "git" {

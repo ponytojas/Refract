@@ -367,7 +367,8 @@ class ToolsArchiveTests(unittest.TestCase):
     def test_tools_workflow_builds_and_smokes_the_seed(self):
         tools = (ROOT / ".github/workflows/tools.yml").read_text()
         for phrase in ("seed:", "needs: seed", "TEX_SEED_DIR", "smoke-tex-seed.sh", "name: tex-seed",
-                       "internal/projects/templates/**", "packaging/tex-seed/**", "scripts/*tex-seed*"):
+                       "internal/projects/templates/**", "packaging/tex-seed/**", "scripts/*tex-seed*",
+                       "smoke-offline.sh"):
             self.assertIn(phrase, tools)
         self.assertIn("TEX_SEED_DIR", (ROOT / "scripts/build-tools.sh").read_text())
 

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path"
@@ -50,6 +51,7 @@ type Tectonic struct {
 	Timeout  time.Duration
 	Fonts    *fonts.Resolver // optional automatic family resolution; shared across builds
 	Sandbox  *Sandbox        // run tectonic inside it; nil = run it directly
+	Seed     *Seed           // already applied to CacheDir; restored when the cache is emptied
 }
 
 const maxOutput = 1 << 20
@@ -68,6 +70,11 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 	defer out.Close()
 	if testHookOutDirOpened != nil {
 		testHookOutDirOpened(projectDir)
+	}
+	if t.Seed != nil && t.CacheDir != "" {
+		if err := t.Seed.Ensure(t.CacheDir); err != nil {
+			slog.Warn("TeX seed not restored; Tectonic downloads what it needs", "err", err)
+		}
 	}
 	base := path.Base(mainFile)
 	stem := strings.TrimSuffix(base, path.Ext(base))

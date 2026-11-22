@@ -166,12 +166,28 @@ as before when there is a network; the seed does not make that fail.
 (527 files), 7.7 MB compressed (`tar.gz` of `tex-seed/` and `licenses/tex/`), the same in every
 archive.
 
+**Use.** `refract local` (internal/compile/seed.go, cmd/refract/texseed.go) finds the seed with
+`tools.Resource("tex-seed")` (the tools folder, subject to the same trust check as the tools; `REFRACT_TEX_SEED`
+overrides it, `none` turns it off), copies it into `TECTONIC_CACHE_DIR` or `<data dir>/tectonic-cache` through
+`os.OpenRoot` (no symlink is followed), verifying each file's SHA-256 and writing `refract-seed.json` last,
+and passes `--bundle <seed bundle URL>`. It never deletes: a changed seed adds or replaces only its own
+files. A cache without the marker is seeded again before the next compile. It is off for the plain server,
+when `REFRACT_TECTONIC_BUNDLE` names another bundle and when the bwrap sandbox is on. Installers need
+nothing else: ship `tex-seed/` next to the tools, read-only. `scripts/smoke-offline.sh` tests it end to end.
+
 **Smoke test.** `scripts/smoke-tex-seed.sh <extracted-dir> <os>` (run by the `smoke` job after the
 tools smoke test) verifies `seed.json` against the files, then, with a read-only runtime, an empty home
 and a copy of the seed as the only cache, compiles every covered project and document, asserting no
 `downloading` line, a `%PDF` output and SyncTeX data, and a `synctex view` / `synctex edit` round trip.
 The network is blocked: macOS `sandbox-exec`, Linux `sudo unshare -n` (then `setpriv` back to the
 user), Windows a firewall rule on `tectonic.exe` plus `--only-cached`.
+
+**Offline smoke test.** `scripts/smoke-offline.sh <refract> <extracted-dir> <os>` (the `smoke` job builds the binary
+and runs it on macOS and Linux) runs the whole of `refract local` with the network blocked, from a read-only
+install with a fresh home and data folder: every template in en and es compiles with no download and a SyncTeX
+round trip, a package outside the seed is reported as a needed download within a second, and after an update with
+another seed id the projects, `refract.db` and `secret.key` are byte-identical while downloaded files stay and the
+marker changes. Windows isn't covered (blocking its network needs an administrator).
 
 **Licences.** The files are TeX Live packages under many free licences (mostly LPPL; also GPL, MIT,
 OFL, the GUST Font License, Knuth's licence, Apache-2.0 for the glyph lists, and the licence stated in

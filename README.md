@@ -161,7 +161,23 @@ It needs no configuration. It opens Refract in your browser and keeps running un
 - **The secret key** that protects stored passwords and API keys is created on first run as `secret.key` in that folder, readable only by you (Refract refuses to start if other users can read it). Back it up with the folder: without it, stored credentials can't be read back. If `REFRACT_SECRET_KEY` is set, Refract uses it instead and doesn't create the file. On Windows the file has the folder's permissions; `%LocalAppData%` is private to your account, so choose an equally private folder if you set `REFRACT_DATA_DIR`.
 - **There is no sign-in**, so Refract only listens on this computer's loopback address: other computers can't reach it. `REFRACT_ADDR` may choose another address on `127.0.0.1` or `[::1]` instead of `--port` (not both); any other address is refused before anything listens. `REFRACT_AUTH` is ignored, and `REFRACT_MODE=saas` and `REFRACT_PROFILE=team` are refused: they are for the server, `refract` without `local`. Other `REFRACT_*` variables work as for the server.
 
+- **The first PDF works offline.** Installers ship a [TeX seed](#offline-first-pdf): `refract local` copies it into `tectonic-cache/` in the data folder at startup, so the starter templates compile with no network and no first-use download.
+
 Run one `refract local` per data folder at a time. To share Refract with other people, [deploy](#deploy) it with sign-in instead.
+
+### Offline first PDF
+
+Tectonic downloads the LaTeX files a document needs the first time, which on an empty cache takes minutes and fails without a network. The tools that ship with Refract (the folder described in [Where Refract finds its tools](#where-refract-finds-its-tools)) therefore include a **TeX seed** in `tex-seed/`: the 525 bundle files and index that these need, pinned to one Tectonic bundle (TeX Live 2022):
+
+- every built-in template (article, thesis, presentation, letter, CV), in English and Spanish;
+- a plain `article` at 10 pt and 12 pt;
+- a common set of packages: `amsmath`, `amsthm`, `graphicx`, `booktabs`, `xcolor`, `tikz`, `siunitx`, `listings`, `natbib`, `hyperref`, `cleveref` and `lmodern` with T1 fonts.
+
+It is 25 MB installed (7.7 MB compressed in the download). When `refract local` starts it copies the seed into the compile cache (`TECTONIC_CACHE_DIR`, or `tectonic-cache/` in the data folder), and compiles with the seed's bundle. The copy is verified with SHA-256, only adds or replaces the seed's own files (a package you downloaded stays, and so do the files of older bundles) and is repeated if the cache is emptied; on macOS the cache is excluded from Time Machine. Tectonic builds its 23 MB format file from it on the first compile, in about a second. Updating Refract refreshes only the files that changed; your projects, `refract.db` and `secret.key` are never touched, and the installation itself can be read-only.
+
+A document that needs another package downloads it as before when you are online, and keeps it in the cache for later offline compiles. Offline, Refract says that a download is needed and keeps your document: compile again once you are connected.
+
+The seed is used only by `refract local`; the server (`refract` without `local`) keeps Tectonic's own cache. `REFRACT_TEX_SEED` names another seed folder or turns it off with `none`. It is skipped, with a line in the log, when `REFRACT_TECTONIC_BUNDLE` names another bundle or `REFRACT_SANDBOX=bwrap` is on. [Packaging](packaging/README.md#tex-seed) describes how it is built and tested.
 
 ### Run it with Docker
 
@@ -383,7 +399,7 @@ Everything lives in the `/data` volume:
 | `refract.db` | Users, sessions, projects, chats and settings (SQLite). Credentials and keys in it are encrypted with `REFRACT_SECRET_KEY`. |
 | `refract.db.pre-upgrade` | A copy of the database exactly as it was when the last upgrade started. Safe to delete once the new version works. |
 | `projects/` | One git repository per project, including those in the trash. |
-| `tectonic-cache/` | LaTeX packages Tectonic has downloaded. Safe to delete: they come back on the next compile. |
+| `tectonic-cache/` | LaTeX packages Tectonic has downloaded; with `refract local` it also holds the copy of the [TeX seed](#offline-first-pdf) (`refract-seed.json` marks it). Safe to delete: the seed comes back at the next start or compile, other packages on the next download. |
 | `tmp/` | Uploads in progress. |
 
 To back up, stop the container, copy the volume, and keep `REFRACT_SECRET_KEY` with the copy.
@@ -506,7 +522,8 @@ All settings are environment variables.
 | `REFRACT_FONT_DOWNLOADS` | `0` disables Google Fonts requests; project, TeX bundle and cached fonts still work. Default: downloads enabled. |
 | `REFRACT_GITHUB_CLIENT_ID` | Client ID of your GitHub OAuth App, to connect GitHub accounts (see below). |
 | `REFRACT_OPENALEX_API_KEY` | A free [OpenAlex key](https://openalex.org/settings/api). Without one, paper searches share a small daily budget per IP address. |
-| `REFRACT_TECTONIC_BUNDLE` | The Tectonic bundle: a URL (pinned in the image), or a local folder (required with the sandbox). |
+| `REFRACT_TECTONIC_BUNDLE` | The Tectonic bundle: a URL (pinned in the image), or a local folder (required with the sandbox). With `refract local`, unset means the [TeX seed](#offline-first-pdf)'s bundle; naming another one turns the seed off. |
+| `REFRACT_TEX_SEED` | `refract local` only: the folder of the [TeX seed](#offline-first-pdf) to copy into the compile cache, or `none`. Default: `tex-seed/` in the bundled tools folder, when it is there and trusted. |
 | `REFRACT_TECTONIC_BIN`, `REFRACT_SYNCTEX_BIN`, `REFRACT_RG_BIN`, `REFRACT_GIT_BIN` | Use this program instead of the one [Refract finds](#where-refract-finds-its-tools). A path, or a name looked up on the `PATH`. If it isn't runnable, the tool counts as missing: Refract doesn't fall back to another. |
 
 ### Where Refract finds its tools
@@ -522,6 +539,7 @@ It always runs the absolute path it found, and the startup log says what was fou
 ```text
 libexec/refract/
   tectonic  synctex  rg          (.exe on Windows)
+  tex-seed/                      the TeX seed (see Offline first PDF)
   git/
     bin/git                      macOS and Linux
     libexec/git-core/            Git's helpers

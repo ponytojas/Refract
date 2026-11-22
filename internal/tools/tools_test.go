@@ -203,3 +203,36 @@ func TestWindowsGitIsMinGit(t *testing.T) {
 		t.Errorf("MinGit finds its own helpers; env = %v", env)
 	}
 }
+
+func TestResource(t *testing.T) {
+	dir := install(t)
+	if got := Resource("tex-seed"); got != "" {
+		t.Fatalf("nothing installed, got %q", got)
+	}
+	seed := filepath.Join(dir, "tex-seed")
+	if err := os.MkdirAll(filepath.Join(seed, "cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := Resource("tex-seed"); got != seed {
+		t.Fatalf("Resource = %q, want %q", got, seed)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	for name, path := range map[string]string{"seed": seed, "folder": dir, "libexec": filepath.Dir(dir)} {
+		fi, _ := os.Stat(path)
+		mode := fi.Mode().Perm()
+		if err := os.Chmod(path, mode|0o020); err != nil {
+			t.Fatal(err)
+		}
+		if got := Resource("tex-seed"); got != "" {
+			t.Errorf("group-writable %s should be ignored, got %q", name, got)
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := Resource("tex-seed"); got != seed {
+		t.Errorf("after restoring modes: %q", got)
+	}
+}

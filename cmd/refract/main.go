@@ -122,6 +122,9 @@ type runOptions struct {
 	// ready runs in its own goroutine once the server is about to accept
 	// connections on addr; ctx ends when the server stops.
 	ready func(ctx context.Context, addr net.Addr)
+	// texSeed (refract local) fills a per-user Tectonic cache from the TeX
+	// seed of the installation, so the first compile works offline.
+	texSeed bool
 }
 
 // run serves Refract until ctx ends, then shuts down gracefully.
@@ -247,9 +250,14 @@ func run(ctx context.Context, opts runOptions) error {
 
 	fontResolver := fonts.NewResolver(filepath.Join(dataDir, "font-cache"))
 	fontResolver.Offline = os.Getenv("REFRACT_FONT_DOWNLOADS") == "0"
+	tex := texSetup{bundle: os.Getenv("REFRACT_TECTONIC_BUNDLE"), cache: os.Getenv("TECTONIC_CACHE_DIR")}
+	if opts.texSeed {
+		tex = setupTeXSeed(os.Getenv, dataDir, cfg.sandbox)
+	}
 	tectonic := &compile.Tectonic{
-		Bundle:   os.Getenv("REFRACT_TECTONIC_BUNDLE"),
-		CacheDir: os.Getenv("TECTONIC_CACHE_DIR"),
+		Bundle:   tex.bundle,
+		CacheDir: tex.cache,
+		Seed:     tex.seed,
 		Timeout:  cfg.timeout,
 		Fonts:    fontResolver,
 	}

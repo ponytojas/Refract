@@ -8,6 +8,8 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 
 - Refract finds `tectonic`, `synctex`, `rg` and `git` in a bundled `libexec/refract` folder next to the executable (the executable's own folder on Windows) before the `PATH`, and runs them by absolute path; a bundled Git uses only its own helpers and templates. `REFRACT_TECTONIC_BIN`, `REFRACT_SYNCTEX_BIN`, `REFRACT_RG_BIN` and `REFRACT_GIT_BIN` override the lookup. The startup log shows where each was found, and the web app shows one notice when a tool is missing, saying what won't work, on whichever page opens first. On macOS and Linux a bundled tool in a folder that others can write, or that another user owns, is ignored.
 
+- `refract local` compiles its first PDF offline: the tools ship a TeX seed (the LaTeX files the built-in templates in English and Spanish, a plain article and a common set of packages need), which `refract local` verifies and copies into `tectonic-cache/` in the data folder at startup and again if the cache is emptied. Updates refresh only changed files and never touch projects, the database or the key; the installation can be read-only. `REFRACT_TEX_SEED` chooses another seed or `none`; the seed is skipped when `REFRACT_TECTONIC_BUNDLE` names another bundle or the compile sandbox is on. A document that needs a package that isn't cached says so when offline and keeps your text. Closes #92.
+
 ## [0.2.0] - 2026-11-20
 
 ### Added
