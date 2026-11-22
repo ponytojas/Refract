@@ -30,7 +30,8 @@ if [ -z "${SMOKE_OFFLINE_INNER:-}" ]; then
 (allow network-outbound (remote ip "localhost:*"))' "$0" "$BIN" "$TOOLS" "$OS"
       ;;
     linux)
-      exec sudo -E unshare -n sh -c 'ip link set lo up && exec setpriv --reuid="$1" --regid="$2" --clear-groups "$3" "$4" "$5" "$6"' \
+      # A hard limit, from root's side: a step that hangs under sudo can't be killed by the CI runner.
+      exec sudo -E timeout -k 10 "${SMOKE_OFFLINE_TIMEOUT:-600}" unshare -n sh -c 'ip link set lo up && exec setpriv --reuid="$1" --regid="$2" --clear-groups "$3" "$4" "$5" "$6"' \
         sh "$(id -u)" "$(id -g)" "$0" "$BIN" "$TOOLS" "$OS"
       ;;
     *) echo "smoke-offline: unsupported os $OS" >&2; exit 2 ;;
@@ -41,11 +42,16 @@ fail() { echo "smoke-offline: $*" >&2; exit 1; }
 WORK=$(mktemp -d)
 SERVER_PID=
 cleanup() {
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    for f in "$WORK"/server*.log; do [ -f "$f" ] && { echo "--- $f (tail)" >&2; tail -n 30 "$f" >&2; }; done
+  fi
   [ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null || true
   chmod -R u+w "$WORK" 2>/dev/null || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
+trap 'exit 143' TERM
 
 # The network really is blocked.
 if curl -fsS --max-time 5 -o /dev/null https://data1b.fullyjustified.net/ 2>/dev/null; then fail "the network is not blocked"; fi
@@ -70,7 +76,7 @@ start() { # install-dir log
   env -i PATH=/usr/bin:/bin "HOME=$HOMEDIR" "REFRACT_DATA_DIR=$DATA" \
     "$1/bin/refract" local --no-browser --port "$PORT" >"$2" 2>&1 &
   SERVER_PID=$!
-  python3 -I "$ROOT/scripts/smoke-offline.py" "http://127.0.0.1:$PORT" ready \
+  python3 -I -u "$ROOT/scripts/smoke-offline.py" "http://127.0.0.1:$PORT" ready \
     || { cat "$2" >&2; fail "refract local did not start"; }
 }
 stop() {
@@ -102,7 +108,7 @@ seal "$WORK/install1"
 start "$WORK/install1" "$WORK/server1.log"
 grep -q 'TeX seed ready' "$WORK/server1.log" || { cat "$WORK/server1.log" >&2; fail "the TeX seed was not applied at startup"; }
 SEED_ID=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$TOOLS/tex-seed/seed.json")
-python3 -I "$ROOT/scripts/smoke-offline.py" "http://127.0.0.1:$PORT" compile || { cat "$WORK/server1.log" >&2; fail "compile checks failed"; }
+python3 -I -u "$ROOT/scripts/smoke-offline.py" "http://127.0.0.1:$PORT" compile || { cat "$WORK/server1.log" >&2; fail "compile checks failed"; }
 grep -q "$SEED_ID" "$DATA/tectonic-cache/refract-seed.json" || fail "the cache marker does not name the seed"
 # Tectonic used the cache under the data folder, not one in the profile.
 if [ -e "$HOMEDIR/Library/Caches/Tectonic" ] || [ -e "$HOMEDIR/.cache/Tectonic" ]; then fail "Tectonic made a cache in the home folder"; fi
@@ -143,6 +149,6 @@ grep -Eq '"copied":1,|copied=1 ' "$WORK/server2.log" || { cat "$WORK/server2.log
 
 # 3. The same projects still compile after the update.
 start "$WORK/install2" "$WORK/server3.log"
-python3 -I "$ROOT/scripts/smoke-offline.py" "http://127.0.0.1:$PORT" compile || { cat "$WORK/server3.log" >&2; fail "compile checks failed after the update"; }
+python3 -I -u "$ROOT/scripts/smoke-offline.py" "http://127.0.0.1:$PORT" compile || { cat "$WORK/server3.log" >&2; fail "compile checks failed after the update"; }
 stop
 echo "smoke-offline: ok ($OS)"

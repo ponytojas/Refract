@@ -24,7 +24,7 @@ def call(method, path, body=None, raw=False, head=None):
         data = body if isinstance(body, bytes) else json.dumps(body).encode()
         headers["Content-Type"] = "application/json" if not isinstance(body, bytes) else "text/plain"
     req = urllib.request.Request(BASE + path, data=data, method=method, headers=headers)
-    with urllib.request.urlopen(req, timeout=300) as resp:
+    with urllib.request.urlopen(req, timeout=150) as resp:
         out = resp.read(head) if head else resp.read()
     return out if raw else (json.loads(out) if out else None)
 
@@ -72,6 +72,7 @@ def main():
     for lang in ("en", "es"):
         for tid in builtin:
             label = f"{tid}/{lang}"
+            print(f"smoke-offline: {label} ...", flush=True)
             p = call("POST", "/api/projects", {"name": f"smoke {label}", "template": tid, "language": lang})
             t0 = time.time()
             res = call("POST", f"/api/projects/{p['id']}/compile")
