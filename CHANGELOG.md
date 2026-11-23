@@ -21,6 +21,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 - A compile that produces the PDF despite TeX errors now saves a version in the history too. Documents imported from Prism often keep a recoverable error on every build, and until now their history never grew.
 
 - `refract local` compiles its first PDF offline: the tools ship a TeX seed (the LaTeX files the built-in templates in English and Spanish, a plain article and a common set of packages need), which `refract local` verifies and copies into `tectonic-cache/` in the data folder at startup and again if the cache is emptied. Updates refresh only changed files and never touch projects, the database or the key; the installation can be read-only. `REFRACT_TEX_SEED` chooses another seed or `none`; the seed is skipped when `REFRACT_TECTONIC_BUNDLE` names another bundle or the compile sandbox is on. A document that needs a package that isn't cached says so when offline and keeps your text. Closes #92.
+- Upgrading `refract local`: it now compiles with the seed's pinned bundle (TeX Live 2022) in `tectonic-cache/` in the data folder, no longer with Tectonic's default bundle in Tectonic's own cache folder. Packages downloaded before belong to another bundle, so they can't be reused: a document that needs one downloads it again (or says "Needs a download" offline). Tectonic's old cache is left untouched and the log names it; to keep using it, set `TECTONIC_CACHE_DIR` and `REFRACT_TECTONIC_BUNDLE` yourself, or `REFRACT_TEX_SEED=none`.
 
 ## [0.2.0] - 2026-11-20
 

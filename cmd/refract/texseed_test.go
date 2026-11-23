@@ -123,3 +123,29 @@ func TestSetupTeXSeed(t *testing.T) {
 		}
 	})
 }
+
+func TestPreviousCache(t *testing.T) {
+	home := t.TempDir()
+	env := func(k string) string {
+		if k == "HOME" {
+			return home
+		}
+		return ""
+	}
+	if got := previousCache(env, "linux"); got != "" {
+		t.Fatalf("no cache: %q", got)
+	}
+	old := filepath.Join(home, ".cache", "Tectonic")
+	os.MkdirAll(filepath.Join(old, "bundles", "data", "abc"), 0o755)
+	if got := previousCache(env, "linux"); got != old {
+		t.Fatalf("linux: %q, want %q", got, old)
+	}
+	if got := previousCache(env, "darwin"); got != "" {
+		t.Fatalf("darwin has no cache here: %q", got)
+	}
+	mac := filepath.Join(home, "Library", "Caches", "Tectonic")
+	os.MkdirAll(filepath.Join(mac, "bundles", "data", "abc"), 0o755)
+	if got := previousCache(env, "darwin"); got != mac {
+		t.Fatalf("darwin: %q", got)
+	}
+}

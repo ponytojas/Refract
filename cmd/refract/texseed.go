@@ -2,7 +2,9 @@ package main
 
 import (
 	"log/slog"
+	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/ponytojas/Refract/internal/compile"
@@ -49,6 +51,9 @@ func setupTeXSeed(getenv func(string) string, dataDir, sandbox string) texSetup 
 	cache := envCache
 	if cache == "" {
 		cache = filepath.Join(dataDir, "tectonic-cache")
+		if old := previousCache(getenv, runtime.GOOS); old != "" {
+			slog.Info("Tectonic's own cache from before the TeX seed is left untouched and no longer used: the seed's bundle differs from Tectonic's default, so its packages can't be shared; set TECTONIC_CACHE_DIR and REFRACT_TECTONIC_BUNDLE to keep using it", "old", old, "new", cache)
+		}
 	}
 	cache, err := filepath.Abs(cache)
 	if err != nil {
@@ -66,4 +71,35 @@ func setupTeXSeed(getenv func(string) string, dataDir, sandbox string) texSetup 
 		excludeFromBackup(cache)
 	}
 	return texSetup{bundle: seed.BundleURL, cache: cache, seed: seed}
+}
+
+// previousCache is Tectonic's default cache folder when it holds downloaded
+// bundle files (what `refract local` used before the TeX seed), or "". Those
+// files belong to Tectonic's default bundle, which isn't the seed's, so they
+// can't be reused: the folder is only reported, never changed or deleted.
+func previousCache(getenv func(string) string, goos string) string {
+	var dir string
+	switch goos {
+	case "darwin":
+		if h := getenv("HOME"); h != "" {
+			dir = filepath.Join(h, "Library", "Caches", "Tectonic")
+		}
+	case "windows":
+		if l := getenv("LOCALAPPDATA"); l != "" {
+			dir = filepath.Join(l, "TectonicProject", "Tectonic", "cache")
+		}
+	default:
+		if x := getenv("XDG_CACHE_HOME"); x != "" {
+			dir = filepath.Join(x, "Tectonic")
+		} else if h := getenv("HOME"); h != "" {
+			dir = filepath.Join(h, ".cache", "Tectonic")
+		}
+	}
+	if dir == "" {
+		return ""
+	}
+	if entries, err := os.ReadDir(filepath.Join(dir, "bundles", "data")); err != nil || len(entries) == 0 {
+		return ""
+	}
+	return dir
 }
