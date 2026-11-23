@@ -95,6 +95,11 @@ func gitTreeUnsafe(dir string) string {
 // each one must be as private as the folder, and none may be a symlink that
 // leads out of it.
 func treeUnsafe(root string) string {
+	if fi, err := os.Lstat(root); err != nil {
+		return fmt.Sprintf("cannot inspect %s: %v", root, err)
+	} else if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Sprintf("%s is a symbolic link", root)
+	}
 	why := ""
 	err := filepath.WalkDir(root, func(p string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {

@@ -69,3 +69,22 @@ func TestBundledGitSupportTrust(t *testing.T) {
 		t.Error("accepted Git without helper directory")
 	}
 }
+
+// A symlink as the resource folder itself is refused, even when it points at
+// a good folder: the walk would not look inside it.
+func TestResourceRootSymlinkRefused(t *testing.T) {
+	dir := install(t)
+	real := filepath.Join(t.TempDir(), "real-seed")
+	if err := os.MkdirAll(filepath.Join(real, "cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(dir, "tex-seed")); err != nil {
+		t.Fatal(err)
+	}
+	if got := Resource("tex-seed"); got != "" {
+		t.Fatalf("symlinked root should be ignored, got %q", got)
+	}
+}
