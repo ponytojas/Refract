@@ -89,3 +89,37 @@ func gitTreeUnsafe(dir string) string {
 	}
 	return ""
 }
+
+// treeUnsafe checks everything inside the resource folder root (the folder
+// itself is checked by trusted): Refract reads these files as they are, so
+// each one must be as private as the folder, and none may be a symlink that
+// leads out of it.
+func treeUnsafe(root string) string {
+	why := ""
+	err := filepath.WalkDir(root, func(p string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			why = fmt.Sprintf("cannot inspect %s: %v", p, walkErr)
+			return filepath.SkipAll
+		}
+		if p == root {
+			return nil
+		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			why = fmt.Sprintf("%s is a symbolic link", p)
+			return filepath.SkipAll
+		}
+		fi, err := entry.Info()
+		if err != nil {
+			why = fmt.Sprintf("cannot inspect %s: %v", p, err)
+			return filepath.SkipAll
+		}
+		if why = unsafeInfo(p, fi); why != "" {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil && why == "" {
+		why = err.Error()
+	}
+	return why
+}

@@ -7,3 +7,5 @@ package tools
 func unsafe(string) string { return "" }
 
 func gitTreeUnsafe(string) string { return "" }
+
+func treeUnsafe(string) string { return "" }

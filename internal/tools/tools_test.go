@@ -246,3 +246,52 @@ func TestResource(t *testing.T) {
 		t.Errorf("after restoring modes: %q", got)
 	}
 }
+
+// What a resource folder holds is read and trusted too: a writable file or
+// folder inside a private one, or a symlink out of it, makes it untrusted.
+func TestResourceChecksItsContents(t *testing.T) {
+	dir := install(t)
+	seed := filepath.Join(dir, "tex-seed")
+	manifest := filepath.Join(seed, "seed.json")
+	inner := filepath.Join(seed, "cache", "bundles")
+	file := filepath.Join(inner, "a.sty")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{manifest, file} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := Resource("tex-seed"); got != seed {
+		t.Fatalf("private seed: Resource = %q", got)
+	}
+	for name, path := range map[string]string{"manifest": manifest, "inner folder": inner, "inner file": file} {
+		fi, _ := os.Stat(path)
+		mode := fi.Mode().Perm()
+		if err := os.Chmod(path, mode|0o002); err != nil {
+			t.Fatal(err)
+		}
+		if got := Resource("tex-seed"); got != "" {
+			t.Errorf("%s writable by others should make the seed untrusted, got %q", name, got)
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outside := filepath.Join(t.TempDir(), "evil.sty")
+	if err := os.WriteFile(outside, []byte("x"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(inner, "b.sty")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := Resource("tex-seed"); got != "" {
+		t.Errorf("a symlink inside the seed should make it untrusted, got %q", got)
+	}
+	os.Remove(link)
+	if got := Resource("tex-seed"); got != seed {
+		t.Errorf("after cleaning up: %q", got)
+	}
+}

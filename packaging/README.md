@@ -179,8 +179,8 @@ as before when there is a network; the seed does not make that fail.
 archive.
 
 **Use.** `refract local` (internal/compile/seed.go, cmd/refract/texseed.go) finds the seed with
-`tools.Resource("tex-seed")` (the tools folder, subject to the same trust check as the tools; `REFRACT_TEX_SEED`
-overrides it, `none` turns it off), copies it into `TECTONIC_CACHE_DIR` or `<data dir>/tectonic-cache` through
+`tools.Resource("tex-seed")` (the tools folder, subject to the same trust check as the tools, applied to every file and folder
+inside it too, with no symlinks allowed; `REFRACT_TEX_SEED` overrides it, `none` turns it off), copies it into `TECTONIC_CACHE_DIR` or `<data dir>/tectonic-cache` through
 `os.OpenRoot` (no symlink is followed), verifying each file's SHA-256 and writing `refract-seed.json` last,
 and passes `--bundle <seed bundle URL>`. It never deletes: a changed seed adds or replaces only its own
 files. A cache without the marker is seeded again before the next compile. It is off for the plain server,
