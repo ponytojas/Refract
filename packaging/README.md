@@ -23,7 +23,7 @@ WinGet's nested executable paths depend on that layout.
   recorded with the release. #55 implements that record.
 - A per-user service definition that is not enabled: a Homebrew `service` block for
   `brew services`, or a systemd user unit in `/usr/lib/systemd/user/`. It runs
-  `refract local` as the person, and only once they start it.
+  `refract local --no-browser` as the person, and only once they start it.
 
 Today's packages (Homebrew formula, WinGet, `.deb`, portable archives) contain only the
 binary and documentation; #58–#60 add the bundled tools to them.
@@ -32,8 +32,8 @@ binary and documentation; #58–#60 add the bundled tools to them.
 
 - Enable or start a service, or install a system-wide one. A per-user service runs only
   when the person starts it (`refract service install` (#57), `brew services start` or
-  `systemctl --user enable`), never from an installer, maintainer script, Homebrew
-  `post_install` or cask `postflight`.
+  `systemctl --user enable --now refract.service`), never from an installer,
+  maintainer script, Homebrew `post_install` or cask `postflight`.
 - Create keys, databases, projects or any data folder at install time. `refract local`
   creates them on first run, in per-user locations.
 - Store data, the key or caches inside the application directory: they live in
@@ -109,6 +109,13 @@ is in the Tectonic source tag recorded in the manifest. Installers that ship the
 keep `licenses/` and the manifest and show them (for example in an About or Licences screen).
 Review the Windows and Tectonic notices again when bumping a pin.
 
+**Security updates are manual.** The libraries compiled into the tools (zlib in SyncTeX; the
+Rust crates in Tectonic and ripgrep; Git and MinGit's components) are invisible to image and
+package scanners, and nothing upgrades them: the release ships exactly what `tools.lock` pins.
+Watch the security advisories of zlib, Git and Git for Windows, Tectonic and ripgrep, and bump
+the pin (version and checksums in `tools.lock`) when one affects a bundled tool; each archive's
+`tools-manifest.json` records which versions a release shipped.
+
 **Gaps.** `windows-arm64` has no tools archive: upstream Tectonic publishes no Windows arm64
 build. The release attaches `refract-tools-<tag>-gaps.txt` listing it, and no Windows arm64
 desktop installer may be advertised as complete until Tectonic runs there. The macOS amd64
@@ -151,10 +158,15 @@ and assembles `tex-seed/` and `licenses/tex/`. `scripts/tex-seed.py` does the wo
 and their checksums is committed as `packaging/tex-seed/files.txt`: the build fails with a diff when it
 changes (a new template, another package used, a new bundle or Tectonic), and
 `scripts/build-tex-seed.sh <tectonic> <out-dir> --update` rewrites it. That makes the build
-reproducible and reviewable. To cover another template, add it under `internal/projects/templates/`
-(or a document under `packaging/tex-seed/documents/`), run with `--update`, and commit `files.txt`.
+reproducible and reviewable. The licence files (`licenses/tex/`, with `NOTICE.md`) are listed the same
+way in `seed.json` (`licenses`) and committed as `packaging/tex-seed/licenses.txt`, which `--update` rewrites
+too. To cover another template, add it under `internal/projects/templates/`
+(or a document under `packaging/tex-seed/documents/`), run with `--update`, and commit `files.txt` and `licenses.txt`.
 In CI the `seed` job of `tools.yml` builds it once with the pinned Linux Tectonic and hands it to every
-`build` job (`TEX_SEED_DIR`; the Windows cross-build cannot build it itself).
+`build` job (`TEX_SEED_DIR`; the Windows cross-build cannot build it itself). `build-tools.sh` runs
+`tex-seed.py verify` on a seed it is given: besides being self-consistent, its files must equal
+`files.txt` and its licence files (next to it, in `licenses/tex/`) must equal `licenses.txt`. The archive
+check (`tools-archive.py check`) requires every licence file `seed.json` lists, with its checksum.
 
 **Coverage.** The five built-in templates (article, beamer, cv, letter, thesis) in English and Spanish
 (10 projects) and three documents: `blank-10pt`, `blank-12pt` (a bare `article` at those sizes) and
@@ -179,11 +191,12 @@ nothing else: ship `tex-seed/` next to the tools, read-only. `scripts/smoke-offl
 tools smoke test) verifies `seed.json` against the files, then, with a read-only runtime, an empty home
 and a copy of the seed as the only cache, compiles every covered project and document, asserting no
 `downloading` or error line, a `%PDF` output and SyncTeX data, and a `synctex view` / `synctex edit` round trip.
-The network is blocked and a probe proves it: macOS `sandbox-exec`, Linux `sudo unshare -n` (then
-`setpriv` back to the user). Windows has no per-process sandbox: the test adds a firewall rule on
-`tectonic.exe` when it runs as an administrator (not probed) and always passes `--only-cached`, which
-fails the compile on any file missing from the seed instead of downloading it. That proves the
-coverage, not the offline behaviour; the log states which blocking held.
+The network is blocked and a probe proves it, and then the documents compile with exactly Refract's flags:
+macOS `sandbox-exec`, Linux `sudo unshare -n` (then `setpriv` back to the user), Windows an outbound
+firewall rule on `tectonic.exe` (an administrator shell, as on CI), proven by Tectonic itself failing to
+compile with an empty cache. Only outside CI, on Windows without administrator rights, the test falls back
+to `--only-cached` (a file missing from the seed fails instead of downloading), which proves the coverage
+but not the offline behaviour; the log states which blocking held.
 
 **Offline smoke test.** `scripts/smoke-offline.sh <refract> <extracted-dir> <os>` (the `smoke` job builds the binary
 and runs it on macOS and Linux) runs the whole of `refract local` with the network blocked, from a read-only
@@ -292,6 +305,7 @@ release manifests for the community package.
 python3 -m unittest discover -s scripts -p 'test_*.py' -v
 ```
 
-The Debian payload test needs `dpkg-deb`; it runs in Linux CI and skips if the tool
-is absent locally. `make test` also runs these tests. No tests open the OAuth
-browser or read real credentials.
+The Debian payload test uses `dpkg-deb`. The Homebrew formula test uses Ruby to
+run the generated install method against temporary paths. Both tests run in Linux
+CI and skip locally if their tool is missing. `make test` also runs these tests.
+No tests open the OAuth browser or read real credentials.

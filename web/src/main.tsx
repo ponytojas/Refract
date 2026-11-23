@@ -4,7 +4,16 @@ import Login from './Login'
 import { setMode } from './lib/mode'
 import { setMissingTools } from './lib/tools'
 import { lang } from './lib/i18n'
+import { flushPending } from './lib/flush'
 import './index.css'
+
+declare global {
+  interface Window {
+    /** For the desktop app before it quits: saves pending edits; false when some couldn't be saved. */
+    refractFlush?: () => Promise<boolean>
+  }
+}
+window.refractFlush = () => flushPending()
 
 const root = createRoot(document.getElementById('root')!)
 // The app downloads while the session is checked; signed out

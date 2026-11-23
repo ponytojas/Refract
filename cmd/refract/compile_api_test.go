@@ -58,6 +58,72 @@ func TestCompileBusyIs429(t *testing.T) {
 	}
 }
 
+type resultCompiler struct{ res compile.Result }
+
+func (c resultCompiler) Compile(context.Context, string, string) (*compile.Result, error) {
+	r := c.res
+	return &r, nil
+}
+
+// A build that produced a PDF checkpoints even with TeX errors (Prism
+// documents often keep a recoverable error); one without a PDF doesn't.
+func TestCompileCheckpointsPDFWithErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		res  compile.Result
+		want bool
+	}{
+		{"clean", compile.Result{OK: true, PDF: ".refract/build/main.pdf"}, true},
+		{"pdf with errors", compile.Result{OK: false, PDF: ".refract/build/main.pdf"}, true},
+		{"no pdf", compile.Result{OK: false}, false},
+		{"clean without pdf", compile.Result{OK: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			db, err := store.Open(filepath.Join(dir, "t.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { db.Close() })
+			svc := &projects.Service{DB: db, Dir: filepath.Join(dir, "projects"), Limits: projects.DefaultLimits}
+			mux := http.NewServeMux()
+			(&compileAPI{svc: svc, runner: &compile.Runner{Compiler: resultCompiler{tc.res}}}).routes(&router{mux: mux, acc: &access.Checker{DB: db}})
+
+			ctx := auth.WithUser(context.Background(), auth.User{ID: "ana"})
+			p, err := svc.Create(ctx, "Paper")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := svc.WriteFile(ctx, p.ID, "main.tex", strings.NewReader("\\documentclass{article}\n####\n")); err != nil {
+				t.Fatal(err)
+			}
+			if err := svc.SetMainFile(ctx, p.ID, "main.tex"); err != nil {
+				t.Fatal(err)
+			}
+			before, err := svc.History(ctx, p.ID, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/projects/"+p.ID+"/compile", nil).WithContext(ctx))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status %d: %s", w.Code, w.Body)
+			}
+			var body struct{ Checkpoint bool }
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			after, err := svc.History(ctx, p.ID, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if body.Checkpoint != tc.want || (len(after) > len(before)) != tc.want {
+				t.Fatalf("checkpoint %v, commits %d -> %d; want checkpoint %v", body.Checkpoint, len(before), len(after), tc.want)
+			}
+		})
+	}
+}
+
 // Downloads of the PDF and the log serve only regular files inside the
 // project's build folder, and keep ranges and headers.
 func TestOutputDownloadsAreConfined(t *testing.T) {

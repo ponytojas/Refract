@@ -66,6 +66,7 @@ import { Autosaver, type SaveStatus } from './autosave'
 import { noSymbols, type ProjectSymbols } from '@/lib/completion'
 import { Link, navigate, pageReady, useBeforeLeave } from '@/lib/router'
 import { pdfChanged, type Activity } from '@/lib/compile-state'
+import { onFlush } from '@/lib/flush'
 import CompileStatus, { type CompileResult, type Problem } from './CompileStatus'
 import Editor from './Editor'
 import { moveLimits } from '@/lib/wordlimits'
@@ -488,6 +489,17 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     await settle(true)
     setRestoring(false)
   }
+
+  // The desktop app quitting (window.refractFlush): everything typed is on
+  // the server first; false tells it some text couldn't be saved.
+  useEffect(
+    () =>
+      onFlush(async () => {
+        if (!goneRef.current) await autosave.flushAll()
+        return autosave.unsaved().length === 0
+      }),
+    [autosave],
+  )
 
   // Never lose edits on reload or close: flush and ask the browser to confirm.
   useEffect(() => {

@@ -77,15 +77,22 @@ jobs:
           npx tsc --noEmit
           node --test src/*.test.ts src/lib/*.test.ts
 
-      - name: Browser tests
-        run: make e2e
+      # Every spec runs in Chrome and in WebKit, the engine of the macOS app's WKWebView.
+      # Playwright's WebKit build runs on Linux, which is enough to catch engine differences
+      # (layout, events, APIs) and keeps one job; WKWebView itself is tested separately (#66).
+      - name: WebKit
+        run: npx playwright install --with-deps webkit
+        working-directory: web
 
-      - name: Browser test report
+      - name: Browser tests
+        run: make e2e BROWSER=all
+
+      - name: Browser test artifacts
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
-          path: web/playwright-report
+          name: playwright-results
+          path: web/test-results
           if-no-files-found: ignore
 
   # Windows has no openat: build outputs are opened with checks that the file
@@ -102,3 +109,7 @@ jobs:
         run: |
           go test ./internal/compile/ -run 'OpenOutput|ReadsThroughChecked' -v
           go test ./cmd/refract/ -run 'OutputDownloads' -v
+      - name: One local instance per data folder
+        run: go test ./cmd/refract/ -run 'SecondLocal|LocalStartsAfterKill|LocalDifferentFolders|LocalLock|LocalCheck|LocalStatus|LocalWaits|LocalGivesUp' -v
+      - name: Local secret key
+        run: go test ./cmd/refract/ -run 'ResolveLocalKey' -v

@@ -73,27 +73,35 @@ for (const lines of [3, 150]) {
       await bubble.click()
       const handle = page.getByRole('separator', { name: 'Resize assistant' })
       const chatTop = () => handle.evaluate((grip) => grip.parentElement!.getBoundingClientRect().top)
+      // The sheet scales in when it opens: measure the grip once it has settled, or the drag can miss it.
+      await handle.evaluate((grip) => Promise.all(grip.parentElement!.getAnimations().map((a) => a.finished)))
+      const before = await chatTop()
       const grip = (await handle.boundingBox())!
       const editor = (await scroller.boundingBox())!
       await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
       await page.mouse.down()
       await page.mouse.move(grip.x + grip.width / 2, editor.y)
       await page.mouse.up()
+      // The drag made the sheet as tall as it can be, short of the strip kept above it.
+      await expect.poll(chatTop).toBeLessThan(before - 100)
       await expect.poll(async () => (await chatTop()) - editor.y).toBeGreaterThanOrEqual(48)
 
+      // Line edges are fractional: flush with the sheet is within half a pixel.
+      const lastBottomOverChat = async () => {
+        const box = (await last.boundingBox())!
+        return box.y + box.height - (await chatTop())
+      }
       await content.focus()
       await page.keyboard.press('ControlOrMeta+Home')
       await page.keyboard.press('ControlOrMeta+End')
-      await expect
-        .poll(async () => (await last.boundingBox())!.y + (await last.boundingBox())!.height)
-        .toBeLessThan(await chatTop())
+      await expect.poll(lastBottomOverChat).toBeLessThanOrEqual(0.5)
 
       await page.getByRole('button', { name: 'Near the end' }).click()
       const heading = content.locator('.cm-line').filter({ hasText: 'Near the end' })
       await expect
         .poll(async () => {
           const line = await heading.boundingBox()
-          return !!line && line.y >= editor.y && line.y + line.height <= (await chatTop())
+          return !!line && line.y >= editor.y - 0.5 && line.y + line.height <= (await chatTop()) + 0.5
         })
         .toBe(true)
 

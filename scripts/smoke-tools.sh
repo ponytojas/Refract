@@ -31,9 +31,16 @@ run "$DIR/synctex$EXE" help 2>&1 | head -1 | grep -q SyncTeX || fail "synctex he
 
 case "$OS" in
   darwin)
+    want=${MACOSX_DEPLOYMENT_TARGET:-13.0}
     for f in tectonic synctex rg git/bin/git git/libexec/git-core/git git/libexec/git-core/git-remote-http; do
       bad=$(otool -L "$DIR/$f" | tail -n +2 | awk '{print $1}' | grep -v -e '^/usr/lib/' -e '^/System/Library/' || true)
       [ -z "$bad" ] || fail "$f links libraries that are not part of macOS: $bad"
+      # LC_BUILD_VERSION says `minos X`; older binaries (Tectonic's x86_64 build) have
+      # LC_VERSION_MIN_MACOSX, which says `version X`. Either comes before any tool version.
+      minos=$(vtool -show-build "$DIR/$f" 2>/dev/null | awk '$1 == "minos" || $1 == "version" {print $2; exit}')
+      [ -n "$minos" ] || fail "$f declares no minimum macOS version"
+      newer=$(awk -v a="$minos" -v b="$want" 'BEGIN { split(a, x, "."); split(b, y, "."); print (x[1] > y[1] || (x[1] == y[1] && x[2] + 0 > y[2] + 0)) }')
+      [ "$newer" = 0 ] || fail "$f needs macOS $minos, newer than the supported $want"
     done
     ;;
   linux)
@@ -80,5 +87,11 @@ g gc -q
 [ "$(g --exec-path)" = "$WANT_EXEC" ] || fail "git exec path is $(g --exec-path), not $WANT_EXEC"
 # HTTPS remotes (Refract's push and pull) work with the bundled runtime alone:
 # macOS's libcurl and certificates, MinGit's Schannel libcurl and the Windows store.
-g ls-remote https://github.com/git/git HEAD | grep -q 'HEAD$' || fail "git cannot read an HTTPS remote"
+# Retried, so a passing network hiccup isn't mistaken for a broken runtime.
+remote_ok=
+for attempt in 1 2 3; do
+  if g ls-remote https://github.com/git/git HEAD | grep -q 'HEAD$'; then remote_ok=1; break; fi
+  [ "$attempt" = 3 ] || sleep $((attempt * 5))
+done
+[ -n "$remote_ok" ] || fail "git cannot read an HTTPS remote (3 attempts)"
 echo "smoke: ok ($OS)"

@@ -102,17 +102,33 @@ class PackagingTests(unittest.TestCase):
             self.assertNotIn("Depends:", control)
             contents = subprocess.check_output(["dpkg-deb", "--fsys-tarfile", str(package)])
             with tarfile.open(fileobj=io.BytesIO(contents)) as archive:
-                files = [m for m in archive.getmembers() if m.isfile()]
-                self.assertEqual({m.name for m in files}, {"./usr/bin/refract",
-                                 "./usr/share/doc/refract/copyright", "./usr/share/doc/refract/README.md"})
-                self.assertTrue(all(m.uid == 0 and m.gid == 0 for m in files))
-                # No setuid, setgid or world-writable entries.
-                self.assertFalse([m.name for m in archive.getmembers() if m.mode & 0o6002 and not m.issym()])
+                self.assert_archive_members(archive, {
+                    ".": tarfile.DIRTYPE,
+                    "./usr": tarfile.DIRTYPE,
+                    "./usr/bin": tarfile.DIRTYPE,
+                    "./usr/bin/refract": tarfile.REGTYPE,
+                    "./usr/share": tarfile.DIRTYPE,
+                    "./usr/share/doc": tarfile.DIRTYPE,
+                    "./usr/share/doc/refract": tarfile.DIRTYPE,
+                    "./usr/share/doc/refract/copyright": tarfile.REGTYPE,
+                    "./usr/share/doc/refract/README.md": tarfile.REGTYPE,
+                })
                 self.assertEqual(archive.getmember("./usr/bin/refract").mode, 0o755)
                 self.assertEqual(archive.extractfile("./usr/bin/refract").read(), binary.read_bytes())
             scripts = subprocess.check_output(["dpkg-deb", "--ctrl-tarfile", str(package)])
             with tarfile.open(fileobj=io.BytesIO(scripts)) as archive:
-                self.assertEqual([m.name for m in archive.getmembers() if m.isfile()], ["./control"])
+                self.assert_archive_members(archive, {
+                    ".": tarfile.DIRTYPE,
+                    "./control": tarfile.REGTYPE,
+                })
+
+    def assert_archive_members(self, archive, expected):
+        members = archive.getmembers()
+        self.assertCountEqual([(member.name, member.type) for member in members], expected.items())
+        for member in members:
+            self.assertEqual((member.uid, member.gid), (0, 0), member.name)
+            # No setuid, setgid or world-writable entries.
+            self.assertFalse(member.mode & 0o6002, member.name)
 
     def test_policy_documented_and_no_install_time_side_effects(self):
         policy = (ROOT / "packaging/README.md").read_text()
@@ -135,6 +151,40 @@ class PackagingTests(unittest.TestCase):
         for formula in (self.output / "homebrew").rglob("*.rb"):
             for marker in ("post_install", "postflight", "systemctl", "launchctl"):
                 self.assertNotIn(marker, formula.read_text())
+
+    @unittest.skipUnless(shutil.which("ruby"), "Formula install verification needs Ruby")
+    def test_formula_install_only_installs_binary(self):
+        self.archives_for("v1.2.3")
+        generate("v1.2.3", self.archives, self.output)
+        formula = self.output / "homebrew/refract.rb"
+        for existing_data in (False, True):
+            with self.subTest(existing_data=existing_data):
+                sandbox = self.root / f"formula-{existing_data}"
+                home, var, prefix, source = (sandbox / name for name in ("home", "var", "prefix", "source"))
+                for directory in (home, var, prefix, source):
+                    directory.mkdir(parents=True)
+                (source / "refract").write_bytes(b"formula binary\n")
+                (home / "keep").write_bytes(b"home data\n")
+                if existing_data:
+                    (var / "refract").mkdir()
+                    (var / "refract/data").write_bytes(b"existing data\n")
+                env = {**os.environ, "HOME": str(home), "TEST_VAR": str(var), "TEST_PREFIX": str(prefix)}
+                result = subprocess.run(["ruby", str(ROOT / "scripts/formula_install_fixture.rb"), str(formula)],
+                                        cwd=source, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = {
+                    "home": None, "home/keep": b"home data\n", "var": None,
+                    "prefix": None, "prefix/bin": None, "prefix/bin/refract": b"formula binary\n",
+                    "source": None, "source/refract": b"formula binary\n",
+                }
+                if existing_data:
+                    expected.update({"var/refract": None, "var/refract/data": b"existing data\n"})
+                actual = {}
+                for path in sandbox.rglob("*"):
+                    self.assertFalse(path.is_symlink(), path)
+                    self.assertTrue(path.is_dir() or path.is_file(), path)
+                    actual[path.relative_to(sandbox).as_posix()] = None if path.is_dir() else path.read_bytes()
+                self.assertEqual(actual, expected)
 
     def prepare_bundle(self, dest):
         """Runs prepare-bundle.sh with a fake curl (serves a tiny bundle) and tectonic."""
@@ -205,8 +255,28 @@ class ToolsArchiveTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(rel)
             path.chmod(0o755)
+        # The seed's licence files, listed in seed.json and in the committed list.
+        licenses = {}
+        for rel in ("licenses/tex/NOTICE.md", "licenses/tex/LPPL-1.3c.txt"):
+            if rel in skip:
+                continue
+            (stage / rel).parent.mkdir(parents=True, exist_ok=True)
+            (stage / rel).write_text(rel)
+            licenses[rel] = hashlib.sha256(rel.encode()).hexdigest()
+        licenses.setdefault("licenses/tex/NOTICE.md", hashlib.sha256(b"licenses/tex/NOTICE.md").hexdigest())
+        licenses.setdefault("licenses/tex/LPPL-1.3c.txt", hashlib.sha256(b"licenses/tex/LPPL-1.3c.txt").hexdigest())
+        if "tex-seed/seed.json" not in skip:
+            (stage / "tex-seed/seed.json").write_text(json.dumps({"licenses": licenses}))
+        committed = self.root / "licenses.txt"
+        committed.write_text("".join(f"{v}  {r}\n" for r, v in sorted(licenses.items())))
+        self.patch(tools_archive, "SEED_LICENSES", committed)
         tools_archive.manifest(stage, os_name, arch, "v1.2.3")
         return stage
+
+    def patch(self, module, name, value):
+        old = getattr(module, name)
+        setattr(module, name, value)
+        self.addCleanup(setattr, module, name, old)
 
     def pack(self, stage, os_name, arch):
         if os_name == "windows":
@@ -261,6 +331,26 @@ class ToolsArchiveTests(unittest.TestCase):
         (stage / "tools-manifest.json").unlink()
         self.assertIn("missing tools-manifest.json", tools_archive.check(self.pack(stage, "linux", "amd64"), "linux", "amd64"))
 
+    def test_seed_licence_texts_must_be_in_the_archive(self):
+        # NOTICE.md alone fills licenses/tex/: the texts it refers to are still required.
+        stage = self.stage("linux", "amd64", skip=("licenses/tex/LPPL-1.3c.txt",))
+        problems = tools_archive.check(self.pack(stage, "linux", "amd64"), "linux", "amd64")
+        self.assertIn("missing licenses/tex/LPPL-1.3c.txt (a licence of the TeX seed)", problems)
+        # A seed.json that drops a licence from its list doesn't match the committed one.
+        stage = self.stage("linux", "amd64")
+        data = json.loads((stage / "tex-seed/seed.json").read_text())
+        del data["licenses"]["licenses/tex/LPPL-1.3c.txt"]
+        (stage / "tex-seed/seed.json").write_text(json.dumps(data))
+        tools_archive.manifest(stage, "linux", "amd64", "v1.2.3")
+        problems = tools_archive.check(self.pack(stage, "linux", "amd64"), "linux", "amd64")
+        self.assertIn("tex-seed/seed.json licence files differ from packaging/tex-seed/licenses.txt", problems)
+        # A replaced licence text.
+        stage = self.stage("darwin", "arm64")
+        (stage / "licenses/tex/LPPL-1.3c.txt").write_text("other")
+        tools_archive.manifest(stage, "darwin", "arm64", "v1.2.3")
+        problems = tools_archive.check(self.pack(stage, "darwin", "arm64"), "darwin", "arm64")
+        self.assertIn("licenses/tex/LPPL-1.3c.txt does not match its checksum in tex-seed/seed.json", problems)
+
     def test_tampered_file_or_stale_pin_fails(self):
         stage = self.stage("linux", "amd64")
         (stage / "rg").write_text("replaced")
@@ -272,6 +362,24 @@ class ToolsArchiveTests(unittest.TestCase):
         (stage / "tools-manifest.json").write_text(json.dumps(manifest))
         problems = tools_archive.check(self.pack(stage, "linux", "arm64"), "linux", "arm64")
         self.assertIn("manifest tectonic does not match packaging/tools.lock", problems)
+
+    def test_every_file_is_checked_against_the_manifest(self):
+        stage = self.stage("darwin", "arm64")
+        helper = stage / "git/share/git-core/templates/x"  # not a required path
+        helper.write_text("replaced")
+        (stage / "extra").write_text("added after the build")
+        (stage / "licenses/zlib/LICENSE").unlink()
+        problems = tools_archive.check(self.pack(stage, "darwin", "arm64"), "darwin", "arm64")
+        self.assertIn("manifest checksum of git/share/git-core/templates/x does not match", problems)
+        self.assertIn("extra is not in the manifest", problems)
+        self.assertIn("manifest lists licenses/zlib/LICENSE, which is not in the archive", problems)
+
+    def test_workflow_builds_every_target(self):
+        workflow = (ROOT / ".github/workflows/tools.yml").read_text()
+        for job in ("build", "smoke"):
+            section = workflow.split(f"\n  {job}:\n", 1)[1].split("\n  # ", 1)[0]
+            pairs = set(re.findall(r"os: (\w+), arch: (\w+)", section))
+            self.assertEqual(pairs, set(tools_archive.TARGETS), job)
 
     def test_non_executable_tool_fails(self):
         stage = self.stage("linux", "amd64")
@@ -370,34 +478,78 @@ class ToolsArchiveTests(unittest.TestCase):
 
     def test_tex_seed_verify_checks_files_and_refuses_unsafe_paths(self):
         lock = tools_archive.load_lock()
+        good = {"cache/bundles/a.tex": b"a"}
+        lic = {"licenses/tex/NOTICE.md": b"notice", "licenses/tex/MIT.txt": b"mit"}
 
-        def seed_with(files, extra=None):
-            seed = Path(tempfile.mkdtemp())
-            self.addCleanup(shutil.rmtree, seed, True)
+        def listing(hashes):
+            return "".join(f"{v}  {r}\n" for r, v in sorted(hashes.items()))
+
+        def sha(body):
+            return hashlib.sha256(body).hexdigest()
+
+        # The committed lists describe `good` and `lic`.
+        committed = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, committed, True)
+        (committed / "files.txt").write_text(listing({r: sha(b) for r, b in good.items()}))
+        (committed / "licenses.txt").write_text(listing({r: sha(b) for r, b in lic.items()}))
+        for name, value in (("COMMITTED_FILES", committed / "files.txt"), ("COMMITTED_LICENSES", committed / "licenses.txt")):
+            old = getattr(tex_seed, name)
+            setattr(tex_seed, name, value)
+            self.addCleanup(setattr, tex_seed, name, old)
+
+        def seed_with(files, extra=None, licenses=None, listed=None):
+            base = Path(tempfile.mkdtemp())
+            self.addCleanup(shutil.rmtree, base, True)
+            seed = base / "tex-seed"
+            seed.mkdir()
             hashes = {}
             for rel, body in files.items():
                 (seed / rel).parent.mkdir(parents=True, exist_ok=True)
                 (seed / rel).write_bytes(body)
-                hashes[rel] = hashlib.sha256(body).hexdigest()
+                hashes[rel] = sha(body)
             hashes.update(extra or {})
-            listing = "".join(f"{v}  {r}\n" for r, v in sorted(hashes.items()))
+            licenses = lic if licenses is None else licenses
+            for rel, body in licenses.items():
+                (base / rel).parent.mkdir(parents=True, exist_ok=True)
+                (base / rel).write_bytes(body)
             covers = {"templates": [label for label, _, _ in tex_seed.covered_projects()],
                       "documents": [d.stem for d in tex_seed.covered_documents()]}
             (seed / "seed.json").write_text(json.dumps({
-                "schema": 1, "id": hashlib.sha256(listing.encode()).hexdigest(), "tectonic": lock["TECTONIC_VERSION"],
+                "schema": 1, "id": sha(listing(hashes).encode()), "tectonic": lock["TECTONIC_VERSION"],
                 "bundle": {"url": lock["TECTONIC_BUNDLE_URL"], "digest": lock["TECTONIC_BUNDLE_DIGEST"]},
-                "covers": covers, "files": hashes}))
+                "covers": covers, "files": hashes,
+                "licenses": {r: sha(b) for r, b in (lic if listed is None else listed).items()}}))
             return seed
 
+        def refused(seed):
+            with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+                tex_seed.verify(seed)
+            return err.getvalue()
+
         with contextlib.redirect_stdout(io.StringIO()):
-            tex_seed.verify(seed_with({"cache/bundles/a.tex": b"a"}))
+            tex_seed.verify(seed_with(good))
         for extra in ({"../escape": "0" * 64}, {"/abs": "0" * 64}, {"cache/../x": "0" * 64}, {"other/x": "0" * 64}):
-            with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-                tex_seed.verify(seed_with({"cache/bundles/a.tex": b"a"}, extra))
-        seed = seed_with({"cache/bundles/a.tex": b"a"})
+            with self.subTest(extra=extra):
+                refused(seed_with(good, extra))
+        seed = seed_with(good)
         (seed / "cache/bundles/a.tex").write_bytes(b"b")
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            tex_seed.verify(seed)
+        refused(seed)
+        # Self-consistent but not the committed inventory: another file, or one file only.
+        self.assertIn("files.txt", refused(seed_with({"cache/bundles/b.tex": b"b"})))
+        self.assertIn("files.txt", refused(seed_with({**good, "cache/bundles/b.tex": b"b"})))
+        # Licence texts: one missing next to the seed, one dropped from seed.json, one replaced.
+        self.assertIn("missing licenses/tex/MIT.txt", refused(seed_with(good, licenses={"licenses/tex/NOTICE.md": b"notice"})))
+        self.assertIn("licenses.txt", refused(seed_with(good, listed={"licenses/tex/NOTICE.md": b"notice"})))
+        self.assertIn("checksum", refused(seed_with(good, licenses={**lic, "licenses/tex/MIT.txt": b"other"})))
+
+    def test_committed_seed_lists_agree(self):
+        # The licence list names NOTICE.md and only texts the repository ships.
+        names = [line.split("  ", 1)[1] for line in (ROOT / "packaging/tex-seed/licenses.txt").read_text().splitlines()]
+        self.assertIn("licenses/tex/NOTICE.md", names)
+        shipped = {p.name for p in (ROOT / "packaging/tex-seed/licenses").iterdir()}
+        for rel in names:
+            if rel != "licenses/tex/NOTICE.md":
+                self.assertIn(rel.rsplit("/", 1)[1], shipped)
 
     def test_tools_workflow_builds_and_smokes_the_seed(self):
         tools = (ROOT / ".github/workflows/tools.yml").read_text()

@@ -12,8 +12,10 @@ writes, under <out>:
   tex-seed/seed.json           id, Tectonic version, bundle, coverage, sha256 of every file
   licenses/tex/                the licence texts and NOTICE.md (file -> TeX Live package -> licence)
 
-and compares the file list with the committed packaging/tex-seed/files.txt: a changed
-list (new bundle file, new template) fails with a diff until `--update` rewrites it.
+and compares the file list with the committed packaging/tex-seed/files.txt, and the licence
+files (seed.json "licenses") with packaging/tex-seed/licenses.txt: a changed list (new bundle
+file, new template, new licence) fails with a diff until `--update` rewrites them. `verify`
+holds a seed built elsewhere (TEX_SEED_DIR) to the same two committed lists.
 Every seed file must have a licence (from the pinned TeX Live database or from
 packaging/tex-seed/license-overrides.txt); a file without one fails the build.
 """
@@ -109,6 +111,41 @@ def hash_file_name(url):
 
 # ---------------------------------------------------------------------------
 # Compiling
+
+
+COMMITTED_FILES = SEED_DIR / "files.txt"
+COMMITTED_LICENSES = SEED_DIR / "licenses.txt"
+
+
+def listing_of(hashes):
+    """The committed form of {path: sha256}: one "<sha256>  <path>" line per file, sorted."""
+    return "".join(f"{value}  {rel}\n" for rel, value in sorted(hashes.items()))
+
+
+def parse_listing(text):
+    result = {}
+    for line in text.splitlines():
+        if line.strip():
+            value, _, rel = line.partition("  ")
+            result[rel] = value
+    return result
+
+
+def compare_committed(committed, listing, what, update):
+    """Rewrites committed with --update; otherwise dies with a diff when it differs."""
+    if update:
+        committed.write_text(listing)
+        print(f"updated {committed.relative_to(ROOT)}")
+        return
+    old = committed.read_text() if committed.is_file() else ""
+    if old != listing:
+        name = committed.name
+        diff = "".join(difflib.unified_diff(old.splitlines(True), listing.splitlines(True), f"{name} (committed)", f"{name} (built)"))
+        die(
+            f"the seed's {what} differ from packaging/tex-seed/{name} (a new Tectonic, bundle, template, document "
+            "or licence, or a non-reproducible build). Review the diff; if it is expected, rerun the build with "
+            "--update and commit the file:\n" + diff
+        )
 
 
 def covered_projects():
@@ -409,10 +446,12 @@ def build(tectonic, out, tlpdb, update):
         for path in sorted(seed.rglob("*")):
             if path.is_file():
                 hashes[path.relative_to(seed).as_posix()] = sha256_file(path)
-        listing = "".join(f"{value}  {rel}\n" for rel, value in sorted(hashes.items()))
+        listing = listing_of(hashes)
 
         attribution = attribute(names, packages, overrides)
         write_notice(out, lock, attribution, version)
+        # The licence texts and NOTICE.md, by their path in the tools archive.
+        licenses = {f"licenses/tex/{p.name}": sha256_file(p) for p in sorted((out / "licenses" / "tex").iterdir()) if p.is_file()}
 
         seed_json = {
             "schema": SCHEMA,
@@ -421,22 +460,12 @@ def build(tectonic, out, tlpdb, update):
             "bundle": {"url": url, "digest": digest},
             "covers": covers,
             "files": hashes,
+            "licenses": licenses,
         }
         (seed / "seed.json").write_text(json.dumps(seed_json, indent=2, sort_keys=True) + "\n")
 
-        committed = SEED_DIR / "files.txt"
-        if update:
-            committed.write_text(listing)
-            print(f"updated {committed.relative_to(ROOT)}")
-        else:
-            old = committed.read_text() if committed.is_file() else ""
-            if old != listing:
-                diff = "".join(difflib.unified_diff(old.splitlines(True), listing.splitlines(True), "files.txt (committed)", "files.txt (built)"))
-                die(
-                    "the seed differs from packaging/tex-seed/files.txt (a new Tectonic, bundle, template or document, "
-                    "or a non-reproducible build). Review the diff; if it is expected, rerun with --update and commit "
-                    "the file:\n" + diff
-                )
+        compare_committed(COMMITTED_FILES, listing, "files", update)
+        compare_committed(COMMITTED_LICENSES, listing_of(licenses), "licence files", update)
         print(f"seed {seed_json['id'][:12]}: {len(names)} bundle files, {len(hashes)} files in total, "
               f"{len(covers['templates'])} templates, {len(covers['documents'])} documents")
     finally:
@@ -444,7 +473,9 @@ def build(tectonic, out, tlpdb, update):
 
 
 def verify(seed):
-    """Fails unless seed.json matches the files in the folder, the lock and the repository's templates."""
+    """Fails unless seed.json matches the files in the folder, the lock, the repository's
+    templates and the committed lists of seed files and licence files. The licence files
+    are looked for next to the seed (the build output's or the archive's licenses/tex/)."""
     seed = Path(seed)
     lock = load_lock()
     data = json.loads((seed / "seed.json").read_text())
@@ -467,9 +498,27 @@ def verify(seed):
     for rel, value in data["files"].items():
         if sha256_file(seed / rel) != value:
             die(f"{rel} does not match its checksum in seed.json")
-    listing = "".join(f"{value}  {rel}\n" for rel, value in sorted(data["files"].items()))
+    listing = listing_of(data["files"])
     if hashlib.sha256(listing.encode()).hexdigest() != data["id"]:
         die("seed.json id does not match its file list")
+    # A seed built elsewhere must be the one this repository describes, not only self-consistent.
+    if listing != COMMITTED_FILES.read_text():
+        extra = sorted(set(data["files"]) - set(parse_listing(COMMITTED_FILES.read_text())))
+        die("the seed's files differ from packaging/tex-seed/files.txt" + (f" (not in it: {', '.join(extra[:10])})" if extra else "")
+            + ": rebuild it with scripts/build-tex-seed.sh from this commit")
+    licenses = data.get("licenses")
+    if not isinstance(licenses, dict) or listing_of(licenses) != COMMITTED_LICENSES.read_text():
+        die("seed.json's licence files differ from packaging/tex-seed/licenses.txt: rebuild the seed from this commit")
+    lic_dir = seed.parent / "licenses" / "tex"
+    on_disk = {f"licenses/tex/{p.name}" for p in lic_dir.iterdir() if p.is_file()} if lic_dir.is_dir() else set()
+    if on_disk != set(licenses):
+        missing, extra = sorted(set(licenses) - on_disk), sorted(on_disk - set(licenses))
+        die(f"the licence files next to the seed ({lic_dir}) differ from seed.json: "
+            + "; ".join(x for x in (missing and "missing " + ", ".join(missing), extra and "not listed " + ", ".join(extra)) if x))
+    for rel, value in licenses.items():
+        path = seed.parent / rel
+        if path.is_symlink() or sha256_file(path) != value:
+            die(f"{rel} does not match its checksum in seed.json")
     want = {"templates": [label for label, _, _ in covered_projects()], "documents": [d.stem for d in covered_documents()]}
     if data["covers"] != want:
         die(f"seed.json covers {data['covers']}, the repository has {want}: rebuild the seed")

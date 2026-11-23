@@ -46,6 +46,7 @@ func TestBundledOnly(t *testing.T) {
 	fake(t, filepath.Join(dir, "synctex"))
 	fake(t, filepath.Join(dir, "rg"))
 	fake(t, filepath.Join(dir, "git", "bin", "git"))
+	fake(t, filepath.Join(dir, "git", "libexec", "git-core", "git"))
 	for _, tl := range All() {
 		if !tl.Found() || tl.Source != SourceBundled || !filepath.IsAbs(tl.Path) {
 			t.Errorf("%+v", tl)
@@ -78,16 +79,24 @@ func TestPrecedence(t *testing.T) {
 	if got := Find("rg"); got.Found() {
 		t.Errorf("a broken override is final: %+v", got)
 	}
-	if got := Path("rg"); got != nope {
-		t.Errorf("Path with a broken override = %s, want %s (never the bundled or PATH rg)", got, nope)
+	if got, err := Path("rg"); err == nil || got != "" {
+		t.Errorf("Path with a broken override = %q, %v; want empty path and error", got, err)
 	}
 	t.Setenv("REFRACT_RG_BIN", "")
 	if err := os.Remove(filepath.Join(dir, "rg")); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("REFRACT_RG_BIN", "not-rg") // a name, looked up on the PATH: not there
-	if got := Path("rg"); got != "not-rg" {
-		t.Errorf("Path = %s: running it must not find the PATH's rg", got)
+	if got, err := Path("rg"); err == nil || got != "" {
+		t.Errorf("Path with a missing name = %q, %v; want empty path and error", got, err)
+	}
+	t.Setenv("REFRACT_RG_BIN", "missing/rg")
+	if got, err := Path("rg"); err == nil || got != "" {
+		t.Errorf("Path with a missing relative override = %q, %v", got, err)
+	}
+	t.Setenv("REFRACT_RG_BIN", over)
+	if got, err := Path("rg"); err != nil || got != over || !filepath.IsAbs(got) {
+		t.Errorf("Path with a valid override = %q, %v", got, err)
 	}
 }
 
@@ -130,6 +139,7 @@ func TestUntrustedBundledFolderIgnored(t *testing.T) {
 	dir := install(t)
 	fake(t, filepath.Join(dir, "tectonic"))
 	fake(t, filepath.Join(dir, "git", "bin", "git"))
+	fake(t, filepath.Join(dir, "git", "libexec", "git-core", "git"))
 	if !Find("tectonic").Found() {
 		t.Fatal("a private bundled folder should be used")
 	}

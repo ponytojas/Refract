@@ -60,6 +60,13 @@ async function abstractLimit(page: Page, max = '3') {
     .click({ position: { x: 10, y: 8 } })
 }
 
+// WebKit (like macOS) selects the word under a right-click, and the quick actions toolbar for that
+// selection can cover the next line (#102). Collapse it with the keyboard, as a person would.
+async function collapseRightClickSelection(page: Page) {
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await page.keyboard.press('ArrowRight')
+}
+
 const shorter = (page: Page) => page.getByRole('button', { name: /^Suggest a shorter version:/ })
 
 async function openWordCountSettings(page: Page) {
@@ -427,6 +434,7 @@ Other prose here.
     await openLimit(page, heading)
     await page.getByLabel('Maximum words').fill('1')
     await page.getByRole('button', { name: 'Set limit', exact: true }).click()
+    await collapseRightClickSelection(page)
   }
   for (const [line, name] of [
     ['\\section{Main}', 'Main'],
@@ -469,6 +477,7 @@ Other prose here.`
     await openLimit(page, heading)
     await page.getByLabel('Maximum words').fill('1')
     await page.getByRole('button', { name: 'Set limit', exact: true }).click()
+    await collapseRightClickSelection(page)
   }
   await page
     .locator('.cm-line')

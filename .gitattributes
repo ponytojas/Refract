@@ -2,3 +2,5 @@
 # keep LF even where core.autocrlf is set.
 *.sh text eol=lf
 packaging/tools.lock text eol=lf
+# The TeX seed inputs are hashed into packaging/tex-seed/files.txt and licenses.txt: same bytes everywhere.
+packaging/tex-seed/** text eol=lf

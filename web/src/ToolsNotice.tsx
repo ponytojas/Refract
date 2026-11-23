@@ -6,7 +6,7 @@ import { getMissingTools, type ToolName } from '@/lib/tools'
 export const effects: Record<ToolName, () => string> = {
   git: () =>
     t(
-      "Git is missing, so projects can't keep their history. Whoever installed Refract needs to reinstall it or install Git.",
+      'Git is required to create projects and use project history. Ask whoever installed Refract to repair the installation or install Git.',
     ),
   tectonic: () => t("Tectonic is missing, so documents can't be compiled."),
   synctex: () => t('SyncTeX is missing, so jumping between the source and the PDF is unavailable.'),

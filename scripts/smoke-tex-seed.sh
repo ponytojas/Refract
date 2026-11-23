@@ -5,10 +5,11 @@
 # and SyncTeX must map source and PDF positions both ways.
 # Usage: scripts/smoke-tex-seed.sh <extracted-dir> <os>   (os: darwin|linux|windows)
 # Network blocked by: macOS sandbox-exec; Linux `sudo unshare -n` (then setpriv back to
-# this user); both are proven with a probe. Windows has no per-process sandbox: it adds a
-# firewall rule on tectonic.exe when it can (an administrator shell; the rule is not
-# probed) and always passes --only-cached, so a file missing from the seed fails the
-# compile instead of being downloaded. The log says which of these held.
+# this user); Windows, which has no per-process sandbox, an outbound firewall rule on
+# tectonic.exe (needs an administrator shell, as on CI). Every block is proven with a
+# probe, and the documents then compile with exactly Refract's flags. Only outside CI, on
+# Windows without administrator rights, it falls back to --only-cached (a file missing
+# from the seed fails instead of downloading) and says the network was not blocked.
 # Run the checks of the seed build itself with build-tex-seed.sh.
 set -eu
 DIR=$(cd "$1" && pwd)
@@ -55,23 +56,44 @@ case "$OS" in
     offline() { sudo unshare -n setpriv --reuid="$(id -u)" --regid="$(id -g)" --clear-groups "$@"; }
     ;;
   windows)
-    ONLY=--only-cached
     FWRULE=refract-smoke-tex-seed-$$
     TECT_WIN=$(cygpath -w "$DIR/tectonic.exe")
-    if netsh advfirewall firewall add rule name="$FWRULE" dir=out action=block program="$TECT_WIN" >/dev/null 2>&1; then
-      NET="firewall rule on tectonic.exe (not probed) plus --only-cached"
-    else
+    if ! netsh advfirewall firewall add rule name="$FWRULE" dir=out action=block program="$TECT_WIN" >/dev/null 2>&1; then
       FWRULE=
+      [ -z "${CI:-}" ] || fail "can't add the firewall rule that blocks tectonic.exe (CI must run as administrator)"
+      ONLY=--only-cached
       NET="NOT blocked (no firewall rule: not an administrator); --only-cached forbids downloads"
     fi
     offline() { "$@"; }
     ;;
 esac
-# Prove the block works: the same sandbox must not reach the network.
+# Prove the block works. macOS and Linux: the same sandbox must not reach the network.
+# Windows: the rule is on tectonic.exe, so tectonic itself is the probe: with an empty cache
+# and Refract's flags it has to fetch the bundle's index, which must fail.
 case "$OS" in
   darwin|linux)
     if offline curl -fsS --max-time 5 -o /dev/null "$URL" 2>/dev/null; then fail "the network is not blocked"; fi
     NET="blocked and probed"
+    ;;
+  windows)
+    if [ -n "$FWRULE" ]; then
+      probe=$WORK/probe
+      mkdir -p "$probe/cache" "$probe/.out"
+      printf '%s\n' '\documentclass{article}' '\begin{document}probe\end{document}' >"$probe/main.tex"
+      if (cd "$probe" && TECTONIC_CACHE_DIR=$(cygpath -w "$probe/cache") HOME="$HOMEDIR" timeout 300 \
+        "$DIR/tectonic.exe" main.tex --outdir .out --synctex --keep-logs --untrusted -Z continue-on-errors --bundle "$URL") \
+        >"$probe/log" 2>&1 && [ -f "$probe/.out/main.pdf" ]; then
+        cat "$probe/log" >&2
+        fail "the firewall rule doesn't block tectonic.exe: it compiled with an empty cache"
+      fi
+      # It must have failed on the network (Tectonic: "this bundle isn't cached, and we couldn't
+      # get it from the internet. Error: error sending request for url ..."), not on something else.
+      if ! grep -q "couldn't get it from the internet" "$probe/log"; then
+        cat "$probe/log" >&2
+        fail "the network probe failed, but not on the network: can't tell whether tectonic.exe is blocked"
+      fi
+      NET="firewall rule on tectonic.exe, probed (an empty cache can't reach the bundle)"
+    fi
     ;;
 esac
 echo "smoke-tex-seed: network: $NET"

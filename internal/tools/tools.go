@@ -33,7 +33,7 @@
 package tools
 
 import (
-	"cmp"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -166,8 +166,17 @@ func Find(name string) Tool {
 	}
 	if dir := Dir(); dir != "" {
 		if p := bundled(dir, name); runnable(p) && trusted(dir, p) {
-			t.Path, t.Source = filepath.Clean(p), SourceBundled
-			return t
+			why := ""
+			if name == "git" && goos != "windows" {
+				why = gitTreeUnsafe(dir)
+			}
+			if why == "" {
+				t.Path, t.Source = filepath.Clean(p), SourceBundled
+				return t
+			}
+			if _, seen := warned.LoadOrStore(p+":git-tree", true); !seen {
+				slog.Warn("ignoring bundled tool", "tool", p, "why", why)
+			}
 		}
 	}
 	if p, err := exec.LookPath(name); err == nil {
@@ -178,12 +187,25 @@ func Find(name string) Tool {
 	return t
 }
 
-// Path is Find(name).Path. When the tool is missing it is the override as
-// written, or else name itself, so that running it fails with the usual "not
-// found" error: never a bare name that the PATH could resolve after a broken
-// override, which would run a program the override was meant to replace.
-func Path(name string) string {
-	return cmp.Or(Find(name).Path, os.Getenv(EnvVar(name)), name)
+// Path returns the absolute path of a tool, or an error when it is missing.
+func Path(name string) (string, error) {
+	t := Find(name)
+	if !t.Found() {
+		return "", fmt.Errorf("%s: %w", name, exec.ErrNotFound)
+	}
+	return t.Path, nil
+}
+
+// Resolve uses an explicit executable when provided, or the standard lookup.
+func Resolve(name, override string) (string, error) {
+	if override == "" {
+		return Path(name)
+	}
+	p, err := exec.LookPath(override)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(p)
 }
 
 // All looks every tool up.
@@ -240,7 +262,7 @@ func isDir(p string) bool {
 
 // Features says what stops working without each tool.
 var Features = map[string]string{
-	"git":      "project history",
+	"git":      "project creation and history",
 	"tectonic": "compiling",
 	"synctex":  "source and PDF jumps",
 	"rg":       "the assistant's search",

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -315,6 +316,54 @@ func swapAfterCheck(t *testing.T, rel, outside string) {
 
 // The build folder Compile checked is the one it uses, even if the path is
 // swapped for a symlink before tectonic runs.
+// A retry that fails without writing a PDF must not report the previous
+// build's, even within the same second; one that rewrites it does, errors or
+// not. The previous PDF stays for the preview either way.
+func TestCompileReportsOnlyThisRunsPDF(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake tectonic is a shell script")
+	}
+	for _, tc := range []struct {
+		name, script string
+		want         bool
+	}{
+		{"fails without pdf", "exit 1", false},
+		{"rewrites pdf with errors", `printf 'new pdf' > "$out/main.pdf"; exit 1`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			proj := t.TempDir()
+			build := filepath.Join(proj, filepath.FromSlash(BuildDir))
+			if err := os.MkdirAll(build, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			old := filepath.Join(build, "main.pdf")
+			if err := os.WriteFile(old, []byte("old pdf"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now() // the previous build finished within this second
+			if err := os.Chtimes(old, now, now); err != nil {
+				t.Fatal(err)
+			}
+			bin := filepath.Join(t.TempDir(), "tectonic")
+			script := "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = --outdir ] && out=$2; shift; done\n" + tc.script + "\n"
+			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			write(t, proj, "main.tex", "x")
+			res, err := (&Tectonic{Bin: bin, Timeout: 5 * time.Second}).Compile(context.Background(), proj, "main.tex")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := res.PDF != ""; got != tc.want || res.OK {
+				t.Fatalf("PDF %q, OK %v; want a PDF: %v", res.PDF, res.OK, tc.want)
+			}
+			if _, err := os.Stat(old); err != nil {
+				t.Errorf("the previous PDF is gone: %v", err)
+			}
+		})
+	}
+}
+
 func TestCompileKeepsCheckedBuildDir(t *testing.T) {
 	proj, outside := t.TempDir(), t.TempDir()
 	build := filepath.Join(proj, filepath.FromSlash(BuildDir))
