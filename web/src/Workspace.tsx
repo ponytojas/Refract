@@ -186,6 +186,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   const [result, setResult] = useState<CompileResult | null>(null)
   const [compileError, setCompileError] = useState('')
   const [activity, setActivity] = useState<Activity | null>(null)
+  const compileGen = useRef(0) // counts compile() calls
   const stopPolling = useRef(() => {}) // the running compile's activity polling
   useEffect(() => () => stopPolling.current(), [])
   const [jump, setJump] = useState<{ path: string; line: number; n: number } | undefined>()
@@ -514,6 +515,7 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
 
   async function compile() {
     if (locked) return
+    const mine = ++compileGen.current // only the latest call clears the state
     setCompiling(true)
     setCompileError('')
     // A first compile may download for a minute: ask what it is doing, from 0.8 s in, every second.
@@ -538,14 +540,17 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
     try {
       await autosave.flushAll() // compile what is on screen
       const res = await api<CompileResult>(`/api/projects/${id}/compile`, { method: 'POST' })
+      if (mine !== compileGen.current) return // a newer compile took over
       setResult(res)
       if (pdfChanged(res)) setPdfVersion((v) => v + 1)
     } catch (e) {
-      setCompileError(errorText(e))
+      if (mine === compileGen.current) setCompileError(errorText(e))
     } finally {
       stop()
-      setActivity(null)
-      setCompiling(false)
+      if (mine === compileGen.current) {
+        setActivity(null)
+        setCompiling(false)
+      }
     }
   }
   const compileRef = useRef(compile)

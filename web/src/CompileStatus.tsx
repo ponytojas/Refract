@@ -108,9 +108,12 @@ export default function CompileStatus({
   if (view.kind === 'downloading') {
     icon = <Download className="animate-pulse text-muted-foreground" />
     label = tn(view.count, 'Downloading {n} file · {file}', 'Downloading {n} files · {file}', { file: view.file })
+  } else if (view.kind === 'queued') {
+    icon = <Loader2 className="animate-spin text-muted-foreground" />
+    label = t('Waiting for a free slot…')
   } else if (view.kind === 'retrying') {
     icon = <Loader2 className="animate-spin text-warning" />
-    label = t('Can’t reach the package server…')
+    label = t('Retrying a download…')
   } else if (compiling) {
     icon = <Loader2 className="animate-spin text-muted-foreground" />
     label = t('Compiling…')
@@ -165,7 +168,7 @@ export default function CompileStatus({
         </PopoverTrigger>
         {/* The chip's name stays fixed: say the network states out loud, not every file downloaded */}
         <span aria-live="polite" className="sr-only">
-          {['retrying', 'needs-download', 'interrupted'].includes(view.kind) ? label : ''}
+          {['queued', 'retrying', 'needs-download', 'interrupted'].includes(view.kind) ? label : ''}
         </span>
         <PopoverContent align="start" className="max-h-[60vh] w-[26rem] overflow-auto p-0">
           <div className="flex items-center justify-between border-b px-3 py-2">
@@ -184,12 +187,12 @@ export default function CompileStatus({
           {error && <p className="px-3 py-2 text-sm text-destructive">{error}</p>}
           {!compiling && view.kind === 'needs-download' && (
             <div className="space-y-2 border-b bg-warning/10 px-3 py-3">
-              <p className="text-sm font-medium">{t('This document needs files that aren’t on this computer yet')}</p>
+              <p className="text-sm font-medium">{t('This document needs files Refract doesn’t have yet')}</p>
               {view.files.length > 0 && (
                 <p className="font-mono text-xs break-words text-muted-foreground">{view.files.join(', ')}</p>
               )}
               <p className="text-sm text-muted-foreground">
-                {t('Your document is saved. Connect to the internet and try again.')}
+                {t('Your document is saved. Refract can’t reach the package server right now: try again in a moment.')}
               </p>
               {onRetry && (
                 <Button
@@ -227,8 +230,8 @@ export default function CompileStatus({
             <p className="border-b px-3 py-2 text-sm text-muted-foreground">
               {tn(
                 view.count,
-                'Downloaded {n} file. It’s kept on this computer for offline use.',
-                'Downloaded {n} files. They’re kept on this computer for offline use.',
+                'Downloaded {n} file. It’s kept for later compiles.',
+                'Downloaded {n} files. They’re kept for later compiles.',
               )}
             </p>
           )}

@@ -110,6 +110,9 @@ func (q *Queue) Compile(ctx context.Context, projectDir, mainFile string) (*Resu
 		q.releaseLocked(w)
 		q.mu.Unlock()
 	}()
+	if report := reporterFrom(ctx); report != nil {
+		report(Event{Kind: Started})
+	}
 	return q.Next.Compile(ctx, projectDir, mainFile)
 }
 

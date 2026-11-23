@@ -46,6 +46,12 @@ test('offline with no file names still needs a download', () => {
   })
 })
 
+test('a compile waiting for a slot is queued', () => {
+  assert.deepEqual(compileView({ compiling: true, activity: act({ state: 'queued' }), result: null }), {
+    kind: 'queued',
+  })
+})
+
 test('a timeout while downloading is an interruption', () => {
   const downloads = { ...none, fetched: 4, interrupted: true }
   assert.deepEqual(compileView({ compiling: false, activity: null, result: { downloads } }), { kind: 'interrupted' })
@@ -73,6 +79,10 @@ test('older or superseded results show nothing special', () => {
 test('the PDF viewer reloads only when the PDF is new', () => {
   assert.equal(pdfChanged({ pdf: '.refract/build/main.pdf', downloads: none }), true)
   assert.equal(pdfChanged({ pdf: '.refract/build/main.pdf' }), true)
-  assert.equal(pdfChanged({ pdf: '.refract/build/main.pdf', downloads: { ...none, missing: ['a.sty'] } }), false)
+  assert.equal(
+    pdfChanged({ pdf: '.refract/build/main.pdf', downloads: { ...none, missing: ['a.sty'], offline: true } }),
+    false,
+  )
+  assert.equal(pdfChanged({ pdf: '.refract/build/main.pdf', downloads: { ...none, missing: ['pdftex.map'] } }), true)
   assert.equal(pdfChanged({ downloads: none }), false)
 })

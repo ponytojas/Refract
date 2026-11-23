@@ -9,7 +9,7 @@ export type Downloads = {
 }
 
 export type Activity = {
-  state: 'idle' | 'compiling' | 'downloading'
+  state: 'idle' | 'queued' | 'compiling' | 'downloading'
   file: string
   downloaded: number
   retrying: boolean
@@ -17,6 +17,7 @@ export type Activity = {
 
 export type CompileView =
   | { kind: 'idle' }
+  | { kind: 'queued' }
   | { kind: 'compiling' }
   | { kind: 'downloading'; file: string; count: number }
   | { kind: 'retrying' }
@@ -32,6 +33,7 @@ type Input = {
 
 export function compileView({ compiling, activity, result }: Input): CompileView {
   if (compiling) {
+    if (activity?.state === 'queued') return { kind: 'queued' }
     if (activity?.retrying) return { kind: 'retrying' }
     if (activity?.state === 'downloading')
       return { kind: 'downloading', file: activity.file, count: activity.downloaded }
@@ -39,13 +41,13 @@ export function compileView({ compiling, activity, result }: Input): CompileView
   }
   const d = result?.downloads
   if (!result || result.superseded || !d) return { kind: 'idle' }
-  if (d.missing.length > 0 || d.offline) return { kind: 'needs-download', files: d.missing }
+  if (d.offline) return { kind: 'needs-download', files: d.missing }
   if (d.interrupted) return { kind: 'interrupted' }
   if (d.fetched > 0) return { kind: 'downloaded', count: d.fetched }
   return { kind: 'idle' }
 }
 
-/** Whether the PDF viewer should reload: a compile that stopped for a missing download leaves the previous PDF. */
+/** Whether the PDF viewer should reload: a compile that stopped for an unreachable package server leaves the previous PDF. */
 export function pdfChanged(result: { pdf?: string; downloads?: Downloads }): boolean {
-  return !!result.pdf && !(result.downloads?.missing.length ?? 0)
+  return !!result.pdf && !result.downloads?.offline
 }

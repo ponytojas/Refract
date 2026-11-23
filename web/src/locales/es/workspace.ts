@@ -152,20 +152,20 @@ export default {
   'Compiling…': 'Compilando…',
   'Downloading {n} file · {file}': 'Descargando {n} archivo · {file}',
   'Downloading {n} files · {file}': 'Descargando {n} archivos · {file}',
-  'Can’t reach the package server…': 'No se puede acceder al servidor de paquetes…',
+  'Waiting for a free slot…': 'Esperando un hueco libre…',
+  'Retrying a download…': 'Reintentando una descarga…',
   'Needs a download': 'Necesita una descarga',
   'Download interrupted': 'Descarga interrumpida',
-  'This document needs files that aren’t on this computer yet':
-    'Este documento necesita archivos que aún no están en este equipo',
-  'Your document is saved. Connect to the internet and try again.':
-    'Tu documento está guardado. Conéctate a internet e inténtalo de nuevo.',
+  'This document needs files Refract doesn’t have yet': 'Este documento necesita archivos que Refract aún no tiene',
+  'Your document is saved. Refract can’t reach the package server right now: try again in a moment.':
+    'Tu documento está guardado. Refract no puede acceder ahora al servidor de paquetes: inténtalo de nuevo en un momento.',
   'Compile again': 'Compilar de nuevo',
   'Still downloading when the time ran out. What was downloaded is kept: compile again to continue.':
     'Se seguía descargando cuando se agotó el tiempo. Lo descargado se conserva: compila de nuevo para continuar.',
-  'Downloaded {n} file. It’s kept on this computer for offline use.':
-    'Se descargó {n} archivo. Se conserva en este equipo para usarlo sin conexión.',
-  'Downloaded {n} files. They’re kept on this computer for offline use.':
-    'Se descargaron {n} archivos. Se conservan en este equipo para usarlo sin conexión.',
+  'Downloaded {n} file. It’s kept for later compiles.':
+    'Se descargó {n} archivo. Se conserva para próximas compilaciones.',
+  'Downloaded {n} files. They’re kept for later compiles.':
+    'Se descargaron {n} archivos. Se conservan para próximas compilaciones.',
   'Could not compile': 'No se pudo compilar',
   Cancelled: 'Cancelada',
   '{n} error': '{n} error',
