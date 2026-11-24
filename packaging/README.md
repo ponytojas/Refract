@@ -240,6 +240,13 @@ the secrets are absent. Repository secrets, by name: `MACOS_CERT_P12_BASE64`,
 the local `notarytool` profile and sets the secrets (`gh secret set`) is in `macos/README.md`,
 "Signing and notarization". Values never go in the repository.
 
+**Disk image (#128).** The same workflow then builds `Refract-<arch>.dmg` per architecture with
+`macos/build-dmg.sh` (`scripts/make-dmg.py`, dmgbuild pinned with hashes in
+`scripts/requirements-dmg.txt`, installed into a virtualenv on the runner). With the secrets it signs the image with the same
+identity, notarizes it with the same API key, staples it and mounts it to check the app inside; without them it is
+unsigned and uploaded as `Refract-dmg-adhoc-<arch>`. The window layout, the icon and the
+background are checked in (`macos/dmg/`, `macos/Resources/AppIcon.icns`); how to regenerate them is in `macos/README.md`, "Icon and disk image".
+
 ## Server deployments
 
 Server deployments are a distinct path: `server/` (a systemd unit and

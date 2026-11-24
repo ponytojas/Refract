@@ -22,6 +22,7 @@
 # See macos/README.md.
 #   Refract.app/Contents/Frameworks/Sparkle.framework   (Sparkle 2, no XPC services: the app isn't sandboxed)
 #   Refract.app/Contents/Resources/{en,es}.lproj/Localizable.strings
+#   Refract.app/Contents/Resources/AppIcon.icns
 #   Refract.app/Contents/Info.plist
 set -eu
 [ -z "${CODESIGN_IDENTITY:-}" ] || { echo "error: CODESIGN_IDENTITY is no longer used: set REFRACT_SIGN_IDENTITY instead" >&2; exit 2; }
@@ -102,6 +103,7 @@ install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS
 cp "$BUILD/go-$ARCH/refract" "$APP/Contents/Resources/Server/bin/refract"
 tar -xzf "$TOOLS" -o -C "$APP/Contents/Resources/Server/libexec/refract"
 sed "s/@VERSION@/$NUM/g" "$ROOT/macos/Resources/Info.plist" > "$APP/Contents/Info.plist"
+cp "$ROOT/macos/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 PLIST="$APP/Contents/Info.plist"
 if [ -n "$SPARKLE_KEY" ]; then
   # One feed per architecture: Sparkle doesn't choose by architecture, and each app updates to its own.
