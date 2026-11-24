@@ -26,9 +26,12 @@ const (
 	Running
 	// Started: the compile left the queue and began (sent by Queue).
 	Started
+	// BundleUnreachable: the bundle isn't cached and its index can't be
+	// fetched, so nothing can be compiled (a first compile offline).
+	BundleUnreachable
 )
 
-// Event is one thing Tectonic said about downloads, read from its stderr.
+// Event is one thing Tectonic said about downloads, read from its output.
 type Event struct {
 	Kind    EventKind
 	File    string
@@ -37,10 +40,9 @@ type Event struct {
 	Network bool // FetchFailed: the server could not be reached
 }
 
-// Reporter receives events while a compile runs. Calls never overlap (the
-// compile serializes them) but may come from different goroutines, and events
-// of Tectonic's stdout and stderr can arrive slightly out of order. It must
-// return quickly.
+// Reporter receives events while a compile runs, in the order Tectonic wrote
+// them. Calls never overlap (the compile serializes them) but may come from
+// different goroutines. It must return quickly.
 type Reporter func(Event)
 
 type reporterKey struct{}
@@ -65,11 +67,14 @@ var (
 	reFetchFailed = regexp.MustCompile(`^warning: failure fetching "(.+)" from network \((\d+)/(\d+)\)$`)
 	reRunning     = regexp.MustCompile(`^note: Running (\S+)`)
 	reGaveUp      = regexp.MustCompile(`^caused by: failed to download "(.+)"; please check your network connection\.$`)
+	// Tectonic 0.17 with an empty cache and no network fails before any
+	// download is announced; it says so as an error, or in a panic.
+	reNoBundle = regexp.MustCompile(`this bundle isn't cached, and we couldn't get it from the internet`)
 	// What Tectonic 0.17 (reqwest) says when there is no connection.
 	networkCauses = []string{"dns error", "client error (connect)", "operation timed out", "connection refused", "timed out"}
 )
 
-// progressWriter splits what Tectonic writes to stderr into lines and
+// progressWriter splits what Tectonic writes (stdout and stderr) into lines and
 // reports the download events among them. It keeps nothing: wrap it with
 // a buffer for the output.
 type progressWriter struct {
@@ -126,6 +131,8 @@ func (w *progressWriter) line(l string) {
 		w.pending = &Event{Kind: FetchFailed, File: m[1], Attempt: n, Total: total}
 	case reRunning.MatchString(l):
 		w.emit(Event{Kind: Running, File: reRunning.FindStringSubmatch(l)[1]})
+	case reNoBundle.MatchString(l):
+		w.emit(Event{Kind: BundleUnreachable})
 	}
 }
 
@@ -187,6 +194,9 @@ func (d *downloadState) add(e Event, now time.Time) {
 	case Running:
 		d.lastWasDown = false
 		d.finishing = e.File == "xdvipdfmx"
+	case BundleUnreachable:
+		d.lastWasDown = false
+		d.offline = true
 	}
 }
 
@@ -240,7 +250,7 @@ func (d Downloads) MarshalJSON() ([]byte, error) {
 }
 
 // reCascade matches the problems that follow from a failed download.
-var reCascade = regexp.MustCompile("^(failure fetching|open of input)|failed to download")
+var reCascade = regexp.MustCompile("^(failure fetching|open of input)|failed to download|this bundle isn't cached")
 
 // reNoFile matches "file not found" problems, which name the file.
 var reNoFile = regexp.MustCompile("^(File `.*' not found|I can't find file)")
@@ -342,7 +352,7 @@ func (r *Runner) onEvent(a *liveActivity, e Event) {
 		// Tectonic tries again unless this was the last attempt.
 		a.Retrying = e.Attempt < e.Total
 		a.lastRetry = time.Now()
-	case DownloadFailed, Running:
+	case DownloadFailed, Running, BundleUnreachable:
 		a.Retrying = false
 	}
 }

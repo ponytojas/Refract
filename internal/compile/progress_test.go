@@ -161,10 +161,27 @@ func TestTimeoutWhileDownloadingSaysCompileAgain(t *testing.T) {
 	}
 }
 
-func TestTimeoutLongAfterADownloadIsALoop(t *testing.T) {
+func TestTimeoutLongAfterADownloadMayBeEither(t *testing.T) {
 	defer func(q time.Duration) { downloadQuiet = q }(downloadQuiet)
 	downloadQuiet = 300 * time.Millisecond
+	// A stalled transfer and a loop right after a download look the same:
+	// the retry is offered, and the loop is named for a second timeout.
 	bin, _ := fakeTectonic(t, "echo 'note: downloading foo.sty'\nsleep 30\n")
+	dir := t.TempDir()
+	write(t, dir, "main.tex", "x")
+	res, err := (&Tectonic{Bin: bin, Timeout: 1500 * time.Millisecond}).Compile(context.Background(), dir, "main.tex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := res.Problems[0].Message
+	if !res.TimedOut || !res.Downloads.Interrupted || res.Problems[0].Kind != "download" ||
+		!strings.Contains(msg, "foo.sty") || !strings.Contains(msg, "Compile again to continue") || !strings.Contains(msg, "infinite loop") {
+		t.Fatalf("res = %+v", res)
+	}
+}
+
+func TestTimeoutAfterTeXRunsAgainIsALoop(t *testing.T) {
+	bin, _ := fakeTectonic(t, "echo 'note: downloading foo.sty'\necho 'note: Running TeX ...'\nsleep 30\n")
 	dir := t.TempDir()
 	write(t, dir, "main.tex", "x")
 	res, err := (&Tectonic{Bin: bin, Timeout: 1500 * time.Millisecond}).Compile(context.Background(), dir, "main.tex")
@@ -173,6 +190,31 @@ func TestTimeoutLongAfterADownloadIsALoop(t *testing.T) {
 	}
 	if !res.TimedOut || res.Downloads.Interrupted || !strings.Contains(res.Problems[0].Message, "infinite loop") {
 		t.Fatalf("res = %+v", res)
+	}
+}
+
+func TestEmptyCacheOfflineIsOffline(t *testing.T) {
+	// What Tectonic 0.17.0 prints with an empty cache and no network: an
+	// error for a named bundle, a panic for the default one.
+	for name, out := range map[string]string{
+		"error": `echo "error: this bundle isn't cached, and we couldn't get it from the internet. Error: error sending request for url (https://example.invalid/b.ttb)" >&2
+exit 1`,
+		"panic": `printf '\nthread '"'"'main'"'"' panicked at src/config.rs:154:18:\n' >&2
+echo "called \` + "`" + `Result::unwrap()\` + "`" + ` on an \` + "`" + `Err\` + "`" + ` value: this bundle isn't cached, and we couldn't get it from the internet. Error: error sending request for url (https://relay.fullyjustified.net/default_bundle_v33.tar.index.gz)" >&2
+exit 101`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			bin, _ := fakeTectonic(t, out+"\n")
+			dir := t.TempDir()
+			write(t, dir, "main.tex", "x")
+			res, err := (&Tectonic{Bin: bin, Timeout: time.Minute}).Compile(context.Background(), dir, "main.tex")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.OK || !res.Downloads.Offline || len(res.Problems) != 1 || res.Problems[0].Kind != "download" {
+				t.Fatalf("res = %+v", res)
+			}
+		})
 	}
 }
 

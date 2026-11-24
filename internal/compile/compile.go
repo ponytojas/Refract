@@ -155,12 +155,14 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 			stopRun() // before xdvipdfmx: the previous good PDF stays
 		}
 	}
-	// Tectonic writes its notes ("downloading …") to stdout and its warnings
-	// ("failure fetching …") to stderr; each stream gets its own splitter,
-	// since exec copies them from separate goroutines.
-	pw, po := &progressWriter{report: onEvent}, &progressWriter{report: onEvent}
-	cmd.Stderr = io.MultiWriter(&stderr, pw)
-	cmd.Stdout = po
+	// Tectonic writes its notes ("downloading …", "Running xdvipdfmx") to
+	// stdout and its warnings ("failure fetching …") to stderr. Both go to one
+	// writer, so exec gives the child a single pipe for them and the lines
+	// arrive in the order Tectonic wrote them: a failure is judged against the
+	// stage it really happened in, not against whichever stream was read first.
+	pw := &progressWriter{report: onEvent}
+	both := io.MultiWriter(&stderr, pw)
+	cmd.Stdout, cmd.Stderr = both, both
 
 	// The previous build's PDF stays for the preview; this run's counts only if
 	// it created or rewrote the file (a failed retry within the same second
@@ -171,7 +173,6 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 	}
 	start := time.Now()
 	runErr := cmd.Run()
-	po.close()
 	pw.close()
 	dlMu.Lock()
 	downloads, wasStopped := dl, stopped
@@ -231,9 +232,14 @@ func (t *Tectonic) Compile(ctx context.Context, projectDir, mainFile string) (*R
 		msg := "Compilation failed."
 		if res.CPULimit {
 			msg = "Compilation used too much CPU time and was stopped. Look for an infinite loop."
-		} else if res.TimedOut && downloads.downloadingAt(time.Now()) {
+		} else if res.TimedOut && downloads.inProgress() != "" {
+			// Tectonic announces a download but not its end: after a long
+			// quiet spell it may still be a slow transfer, or TeX looping.
 			res.Downloads.Interrupted = true
 			msg = "Still downloading LaTeX packages when the time ran out. Compile again to continue; what was downloaded is kept."
+			if !downloads.downloadingAt(time.Now()) {
+				msg = "Compilation timed out after " + t.Timeout.String() + " while " + downloads.inProgress() + " may still have been downloading. Compile again to continue; what was downloaded is kept. If it times out again, look for an infinite loop."
+			}
 			res.Problems = append([]Problem{{Severity: "error", Kind: "download", Message: msg}}, res.Problems...)
 			return res, nil
 		} else if res.TimedOut {
