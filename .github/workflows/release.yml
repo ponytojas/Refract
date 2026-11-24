@@ -203,7 +203,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" "$notes" $pre
 
   # The default token cannot write to a different repository. Opt in after
-  # adding a fine-grained HOMEBREW_TAP_TOKEN for ponytojas/homebrew-tap.
+  # adding a fine-grained HOMEBREW_TAP_TOKEN for Use-Refract/homebrew-tap.
   homebrew:
     needs: release
     if: vars.HOMEBREW_TAP_ENABLED == 'true' && !contains(github.ref_name, '-')
@@ -215,7 +215,7 @@ jobs:
           path: metadata
       - uses: actions/checkout@v7
         with:
-          repository: ponytojas/homebrew-tap
+          repository: Use-Refract/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
       - name: Update tap
@@ -273,7 +273,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/ponytojas/refract
+          images: ghcr.io/use-refract/refract
       - id: push
         uses: docker/build-push-action@v7
         with:
@@ -281,7 +281,7 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: VERSION=${{ github.ref_name }}
-          outputs: type=image,name=ghcr.io/ponytojas/refract,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=ghcr.io/use-refract/refract,push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=image-${{ matrix.arch }}
       - id: digest
         run: echo "${{ matrix.arch }}=${{ steps.push.outputs.digest }}" >> "$GITHUB_OUTPUT"
@@ -292,11 +292,11 @@ jobs:
       # Blocks the release on Critical findings without a reviewed exception
       # (security/image-scan-exceptions.json); the report is kept either way.
       - name: Scan the pushed image
-        run: scripts/scan-image.sh "ghcr.io/ponytojas/refract@${{ steps.push.outputs.digest }}" "$RUNNER_TEMP/scan"
+        run: scripts/scan-image.sh "ghcr.io/use-refract/refract@${{ steps.push.outputs.digest }}" "$RUNNER_TEMP/scan"
       - name: Keep the report with the build
         if: ${{ !cancelled() && steps.push.outputs.digest != '' }}
         run: |
-          printf '%s\n' "ghcr.io/ponytojas/refract@${{ steps.push.outputs.digest }}" > "$RUNNER_TEMP/scan/image.txt"
+          printf '%s\n' "ghcr.io/use-refract/refract@${{ steps.push.outputs.digest }}" > "$RUNNER_TEMP/scan/image.txt"
           tar -czf "$RUNNER_TEMP/refract-image-${GITHUB_REF_NAME}-${{ matrix.arch }}-scan.tar.gz" -C "$RUNNER_TEMP/scan" .
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() && steps.push.outputs.digest != '' }}
@@ -322,7 +322,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/ponytojas/refract
+          images: ghcr.io/use-refract/refract
           # v1.2.3 → 1.2.3 and 1.2; "latest" only for releases, not pre-releases (v1.2.3-rc1).
           tags: |
             type=semver,pattern={{version}}
@@ -341,5 +341,5 @@ jobs:
           done <<EOF
           $TAGS
           EOF
-          docker buildx imagetools create "$@" "ghcr.io/ponytojas/refract@$AMD64" "ghcr.io/ponytojas/refract@$ARM64"
+          docker buildx imagetools create "$@" "ghcr.io/use-refract/refract@$AMD64" "ghcr.io/use-refract/refract@$ARM64"
           docker buildx imagetools inspect "$(printf '%s\n' "$TAGS" | head -1)"

@@ -6,7 +6,7 @@
 #
 # Usage: scripts/scan-image.sh <image> <out folder>
 #   <image> is what `docker run` takes, ideally by digest
-#   (ghcr.io/ponytojas/refract@sha256:…), or a local tag in CI.
+#   (ghcr.io/use-refract/refract@sha256:…), or a local tag in CI.
 # Needs docker, python3, and syft and grype on the PATH (scripts/install-scanners.sh).
 # Writes report.md, sbom.spdx.json, sbom.syft.json, grype.json and grype.txt.
 # Exit status: 0 publishable, 1 blocked, 2 the scan itself failed.
