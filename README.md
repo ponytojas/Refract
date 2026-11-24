@@ -477,11 +477,11 @@ The CLI lets you run `refract login` on your computer and upload the resulting c
 **macOS (Apple Silicon or Intel):**
 
 ```sh
-brew install ponytojas/tap/refract
+brew install use-refract/tap/refract
 refract login
 ```
 
-Update with `brew update` followed by `brew upgrade ponytojas/tap/refract`.
+Update with `brew update` followed by `brew upgrade use-refract/tap/refract`.
 
 **Debian / Ubuntu:** download the `.deb` for your architecture (`amd64` or `arm64`) from [Releases](https://github.com/Use-Refract/Refract/releases). Packages are available starting with v0.1.2. For example, from the download directory:
 

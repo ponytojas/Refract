@@ -203,7 +203,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" "$notes" $pre
 
   # The default token cannot write to a different repository. Opt in after
-  # adding a fine-grained HOMEBREW_TAP_TOKEN for ponytojas/homebrew-tap.
+  # adding a fine-grained HOMEBREW_TAP_TOKEN for Use-Refract/homebrew-tap.
   homebrew:
     needs: release
     if: vars.HOMEBREW_TAP_ENABLED == 'true' && !contains(github.ref_name, '-')
@@ -215,7 +215,7 @@ jobs:
           path: metadata
       - uses: actions/checkout@v7
         with:
-          repository: ponytojas/homebrew-tap
+          repository: Use-Refract/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
       - name: Update tap
