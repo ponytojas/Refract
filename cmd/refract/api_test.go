@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -40,6 +41,12 @@ func newAIServerDB(t *testing.T, m mode.Mode) (http.Handler, *sql.DB) {
 // from the mode.
 func newAIServerOutbound(t *testing.T, m mode.Mode, publicOnly bool) (http.Handler, *sql.DB) {
 	t.Helper()
+	return newAIServerWith(t, m, func(a *api) { a.publicOnly = publicOnly })
+}
+
+// newAIServerWith is newAIServerDB with the api adjusted by set.
+func newAIServerWith(t *testing.T, m mode.Mode, set func(*api)) (http.Handler, *sql.DB) {
+	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +66,8 @@ func newAIServerOutbound(t *testing.T, m mode.Mode, publicOnly bool) (http.Handl
 		t.Fatal(err)
 	}
 
-	a := &api{base: &siwc.Session{DB: db, Key: key}, mode: m, publicOnly: publicOnly, providers: &providers.Store{DB: db, Key: key}, usage: &usage.Recorder{DB: db}}
+	a := &api{base: &siwc.Session{DB: db, Key: key}, mode: m, providers: &providers.Store{DB: db, Key: key}, usage: &usage.Recorder{DB: db}}
+	set(a)
 	mux := http.NewServeMux()
 	a.routes(&router{mux: mux, acc: &access.Checker{DB: db}})
 	mux.HandleFunc("/api/", http.NotFound) // as in main
@@ -122,6 +130,49 @@ func TestSelfHostKeepsChatGPT(t *testing.T) {
 	var me struct{ Mode string }
 	if call(t, h, "GET", "/api/me", &me); me.Mode != "selfhost" {
 		t.Errorf("me.mode = %q", me.Mode)
+	}
+}
+
+// The in-server ChatGPT sign-in exists only where the server listens on
+// loopback (a.logins set) and the plan is offered; the status says which.
+func TestSignInHereRoutes(t *testing.T) {
+	type status struct {
+		SignInHere bool `json:"sign_in_here"`
+	}
+	for _, c := range []struct {
+		name   string
+		m      mode.Mode
+		logins bool
+		want   bool
+	}{
+		{"loopback", mode.SelfHost, true, true},
+		{"reachable from other computers", mode.SelfHost, false, false},
+		{"hosted service", mode.SaaS, true, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h, _ := newAIServerWith(t, c.m, func(a *api) {
+				if c.logins {
+					a.logins = &siwc.Logins{}
+				}
+			})
+			var st status
+			if call(t, h, "GET", "/api/chatgpt/status", &st); st.SignInHere != c.want {
+				t.Errorf("sign_in_here = %v, want %v", st.SignInHere, c.want)
+			}
+			code := call(t, h, "GET", "/api/chatgpt/login", nil)
+			if want := map[bool]int{true: http.StatusOK, false: http.StatusNotFound}[c.want]; code != want {
+				t.Errorf("GET /api/chatgpt/login = %d, want %d", code, want)
+			}
+		})
+	}
+}
+
+func TestLoginsOnlyOnLoopback(t *testing.T) {
+	for addr, want := range map[string]bool{"127.0.0.1:8080": true, "[::1]:8080": true, "0.0.0.0:8080": false, "192.168.1.5:8080": false} {
+		a, _ := net.ResolveTCPAddr("tcp", addr)
+		if got := loginsFor(a) != nil; got != want {
+			t.Errorf("%s: in-server sign-in = %v, want %v", addr, got, want)
+		}
 	}
 }
 

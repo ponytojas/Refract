@@ -448,9 +448,10 @@ What the web view does with things the page asks for (`WebViewController`; the p
 - **Clipboard.** `navigator.clipboard.writeText` works from the loopback origin (a secure context). Reading
   (`readText`, the editor's Paste menu entry) shows WebKit's own "Paste" prompt.
 
-Signing in to ChatGPT inside the app is not done here: today Settings → Assistant asks the person to run
-`refract login` and upload the credentials file (the file picker works). The one-click flow from Settings
-needs the server side of #61; its sign-in page then opens in the browser by the rule above.
+Signing in to ChatGPT needs no native code: **Settings → Assistant → Sign in with ChatGPT** asks the
+embedded server (which listens on loopback) to start the sign-in, and the page's `window.open` of OpenAI's
+address goes to the default browser by the rule above. ChatGPT redirects to `127.0.0.1:1455`, which the
+server answers itself; the page polls until it's done. Uploading a credentials file still works.
 
 ## Left for later
 

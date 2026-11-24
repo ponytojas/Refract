@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ponytojas/Refract/internal/siwc"
 )
 
 // listenAddr is REFRACT_ADDR, or 127.0.0.1:8080 without it: this computer
@@ -199,4 +201,15 @@ func newServer(mux http.Handler, hosts hostPolicy) *http.Server {
 		ReadHeaderTimeout:            10 * time.Second,
 		DisableGeneralOptionsHandler: true,
 	}
+}
+
+// loginsFor is the in-server ChatGPT sign-in for a server listening on addr:
+// only on loopback, where the browser is on this computer. A container that
+// listens on all its interfaces gets none: OpenAI's redirect to the host's
+// 127.0.0.1 can't reach it.
+func loginsFor(addr net.Addr) *siwc.Logins {
+	if tcp, ok := addr.(*net.TCPAddr); ok && tcp.IP.IsLoopback() {
+		return &siwc.Logins{}
+	}
+	return nil
 }
