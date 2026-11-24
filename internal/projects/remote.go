@@ -42,9 +42,10 @@ var (
 	ErrBehind    = errors.New("the remote has commits this project doesn't: pull first")
 	branchName   = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
 
-	ErrPrivateRemote = errors.New("the remote's address is on a private network, which the hosted service can't reach")
-	ErrTokenOrigin   = errors.New("the remote is on another host now, and the saved token only works with the old one: type an access token for the new host, or save without one")
-	ErrGitHubRemote  = errors.New("a remote that uses the GitHub account must be a repository on GitHub")
+	ErrPrivateRemote   = errors.New("the remote's address is on a private network, which the hosted service can't reach")
+	ErrLinkLocalRemote = errors.New("the remote's address is a link-local address (such as a cloud metadata service), which Refract never connects to")
+	ErrTokenOrigin     = errors.New("the remote is on another host now, and the saved token only works with the old one: type an access token for the new host, or save without one")
+	ErrGitHubRemote    = errors.New("a remote that uses the GitHub account must be a repository on GitHub")
 )
 
 // remoteOrigin is the scheme, host and port a remote URL connects to, in one
@@ -113,7 +114,7 @@ var lookupIP = net.DefaultResolver.LookupNetIP
 // PublicRemotes it returns nothing.
 func (s *Service) pinRemote(ctx context.Context, raw string) ([]string, error) {
 	if !s.PublicRemotes {
-		return nil, nil
+		return nil, s.refuseLinkLocal(ctx, raw)
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -153,6 +154,40 @@ func (s *Service) pinRemote(ctx context.Context, raw string) ([]string, error) {
 	}
 	port := cmp.Or(u.Port(), "443")
 	return append(opts, "-c", "http.curloptResolve="+host+":"+port+":"+strings.Join(pinned, ",")), nil
+}
+
+// refuseLinkLocal is what remotes get without PublicRemotes: link-local
+// addresses (169.254.0.0/16, fe80::/10: cloud metadata services) are refused
+// in every mode. An address written in the URL is checked, and so are the
+// addresses a host name resolves to when the push or pull starts; unlike
+// PublicRemotes, git isn't pinned to them, so this is a check, not a guarantee.
+func (s *Service) refuseLinkLocal(ctx context.Context, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+		return nil // checkRemote and git judge the rest
+	}
+	host := u.Hostname()
+	if a, err := netip.ParseAddr(host); err == nil {
+		if isLinkLocal(a) {
+			return ErrLinkLocalRemote
+		}
+		return nil
+	}
+	addrs, err := lookupIP(ctx, "ip", host)
+	if err != nil {
+		return nil // a host that can't be found yet is saved anyway
+	}
+	for _, a := range addrs {
+		if isLinkLocal(a) {
+			return ErrLinkLocalRemote
+		}
+	}
+	return nil
+}
+
+func isLinkLocal(a netip.Addr) bool {
+	a = a.Unmap().WithZone("")
+	return a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast()
 }
 
 func checkRemote(r Remote) error {
@@ -243,7 +278,7 @@ func (s *Service) SetRemote(ctx context.Context, id string, r Remote, keepToken 
 	}
 	// An early, friendly error; every push and pull checks again. A host that
 	// can't be found yet is saved anyway, as without PublicRemotes.
-	if _, err := s.pinRemote(ctx, r.URL); errors.Is(err, ErrPrivateRemote) || errors.Is(err, ErrBadRemote) {
+	if _, err := s.pinRemote(ctx, r.URL); errors.Is(err, ErrPrivateRemote) || errors.Is(err, ErrLinkLocalRemote) || errors.Is(err, ErrBadRemote) {
 		return err
 	}
 	switch {
@@ -420,7 +455,6 @@ func (s *Service) Push(ctx context.Context, id string) error {
 	unlock := lockRepo(id) // only while committing: never across the network
 	_, err = s.checkpoint(ctx, id, "Checkpoint before push", false)
 	unlock()
-	s.measure(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -447,11 +481,7 @@ func (s *Service) Pull(ctx context.Context, id string) (*PullResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkQuotaFor(ctx, id); err != nil {
-		return nil, err
-	}
-	defer s.measure(ctx, id) // a pull can overshoot the limit; then growth is refused until under
-	unlock := lockRepo(id)   // released during the fetch, taken again for the merge
+	unlock := lockRepo(id) // released during the fetch, taken again for the merge
 	_, err = s.checkpoint(ctx, id, "Checkpoint before pull", false)
 	unlock()
 	if err != nil {

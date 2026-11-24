@@ -63,8 +63,6 @@ Usage:
                      let an account (or everyone) sign in again after too many failed attempts
   refract users remove <email> [--yes]
                      delete an account with its projects, chats and connections
-  refract users plan <email> <plan>
-                     set an account's plan (free, plus or ai)
   refract users list list accounts
   refract version    print the version
 `
@@ -140,6 +138,16 @@ func run(ctx context.Context, opts runOptions) error {
 	deployment, err := mode.Parse(os.Getenv("REFRACT_MODE"))
 	if err != nil {
 		return err
+	}
+	publicOnly, err := parseOutbound(os.Getenv("REFRACT_OUTBOUND"))
+	if err != nil {
+		return err
+	}
+	if publicOnly {
+		// Before anything is created in the data folder.
+		if err := checkGitForPinning(); err != nil {
+			return err
+		}
 	}
 	cfg, err := parseCompileConfig(os.Getenv)
 	if err != nil {
@@ -231,18 +239,19 @@ func run(ctx context.Context, opts runOptions) error {
 		missingTools: missing,
 		base:         session,
 		mode:         deployment,
+		publicOnly:   publicOnly,
 		model:        os.Getenv("REFRACT_MODEL_AGENT"),
 		quick:        os.Getenv("REFRACT_MODEL_QUICK"),
 
 		canSignOut: login != nil,
 
 		providers: &providers.Store{DB: db, Key: key},
-		outbound:  providers.HTTPClient(deployment.PrivateNetwork()),
+		outbound:  providers.HTTPClient(!publicOnly),
 		usage:     &usage.Recorder{DB: db},
 	}
 
 	pa := &projectsAPI{
-		svc: &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Limits: projects.DefaultLimits, Key: key, PublicRemotes: !deployment.PrivateNetwork()},
+		svc: &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Limits: projects.DefaultLimits, Key: key, PublicRemotes: publicOnly},
 		tmp: filepath.Join(dataDir, "tmp"),
 	}
 
@@ -296,24 +305,6 @@ func run(ctx context.Context, opts runOptions) error {
 	if err := asa.svc.Recover(ctx); err != nil {
 		return err
 	}
-	if deployment == mode.SaaS { // self-hosted installs have no limits
-		pa.svc.QuotaFor = func(ctx context.Context, owner string) (projects.Quota, error) {
-			plan, err := planOf(ctx, db, owner)
-			l := limitsOf(plan)
-			return projects.Quota{MaxProjects: l.Projects, MaxBytes: int64(l.StorageMB) << 20}, err
-		}
-		asa.svc.LimitsFor = func(ctx context.Context, userID string) (assistant.TurnLimits, error) {
-			plan, err := planOf(ctx, db, userID)
-			l := limitsOf(plan)
-			return assistant.TurnLimits{Running: l.Turns, PendingReview: l.PendingReview}, err
-		}
-		go func() { // sizes for projects from before limits existed; saves aren't blocked meanwhile
-			if err := pa.svc.MeasureAll(context.WithoutCancel(ctx)); err != nil {
-				slog.Error("measuring projects", "err", err)
-			}
-		}()
-	}
-
 	acc := &access.Checker{DB: db, SkipVerified: authKind != "builtin"}
 	asa.svc.Access = acc
 	ra := &remoteAPI{svc: pa.svc, db: db, key: key, acc: acc}

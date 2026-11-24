@@ -165,7 +165,13 @@ export default {
   'New blank project': 'Nuevo proyecto en blanco',
   'Import a Prism export (.zip)': 'Importar una exportación de Prism (.zip)',
   'Import a folder': 'Importar una carpeta',
-  'Drop .zip files to import them.': 'Suelta archivos .zip para importarlos.',
+  'Drop .zip files or folders to import them.': 'Suelta archivos .zip o carpetas para importarlos.',
+  'The folder {name} has too many files to import.': 'La carpeta {name} tiene demasiados archivos para importarla.',
+  'The folder {name} is nested too deeply to import.': 'La carpeta {name} tiene demasiados niveles para importarla.',
+  'Could not read the folder {name}: {error}': 'No se pudo leer la carpeta {name}: {error}',
+  'The folder {name} is empty.': 'La carpeta {name} está vacía.',
+  'Only folders and .zip files can be imported; the other dropped files were ignored.':
+    'Solo se pueden importar carpetas y archivos .zip; el resto de archivos soltados se ignoró.',
   'Imported {name}': 'Importado {name}',
   'Imported {n} projects': '{n} proyectos importados',
   Search: 'Buscar',
@@ -185,7 +191,7 @@ export default {
   'No projects yet': 'Aún no hay proyectos',
   'Create a blank project, or drop Prism .zip exports anywhere on this page.':
     'Crea un proyecto en blanco o suelta exportaciones .zip de Prism en cualquier parte de esta página.',
-  'Drop .zip files to import': 'Suelta archivos .zip para importarlos',
+  'Drop .zip files or folders to import': 'Suelta archivos .zip o carpetas para importarlos',
   'New project': 'Nuevo proyecto',
   'Rename project': 'Renombrar proyecto',
   'Project name': 'Nombre del proyecto',
@@ -273,10 +279,6 @@ export default {
     'La configuración git de este proyecto tiene ajustes url, http, include o credential, que Refract no permite para los remotos.',
   'The assistant is working on this project. Stop it or wait until it finishes, then try again.':
     'El asistente está trabajando en este proyecto. Deténlo o espera a que termine y vuelve a intentarlo.',
-  'Your plan has reached its project limit, including projects in the trash. Delete one forever from the trash to add another.':
-    'Tu plan ha alcanzado su límite de proyectos, contando los de la papelera. Elimina uno para siempre desde la papelera para añadir otro.',
-  "Your plan's storage is full, counting projects in the trash. Delete projects forever from the trash to free space; deleted files stay in a project's history.":
-    'El almacenamiento de tu plan está lleno, contando los proyectos de la papelera. Elimina proyectos para siempre desde la papelera para liberar espacio; los archivos borrados siguen en el historial de un proyecto.',
   // Account lifecycle (A3)
   'Confirm your email address to create or import projects. Open the link we sent you, or send a new one from Settings → Account.':
     'Confirma tu correo electrónico para crear o importar proyectos. Abre el enlace que te enviamos, o pide uno nuevo en Ajustes → Cuenta.',

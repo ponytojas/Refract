@@ -63,6 +63,7 @@ import { ago } from '@/lib/time'
 import { daysLeft } from '@/lib/trash'
 import { cn } from '@/lib/utils'
 import { lang, t, tn, type Lang } from '@/lib/i18n'
+import { readDropped, type DroppedFile } from '@/lib/dropfiles'
 import { useCommands } from '@/lib/commands'
 import { DropdownItems, WithContextMenu, type MenuEntry } from '@/components/Menu'
 import { Link, navigate, pageReady, previousPath, usePath } from '@/lib/router'
@@ -202,7 +203,7 @@ function ProjectList({ status }: { status: ChatGPTStatus | null }) {
 
   async function importZips(files: File[]) {
     const zips = files.filter((f) => f.name.toLowerCase().endsWith('.zip'))
-    if (zips.length === 0) return toast.error(t('Drop .zip files to import them.'))
+    if (zips.length === 0) return toast.error(t('Drop .zip files or folders to import them.'))
     setBusy(true)
     const done: ImportResult[] = []
     for (const f of zips) {
@@ -224,19 +225,26 @@ function ProjectList({ status }: { status: ChatGPTStatus | null }) {
   async function importFolder(files: File[]) {
     if (files.length === 0) return
     const folder = files[0].webkitRelativePath.split('/')[0]
-    const form = new FormData()
-    for (const f of files) form.append('file', f, f.webkitRelativePath)
     setBusy(true)
+    const result = await uploadFolder(
+      folder,
+      files.map((file) => ({ file, path: file.webkitRelativePath })),
+    )
+    finishImport(result ? [result] : [])
+  }
+
+  // Uploads one folder; the caller reports the results of the whole batch with finishImport.
+  async function uploadFolder(folder: string, files: DroppedFile[]): Promise<ImportResult | null> {
+    const form = new FormData()
+    for (const f of files) form.append('file', f.file, f.path)
     try {
-      finishImport([
-        await api<ImportResult>(`/api/projects/import-folder?name=${encodeURIComponent(folder)}`, {
-          method: 'POST',
-          body: form,
-        }),
-      ])
+      return await api<ImportResult>(`/api/projects/import-folder?name=${encodeURIComponent(folder)}`, {
+        method: 'POST',
+        body: form,
+      })
     } catch (e) {
       toast.error(`${folder}: ${errorText(e)}`)
-      setBusy(false)
+      return null
     }
   }
 
@@ -310,10 +318,37 @@ function ProjectList({ status }: { status: ChatGPTStatus | null }) {
     load()
   }
 
-  function onDrop(e: DragEvent) {
+  async function onDrop(e: DragEvent) {
     e.preventDefault()
     setDragging(false)
-    importZips([...e.dataTransfer.files])
+    let dropped
+    setBusy(true)
+    try {
+      // readDropped takes the items before its first await, while the event still holds them.
+      dropped = await readDropped([...e.dataTransfer.items])
+    } catch (err) {
+      return toast.error(errorText(err))
+    } finally {
+      setBusy(false)
+    }
+    if (dropped.folders.length === 0) return importZips(dropped.files)
+    const done: ImportResult[] = []
+    setBusy(true)
+    for (const f of dropped.folders) {
+      if (f.tooBig) toast.error(t('The folder {name} has too many files to import.', { name: f.name }))
+      else if (f.tooDeep) toast.error(t('The folder {name} is nested too deeply to import.', { name: f.name }))
+      else if (f.error) toast.error(t('Could not read the folder {name}: {error}', { name: f.name, error: f.error }))
+      else if (f.files.length) {
+        const r = await uploadFolder(f.name, f.files)
+        if (r) done.push(r)
+      } else toast.error(t('The folder {name} is empty.', { name: f.name }))
+    }
+    finishImport(done)
+    const zips = dropped.files.filter((f) => f.name.toLowerCase().endsWith('.zip'))
+    if (zips.length) importZips(dropped.files)
+    else if (dropped.files.length) {
+      toast.error(t('Only folders and .zip files can be imported; the other dropped files were ignored.'))
+    }
   }
 
   const sortBy = (key: Sort['key']) => setSort((s) => ({ key, desc: s.key === key ? !s.desc : key === 'updated' }))
@@ -483,7 +518,7 @@ function ProjectList({ status }: { status: ChatGPTStatus | null }) {
 
         {dragging && (
           <div className="pointer-events-none absolute inset-2 flex items-center justify-center rounded-lg border-2 border-dashed border-ring bg-background/80 text-sm font-medium backdrop-blur-sm">
-            {t('Drop .zip files to import')}
+            {t('Drop .zip files or folders to import')}
           </div>
         )}
       </main>

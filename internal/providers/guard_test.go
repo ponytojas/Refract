@@ -25,19 +25,21 @@ func get(hc *http.Client, u string) error {
 }
 
 func TestHTTPClientPrivateNetworks(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 
-	if err := get(HTTPClient(true), srv.URL); err != nil {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer plain.Close()
+	if err := get(HTTPClient(true), plain.URL); err != nil {
 		t.Fatalf("self-hosted can't reach loopback: %v", err)
 	}
 	if err := get(HTTPClient(false), srv.URL); !errors.Is(err, netguard.ErrPrivate) {
-		t.Fatalf("hosted reached loopback: %v", err)
+		t.Fatalf("public-only reached loopback: %v", err)
 	}
 	u, _ := url.Parse(srv.URL)
 	u.Host = "localhost:" + u.Port()
 	if err := get(HTTPClient(false), u.String()); !errors.Is(err, netguard.ErrPrivate) {
-		t.Fatalf("hosted reached localhost: %v", err)
+		t.Fatalf("public-only reached localhost: %v", err)
 	}
 }
 
@@ -62,7 +64,7 @@ func TestHTTPClientChecksRedirects(t *testing.T) {
 }
 
 func TestPrivateNetworkErrorIsReadable(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	_, err := ListModels(context.Background(), HTTPClient(false), Config{ID: "c", Kind: "compat", BaseURL: srv.URL})
 	var ae *ai.Error
@@ -110,5 +112,39 @@ func TestKindsFor(t *testing.T) {
 	hosted := KindsFor(false)
 	if len(hosted) != len(Kinds)-1 || slices.ContainsFunc(hosted, func(k Kind) bool { return k.ID == "ollama" }) {
 		t.Errorf("the hosted service offers %v", hosted)
+	}
+}
+
+// A provider saved with http:// while REFRACT_OUTBOUND was any must not send
+// anything once it is public.
+func TestPublicClientRefusesHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("a request reached the http server")
+	}))
+	defer srv.Close()
+	if err := get(HTTPClient(false), srv.URL); !errors.Is(err, ErrInsecure) {
+		t.Fatalf("http request: %v", err)
+	}
+	_, err := ListModels(context.Background(), HTTPClient(false), Config{ID: "c", Kind: "compat", BaseURL: srv.URL, APIKey: "secret"})
+	var ae *ai.Error
+	if !errors.As(err, &ae) || !strings.Contains(ae.Message, "https://") {
+		t.Fatalf("ListModels: %#v", err)
+	}
+}
+
+func TestPublicClientRefusesHTTPSToHTTPRedirect(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("the redirect was followed")
+	}))
+	defer plain.Close()
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL, http.StatusFound)
+	}))
+	defer secure.Close()
+	hc := HTTPClient(false)
+	// Reach the test server's loopback address; the policy under test is https.
+	hc.Transport = httpsOnly{secure.Client().Transport}
+	if err := get(hc, secure.URL); !errors.Is(err, ErrInsecure) {
+		t.Fatalf("redirect to http: %v", err)
 	}
 }

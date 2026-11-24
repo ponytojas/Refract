@@ -25,10 +25,12 @@ import (
 )
 
 type api struct {
-	base  *siwc.Session // DB, key, OAuth and allowlist shared by every user's session
-	mode  mode.Mode     // REFRACT_MODE: whether the ChatGPT plan is offered
-	model string        // default model (REFRACT_MODEL_AGENT)
-	quick string        // default model for quick actions (REFRACT_MODEL_QUICK)
+	base *siwc.Session // DB, key, OAuth and allowlist shared by every user's session
+	mode mode.Mode     // REFRACT_MODE: whether the ChatGPT plan is offered
+	// publicOnly (REFRACT_OUTBOUND=public): provider addresses must be public https.
+	publicOnly bool
+	model      string // default model (REFRACT_MODEL_AGENT)
+	quick      string // default model for quick actions (REFRACT_MODEL_QUICK)
 
 	canSignOut bool // REFRACT_AUTH=builtin: Refract keeps the session
 

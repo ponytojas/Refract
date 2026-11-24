@@ -26,19 +26,25 @@ func fakeDNS(t *testing.T, names map[string][]string) {
 }
 
 func TestPublicRemotes(t *testing.T) {
-	fakeDNS(t, map[string][]string{"mixed.example.com": {"93.184.215.14", "10.0.0.5"}})
+	fakeDNS(t, map[string][]string{"mixed.example.com": {"93.184.215.14", "10.0.0.5"}, "meta.example.com": {"169.254.169.254"}})
 	s, id := newTurnProject(t)
 	s.Key = make([]byte, 32)
 	urls := []string{
 		"https://127.0.0.1/a.git",
 		"https://[::1]/a.git",
 		"https://localhost:8443/a.git",
-		"https://169.254.169.254/a.git",
 		"https://mixed.example.com/a.git",
+		"https://169.254.169.254/a.git",
 	}
-	for _, u := range urls {
+	for _, u := range urls[:4] {
 		if err := s.SetRemote(ownerCtx, id, Remote{URL: u}, true); err != nil {
 			t.Errorf("self-hosted refused %s: %v", u, err)
+		}
+	}
+	// Link-local addresses (cloud metadata) are refused in every mode.
+	for _, u := range []string{"https://169.254.169.254/a.git", "https://[fe80::1]/a.git", "https://meta.example.com/a.git"} {
+		if err := s.SetRemote(ownerCtx, id, Remote{URL: u}, true); !errors.Is(err, ErrLinkLocalRemote) {
+			t.Errorf("self-hosted saved %s: %v", u, err)
 		}
 	}
 	s.PublicRemotes = true

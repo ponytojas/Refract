@@ -26,7 +26,7 @@ func (a *api) listProviders(w http.ResponseWriter, r *http.Request) {
 		out[i] = providerView{Config: c, HasKey: c.APIKey != ""}
 		out[i].APIKey = ""
 	}
-	writeJSON(w, map[string]any{"kinds": providers.KindsFor(a.mode.PrivateNetwork()), "configured": out})
+	writeJSON(w, map[string]any{"kinds": providers.KindsFor(!a.publicOnly), "configured": out})
 }
 
 func (a *api) saveProvider(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +36,7 @@ func (a *api) saveProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.ID = r.PathValue("id")
-	if !a.mode.PrivateNetwork() {
+	if a.publicOnly {
 		err := c.Validate()
 		if err == nil {
 			err = c.CheckPublic()

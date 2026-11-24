@@ -33,6 +33,13 @@ func newAIServer(t *testing.T, m mode.Mode) http.Handler {
 // newAIServerDB is newAIServer that also returns its database.
 func newAIServerDB(t *testing.T, m mode.Mode) (http.Handler, *sql.DB) {
 	t.Helper()
+	return newAIServerOutbound(t, m, false)
+}
+
+// newAIServerOutbound is newAIServerDB with REFRACT_OUTBOUND chosen apart
+// from the mode.
+func newAIServerOutbound(t *testing.T, m mode.Mode, publicOnly bool) (http.Handler, *sql.DB) {
+	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +59,7 @@ func newAIServerDB(t *testing.T, m mode.Mode) (http.Handler, *sql.DB) {
 		t.Fatal(err)
 	}
 
-	a := &api{base: &siwc.Session{DB: db, Key: key}, mode: m, providers: &providers.Store{DB: db, Key: key}, usage: &usage.Recorder{DB: db}}
+	a := &api{base: &siwc.Session{DB: db, Key: key}, mode: m, publicOnly: publicOnly, providers: &providers.Store{DB: db, Key: key}, usage: &usage.Recorder{DB: db}}
 	mux := http.NewServeMux()
 	a.routes(&router{mux: mux, acc: &access.Checker{DB: db}})
 	mux.HandleFunc("/api/", http.NotFound) // as in main

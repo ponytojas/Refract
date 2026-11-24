@@ -335,35 +335,6 @@ func TestTemplateTrashAndRestore(t *testing.T) {
 	}
 }
 
-func TestTemplatesRespectQuota(t *testing.T) {
-	s := newService(t)
-	s.QuotaFor = func(context.Context, string) (Quota, error) {
-		return Quota{MaxProjects: 2}, nil
-	}
-	p, err := s.CreateFromTemplate(ownerCtx, "Article", "article", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved, err := s.SaveTemplate(ownerCtx, p.ID, "Starter")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{p.ID, saved.ID} {
-		var size, measured int64
-		if err := s.DB.QueryRow(`SELECT size_bytes, size_measured_at FROM projects WHERE id = ?`, id).Scan(&size, &measured); err != nil || size <= 0 || measured <= 0 {
-			t.Fatalf("size for %s: %d, %d, %v", id, size, measured, err)
-		}
-	}
-	if _, err := s.SaveTemplate(ownerCtx, p.ID, "Extra"); !errors.Is(err, ErrOverLimit) {
-		t.Fatalf("save over quota: %v", err)
-	}
-	for _, id := range []string{"article", saved.ID} {
-		if _, err := s.CreateFromTemplate(ownerCtx, "Extra", id, ""); !errors.Is(err, ErrOverLimit) {
-			t.Fatalf("copy %s over quota: %v", id, err)
-		}
-	}
-}
-
 func TestBuiltinTemplateLanguagesAndSections(t *testing.T) {
 	s := newService(t)
 	for _, template := range starters {

@@ -28,11 +28,7 @@ func branch(turn string) string { return "ai/" + turn }
 // sees), then creates the turn's worktree. It returns the base commit and the
 // worktree directory.
 func (s *Service) StartTurn(ctx context.Context, id, turn string) (base, dir string, err error) {
-	defer s.measure(ctx, id)
 	defer lockRepo(id)()
-	if err := s.checkQuotaFor(ctx, id); err != nil {
-		return "", "", err
-	}
 	if _, err := s.checkpoint(ctx, id, "checkpoint: before AI", true); err != nil {
 		return "", "", err
 	}
@@ -52,7 +48,6 @@ func (s *Service) StartTurn(ctx context.Context, id, turn string) (base, dir str
 // FinishTurn commits the worktree's changes on the turn's branch and lists
 // what changed relative to base.
 func (s *Service) FinishTurn(ctx context.Context, id, turn, base, message string) ([]Change, error) {
-	defer s.measure(ctx, id) // the turn's files and new objects count, failed or not
 	defer lockRepo(id)()
 	dir := s.worktreeDir(id, turn)
 	if _, err := git(ctx, dir, "add", "-A"); err != nil {
@@ -94,11 +89,7 @@ func (s *Service) AcceptTurn(ctx context.Context, id, turn, base string, files [
 			return "", nil, err
 		}
 	}
-	defer s.measure(ctx, id) // an accepted turn can overshoot the limit; then growth is refused until under
 	defer lockRepo(id)()
-	if err := s.checkQuotaFor(ctx, id); err != nil {
-		return "", nil, err
-	}
 	root := s.Path(id)
 	// Edits made during the turn become part of HEAD, so the merge sees them.
 	if _, err := s.checkpoint(ctx, id, "checkpoint: before accepting AI changes", true); err != nil {
@@ -160,7 +151,6 @@ func (s *Service) AcceptTurn(ctx context.Context, id, turn, base string, files [
 
 // EndTurn removes the turn's worktree and branch (after reject, or once everything was accepted).
 func (s *Service) EndTurn(ctx context.Context, id, turn string) error {
-	defer s.measure(ctx, id)
 	defer lockRepo(id)()
 	root := s.Path(id)
 	git(ctx, root, "worktree", "remove", "--force", s.worktreeDir(id, turn))

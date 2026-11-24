@@ -207,7 +207,38 @@ func (s *Store) Delete(ctx context.Context, user, id string) error {
 // live. Without it (the hosted service), only public addresses are reached,
 // and proxy settings are ignored so the check sees the real destination.
 func HTTPClient(private bool) *http.Client {
-	return httpClient(netguard.Control(private), private)
+	hc := httpClient(netguard.Control(private), private)
+	if !private {
+		// Public-only: https for every request and redirect, whatever was
+		// saved before the setting changed.
+		hc.Transport = httpsOnly{hc.Transport}
+		hc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "https" {
+				return ErrInsecure
+			}
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return nil
+		}
+	}
+	return hc
+}
+
+// ErrInsecure is returned when a public-only client is asked for a plain
+// http:// address, or redirected to one.
+var ErrInsecure = errors.New("with REFRACT_OUTBOUND=public, AI providers must use https:// addresses: edit this provider's base URL")
+
+type httpsOnly struct{ next http.RoundTripper }
+
+func (h httpsOnly) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme != "https" {
+		if req.Body != nil {
+			req.Body.Close()
+		}
+		return nil, ErrInsecure
+	}
+	return h.next.RoundTrip(req)
 }
 
 func httpClient(control func(network, address string, c syscall.RawConn) error, proxy bool) *http.Client {

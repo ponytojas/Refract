@@ -273,6 +273,8 @@ func mapError(err error, c Config) *ai.Error {
 		return &ai.Error{Kind: ai.ErrOther, Message: "stopped"}
 	case errors.Is(err, netguard.ErrPrivate):
 		return &ai.Error{Kind: ai.ErrOther, Message: k.Name + ": " + netguard.ErrPrivate.Error()}
+	case errors.Is(err, ErrInsecure):
+		return &ai.Error{Kind: ai.ErrOther, Message: k.Name + ": " + ErrInsecure.Error()}
 	case errors.As(err, &overflow):
 		return &ai.Error{Kind: ai.ErrOther, Message: "The conversation is too long for this model: start a new chat."}
 	case errors.As(err, &api):

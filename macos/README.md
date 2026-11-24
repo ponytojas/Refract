@@ -227,7 +227,35 @@ never sets `REFRACT_DATA_DIR`, so to test the server with scratch data run the b
 `REFRACT_DATA_DIR=<dir> Refract.app/Contents/Resources/Server/bin/refract local --no-browser`.
 Launch the app with them via `open --env` or `env ... Refract.app/Contents/MacOS/Refract`.
 
+## Links, downloads, file pickers (#67)
+
+What the web view does with things the page asks for (`WebViewController`; the pure decisions are in
+`RefractCore/LinkPolicy.swift`, tested):
+
+- **Links.** The server's own origin (same scheme, host and port, plus `about:blank`/`about:srcdoc`, `data:` and that origin's `blob:` URLs) stays in the
+  app. `http`, `https` and `mailto` elsewhere open in the default browser through `NSWorkspace`, with the bare
+  URL: the token cookie never leaves the web view. Any other scheme (`file:`, `javascript:`, custom schemes)
+  is refused and logged, and so is another origin's `blob:`. Only the main frame opens the browser; a frame inside the page can't. `target="_blank"` and `window.open` never create a window: same-origin pages load in
+  the main view (a `blob:`/`data:` one is ignored, it would replace the app), the rest follows the same rule. Sign-in pages (provider keys, GitHub's device flow, OIDC)
+  therefore open in the browser.
+- **Downloads** (Export .zip, Download PDF, a file's download). `WKDownload` for `shouldPerformDownload`
+  (the web app's `a[download]` with a `blob:` URL works as it is, no web hook needed), for
+  `Content-Disposition: attachment` and for responses the view can't show. A save panel opens as a sheet in
+  Downloads with the suggested name (stripped of path parts, control and bidi characters and leading dots, cut to 255 bytes keeping the extension); a failure shows an alert; cancelling is silent.
+- **File inputs.** `runOpenPanelWith`: multiple selection as asked; a directory input (`webkitdirectory`)
+  gets a folder-only panel, the others a file-only one.
+- **Drag and drop** onto the project list. WKWebView hands drops to the page. The project list now reads
+  dropped folders through `webkitGetAsEntry` (`web/src/lib/dropfiles.ts`) and uploads them like the Folder
+  picker; zips work as before.
+- **`window.confirm`** (and `alert`/`prompt`, unused today) has a native sheet (without a delegate WebKit answers false, which would break the
+  "leave this page" prompt).
+- **Clipboard.** `navigator.clipboard.writeText` works from the loopback origin (a secure context). Reading
+  (`readText`, the editor's Paste menu entry) shows WebKit's own "Paste" prompt.
+
+Signing in to ChatGPT inside the app is not done here: today Settings → Assistant asks the person to run
+`refract login` and upload the credentials file (the file picker works). The one-click flow from Settings
+needs the server side of #61; its sign-in page then opens in the browser by the rule above.
+
 ## Left for later
 
-Links, downloads and file pickers (#67, `TODO(#67)` in `WebViewController`), the real menu (#68, the
-current one is the minimum for Quit, Close and editing), updates (#70).
+The real menu (#68, the current one is the minimum for Quit, Close and editing) and updates (#70).

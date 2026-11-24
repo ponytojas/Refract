@@ -107,6 +107,9 @@ func fetchModels(ctx context.Context, hc *http.Client, c Config, k Kind) ([]list
 	if errors.Is(err, netguard.ErrPrivate) {
 		return nil, &ai.Error{Kind: ai.ErrOther, Message: k.Name + ": " + netguard.ErrPrivate.Error()}
 	}
+	if errors.Is(err, ErrInsecure) {
+		return nil, &ai.Error{Kind: ai.ErrOther, Message: k.Name + ": " + ErrInsecure.Error()}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%s is unreachable: %w", k.Name, err)
 	}

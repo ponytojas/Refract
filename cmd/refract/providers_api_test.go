@@ -39,8 +39,8 @@ func offersOllama(t *testing.T, h http.Handler) bool {
 	return false
 }
 
-func TestSaaSProvidersMustBePublic(t *testing.T) {
-	h := newAIServer(t, mode.SaaS)
+func TestOutboundPublicProvidersMustBePublic(t *testing.T) {
+	h, _ := newAIServerOutbound(t, mode.SelfHost, true)
 	if offersOllama(t, h) {
 		t.Error("the hosted service offers Ollama")
 	}
@@ -59,8 +59,19 @@ func TestSaaSProvidersMustBePublic(t *testing.T) {
 	}
 }
 
-func TestSelfHostKeepsLocalModels(t *testing.T) {
-	h := newAIServer(t, mode.SelfHost)
+// REFRACT_MODE=saas no longer decides the outbound policy.
+func TestSaaSModeDoesNotRestrictOutbound(t *testing.T) {
+	h, _ := newAIServerOutbound(t, mode.SaaS, false)
+	if !offersOllama(t, h) {
+		t.Error("REFRACT_OUTBOUND=any hides Ollama in saas mode")
+	}
+}
+
+func TestOutboundAnyKeepsLocalModels(t *testing.T) {
+	h, _ := newAIServerOutbound(t, mode.SelfHost, false)
+	if w := send(t, h, "PUT", "/api/providers/lan", `{"kind":"compat","base_url":"http://10.0.0.5:8000/v1"}`); w.Code != http.StatusOK {
+		t.Errorf("private http base URL: %d %s", w.Code, w.Body)
+	}
 	if !offersOllama(t, h) {
 		t.Error("self-hosted doesn't offer Ollama")
 	}

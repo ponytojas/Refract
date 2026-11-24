@@ -1,3 +1,9 @@
+"dialog.cancel" = "Cancel";
+"dialog.ok" = "OK";
+"download.exists.message" = "A file with that name appeared while downloading. Choose where to save it.";
+"download.failed.message" = "Refract couldn't save the file: %@";
+"download.failed.ok" = "OK";
+"download.failed.title" = "The download failed";
 "error.damaged.message" = "The app can't find what it needs to run (%@). Download Refract again and replace this copy; your projects aren't touched.";
 "error.damaged.title" = "Refract's files are missing or damaged";
 "error.exited.signal" = "The server was stopped by signal %d. Your projects and files are safe; what you typed in the last moment may not be.";
