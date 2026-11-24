@@ -5,6 +5,12 @@ This folder covers the installable packages: the CLI packages that exist today
 desktop installers being added (macOS and Windows apps, Debian/Ubuntu package, Homebrew
 cask `refract-app`). `server/` is a separate path for server deployments.
 
+The macOS app updates itself with Sparkle from a feed per architecture
+(`appcast-arm64.xml`, `appcast-amd64.xml`) attached to the same GitHub release as the archives it
+points to, written by `scripts/make-appcast.py` from the final, notarized zip; see
+[../macos/README.md](../macos/README.md#updates). Publish desktop releases as full releases (not
+pre-releases): the feed URL is `releases/latest/download/…`.
+
 Keep the portable archives and their enclosing `refract-<tag>-<os>-<arch>/` directory:
 WinGet's nested executable paths depend on that layout.
 

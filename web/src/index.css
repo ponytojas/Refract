@@ -1003,3 +1003,34 @@
 .refract-pdf-text ::selection {
   background: rgb(59 130 246 / 0.3);
 }
+
+/* The macOS app draws no title bar: the page reaches the top edge and the traffic lights float
+   over its top left, on the same line as the bars' content rows (every bar is 44px tall, 8px
+   below the window's top edge, so its row is centred 30px down; the app puts the lights there
+   and inside the card or sidebar, never across an edge). The app sets data-desktop and --window-inset-left/-top on <html>
+   (macos/Sources/RefractCore/WindowChrome.swift); nothing sets them in a browser, so none of
+   this applies there. */
+[data-desktop] [data-window-bar] {
+  min-height: 44px;
+  padding-block: 4px;
+}
+/* The bar's first element clears the traffic lights (the bar starts 0.5rem in from the window
+   edge, and has --bar-pad of its own); a second row of a wrapping bar is not pushed. */
+[data-desktop] [data-window-bar] > :first-child {
+  margin-left: max(0px, calc(var(--window-inset-left, 0px) - 0.5rem - var(--bar-pad, 0px)));
+}
+[data-desktop] [data-window-drag] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* A thin drag strip on screens that have no top bar (the sign-in pages). Remove this rule, or
+   the .window-strip elements, to go without it. */
+.window-strip {
+  display: none;
+}
+[data-desktop] .window-strip {
+  display: block;
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: max(var(--window-inset-top, 0px), 28px);
+}

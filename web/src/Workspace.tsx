@@ -1206,6 +1206,8 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
   const saving = active ? saveState[statuses[active] ?? 'saved'] : null
 
   const unsaved = locked ? autosave.unsaved() : []
+  // The macOS app puts the traffic lights in the sidebar's bar: it needs more room for the name.
+  const desktop = !!document.documentElement.dataset.desktop
 
   return (
     <div className="flex h-full flex-col p-2">
@@ -1214,15 +1216,15 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
         <ResizablePanel
           id="sidebar"
           panelRef={sidebar}
-          defaultSize="248px"
-          minSize="190px"
+          defaultSize={desktop ? '296px' : '248px'}
+          minSize={desktop ? '230px' : '190px'}
           maxSize="420px"
           collapsible
           collapsedSize={0}
           onResize={(size) => setSidebarCollapsed(size.inPixels < 8)}
         >
           <aside className="flex h-full min-w-0 flex-col pr-1">
-            <div className="flex h-11 items-center gap-1 px-1">
+            <div data-window-bar data-window-drag className="flex h-11 items-center gap-1 px-1 [--bar-pad:0.25rem]">
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -1466,7 +1468,11 @@ export default function Workspace({ id, status }: { id: string; status: ChatGPTS
 
         <ResizablePanel id="editor" minSize="320px">
           <main className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-xs">
-            <div className="flex h-11 shrink-0 items-center gap-1.5 border-b px-2">
+            <div
+              data-window-bar={sidebarCollapsed ? '' : undefined}
+              data-window-drag
+              className="flex h-11 shrink-0 items-center gap-1.5 border-b px-2 [--bar-pad:0.5rem]"
+            >
               {sidebarCollapsed && (
                 <Tooltip>
                   <TooltipTrigger

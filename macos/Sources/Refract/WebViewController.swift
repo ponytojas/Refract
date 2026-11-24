@@ -13,9 +13,12 @@ final class WebViewController: NSViewController, WKNavigationDelegate, WKUIDeleg
     private var reloads: [Date] = []
     /// Called when the page can't be shown safely (the origin rules didn't compile).
     private let failed: (String) -> Void
+    /// The space the page leaves for the traffic lights; see `WindowInset`.
+    private(set) var inset: WindowInset
 
-    init(origin: URL, failed: @escaping (String) -> Void) {
+    init(origin: URL, inset: WindowInset, failed: @escaping (String) -> Void) {
         self.origin = origin
+        self.inset = inset
         self.failed = failed
         let config = WKWebViewConfiguration()
         // The default store keeps what the web app saves in the browser (its settings), per
@@ -25,8 +28,13 @@ final class WebViewController: NSViewController, WKNavigationDelegate, WKUIDeleg
         // would be dropped. Safe: createWebViewWith never returns a window, and only the main
         // frame may send anything to the browser.
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // The desktop marker and the inset exist before the page's first script runs (so the
+        // first paint is already laid out), and only in the main frame.
+        config.userContentController.addUserScript(
+            WKUserScript(source: inset.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         webView = WKWebView(frame: .zero, configuration: config)
         super.init(nibName: nil, bundle: nil)
+        config.userContentController.add(WindowMessageProxy(self), contentWorld: .page, name: windowMessageName)
         webView.navigationDelegate = self
         webView.uiDelegate = self
     }
@@ -34,6 +42,39 @@ final class WebViewController: NSViewController, WKNavigationDelegate, WKUIDeleg
     required init?(coder: NSCoder) { fatalError("not used") }
 
     override func loadView() { view = webView }
+
+    /// Full screen or a new window state changed the inset: tell the loaded page, and keep the
+    /// script for the next load.
+    func update(inset next: WindowInset) {
+        guard next != inset else { return }
+        inset = next
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        controller.addUserScript(WKUserScript(source: next.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        webView.evaluateJavaScript(next.script, completionHandler: nil)
+    }
+
+    // MARK: Window drag
+
+    /// The page asked to move the window (a mousedown on a drag region): only from the app's
+    /// own main frame. The current event is the mouse press that caused the message.
+    fileprivate func handle(_ message: WKScriptMessage) {
+        let frame = message.frameInfo
+        let source = frame.securityOrigin
+        guard WindowMessage.parse(message.body, isMainFrame: frame.isMainFrame, scheme: source.protocol,
+            host: source.host, port: source.port, origin: origin) != nil,
+            let window = view.window, let event = NSApp.currentEvent, event.type == .leftMouseDown
+        else { return }
+        if event.clickCount == 2 {
+            switch DoubleClickAction(setting: UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick")) {
+            case .zoom: window.performZoom(nil)
+            case .minimize: window.performMiniaturize(nil)
+            case .nothing: break
+            }
+        } else {
+            window.performDrag(with: event)
+        }
+    }
 
     /// Sets the token cookie in the web view's own store, then loads the app: the very
     /// first request already carries it. token is nil for a terminal instance, which has none.
@@ -376,5 +417,18 @@ final class WebViewController: NSViewController, WKNavigationDelegate, WKUIDeleg
         reloads.append(now)
         AppLog.note("the web content process ended: reloading")
         webView.reload()
+    }
+}
+
+let windowMessageName = "refractWindow"
+
+/// The user content controller keeps its handlers alive: this one holds the controller weakly,
+/// so the web view can go away.
+private final class WindowMessageProxy: NSObject, WKScriptMessageHandler {
+    weak var target: WebViewController?
+    init(_ target: WebViewController) { self.target = target }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        target?.handle(message)
     }
 }

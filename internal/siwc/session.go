@@ -111,36 +111,57 @@ func (s *Session) AccessToken(ctx context.Context, force bool) (string, error) {
 	if c == nil || c.RefreshToken == "" {
 		return "", ErrNotSignedIn
 	}
-	now := time.Now()
-	stillValid := now.Before(c.ExpiresAt.Add(-refreshMargin))
-	tooEarly := now.Before(c.EarliestRefreshAt) && now.Before(c.ExpiresAt)
-	if !force && (stillValid || tooEarly) {
-		return c.AccessToken, nil
-	}
-
 	// Not cancellable by the caller: once the server rotates the token, losing
 	// the response (or failing to save it) burns the session. OAuth.HTTP's
 	// timeout still bounds it.
 	ctx = context.WithoutCancel(ctx)
-	next, err := s.OAuth.Refresh(ctx, c)
-	if err != nil {
-		var te *TokenError
-		if errors.As(err, &te) && te.Terminal() {
-			// Keep the registration (client id, identity); drop the dead tokens.
-			c.AccessToken, c.RefreshToken = "", ""
-			if serr := s.save(ctx, c); serr != nil {
-				return "", serr
-			}
-			return "", fmt.Errorf("%w: %s", ErrNotSignedIn, te.Code)
+	if c.Pending == nil {
+		now := time.Now()
+		stillValid := now.Before(c.ExpiresAt.Add(-refreshMargin))
+		tooEarly := now.Before(c.EarliestRefreshAt) && now.Before(c.ExpiresAt)
+		if !force && (stillValid || tooEarly) {
+			return c.AccessToken, nil
 		}
-		return "", fmt.Errorf("refresh: %w", err) // transient: keep credentials, caller may retry
+		next, err := s.OAuth.Refresh(ctx, c)
+		if err != nil {
+			var te *TokenError
+			if errors.As(err, &te) && te.Terminal() {
+				// Keep the registration (client id, identity); drop the dead tokens.
+				c.AccessToken, c.RefreshToken = "", ""
+				if serr := s.save(ctx, c); serr != nil {
+					return "", serr
+				}
+				return "", fmt.Errorf("%w: %s", ErrNotSignedIn, te.Code)
+			}
+			return "", fmt.Errorf("refresh: %w", err) // transient: keep credentials, caller may retry
+		}
+		// The old refresh token is spent: checkpoint the new set before verifying
+		// or using it, so a key-server outage or a restart cannot burn the session.
+		c.Pending = next
+		if err := s.save(ctx, c); err != nil {
+			slog.Error("siwc: rotated tokens could not be saved; a new login will be needed", "err", err)
+			return "", err
+		}
 	}
-	// The old refresh token is spent: persist the new set before using it.
-	if err := s.save(ctx, next); err != nil {
-		slog.Error("siwc: rotated tokens could not be saved; a new login will be needed", "err", err)
+	// A refresh interrupted before this point resumes here without the spent token.
+	if err := s.OAuth.VerifyPending(ctx, c.ClientID, c.Subject, c.Pending); err != nil {
+		if errors.Is(err, ErrVerifyUnavailable) {
+			return "", fmt.Errorf("refresh: %w", err) // retryable: Pending stays saved
+		}
+		// Rejected: don't trust these tokens. The stored identity stays; the
+		// spent refresh token means the next attempt asks for a new login.
+		c.Pending = nil
+		if serr := s.save(ctx, c); serr != nil {
+			return "", serr
+		}
 		return "", err
 	}
-	return next.AccessToken, nil
+	c.promote(c.Pending)
+	if err := s.save(ctx, c); err != nil {
+		slog.Error("siwc: refreshed tokens could not be saved; a new login will be needed", "err", err)
+		return "", err
+	}
+	return c.AccessToken, nil
 }
 
 // ExpireNow marks the access token expired so the next call refreshes. For tests.
@@ -167,8 +188,11 @@ func (s *Session) SignOut(ctx context.Context) error {
 	if err != nil || c == nil || c.RefreshToken == "" {
 		return err
 	}
+	if c.Pending != nil && c.Pending.RefreshToken != "" {
+		c.RefreshToken = c.Pending.RefreshToken // the stored one is spent
+	}
 	revokeErr := s.OAuth.Revoke(ctx, c)
-	c.AccessToken, c.RefreshToken = "", ""
+	c.AccessToken, c.RefreshToken, c.Pending = "", "", nil
 	if err := s.save(ctx, c); err != nil {
 		return err
 	}

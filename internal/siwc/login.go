@@ -9,9 +9,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"time"
 )
 
@@ -26,12 +28,21 @@ func NewHostID() string {
 
 // LoginOptions configures the local loopback sign-in.
 type LoginOptions struct {
-	HostID       string
-	Saved        *Credentials // previous registration for this account: reuse its client id
-	Port         int          // 0 = DefaultPort, negative = any free port
-	OpenBrowser  func(authURL string)
-	OAuth        *OAuth
-	AuthorizeURL string // "" = real endpoint
+	HostID string
+	Saved  *Credentials // previous registration for this account: reuse its client id
+	Port   int          // 0 = DefaultPort, negative = any free port
+	// OpenBrowser opens the sign-in URL. A nil func or an error does not stop
+	// the login: it keeps waiting, and OnURL lets the caller show the URL.
+	OpenBrowser func(authURL string) error
+	// OnURL is called once with the authorize URL, after the open attempt;
+	// openErr is why the browser could not be opened, if it could not.
+	OnURL func(authURL string, openErr error)
+	// OnRegistration is called with a newly issued client id before the code
+	// exchange, so the caller can save it: a failed exchange then retries with
+	// the same registration (pass it back in Saved). An error stops the login.
+	OnRegistration func(clientID string) error
+	OAuth          *OAuth
+	AuthorizeURL   string // "" = real endpoint
 }
 
 // Login runs the browser sign-in on a 127.0.0.1 listener and returns validated credentials.
@@ -64,9 +75,8 @@ func Login(ctx context.Context, o LoginOptions) (*Credentials, error) {
 	}
 	if o.Saved != nil {
 		q.Set("client_id", o.Saved.ClientID)
-		if o.Saved.IDToken != "" {
-			q.Set("id_token_hint", o.Saved.IDToken)
-		}
+		// No id_token_hint: the URL is a process argument and lands in browser
+		// history. The subject check after the exchange pins the account.
 		if o.Saved.Email != "" {
 			q.Set("login_hint", o.Saved.Email)
 		}
@@ -79,12 +89,33 @@ func Login(ctx context.Context, o LoginOptions) (*Credentials, error) {
 		err            error
 	}
 	done := make(chan result, 1)
+	wantHost := fmt.Sprintf("127.0.0.1:%d", ln.Addr().(*net.TCPAddr).Port)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+CallbackPath, func(w http.ResponseWriter, r *http.Request) {
+		cspNonce := randToken()
+		setCallbackHeaders(w, cspNonce)
+		// A request that is not the real callback never consumes the pending login.
+		reject := func(msg string) {
+			http.Error(w, msg, http.StatusBadRequest)
+		}
 		p := r.URL.Query()
+		if r.Host != wantHost {
+			reject("This address is not the sign-in callback.")
+			return
+		}
+		for _, k := range []string{"state", "code", "client_id", "error"} {
+			if len(p[k]) > 1 {
+				reject("The sign-in callback was malformed.")
+				return
+			}
+		}
 		if subtle.ConstantTimeCompare([]byte(p.Get("state")), []byte(state)) != 1 {
-			http.Error(w, "state mismatch", http.StatusBadRequest)
-			return // ignore stray requests; keep waiting for the real callback
+			reject("This sign-in link is not for the current sign-in.")
+			return
+		}
+		if id := p.Get("client_id"); id != "" && (!clientIDPattern.MatchString(id) || id == RegisterID) {
+			reject("The sign-in callback carried an invalid client.")
+			return
 		}
 		var res result
 		switch {
@@ -98,9 +129,10 @@ func Login(ctx context.Context, o LoginOptions) (*Credentials, error) {
 			res = result{code: p.Get("code"), clientID: p.Get("client_id")}
 		}
 		if res.err != nil {
-			http.Error(w, res.err.Error()+". You can close this tab.", http.StatusBadRequest)
+			w.WriteHeader(http.StatusBadRequest)
+			writeCallbackPage(w, cspNonce, "Sign-in did not complete", res.err.Error()+". You can close this tab and try again.")
 		} else {
-			fmt.Fprint(w, "Signed in. You can close this tab and return to the terminal.")
+			writeCallbackPage(w, cspNonce, "Signed in", "You can close this tab and go back to Refract.")
 		}
 		select {
 		case done <- res:
@@ -109,9 +141,21 @@ func Login(ctx context.Context, o LoginOptions) (*Credentials, error) {
 	})
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go srv.Serve(ln)
-	defer srv.Close()
+	defer func() {
+		// Let the answer to the real callback reach the browser before closing.
+		c, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		srv.Shutdown(c)
+	}()
 
-	o.OpenBrowser(cmp.Or(o.AuthorizeURL, AuthorizeURL) + "?" + q.Encode())
+	authURL := cmp.Or(o.AuthorizeURL, AuthorizeURL) + "?" + q.Encode()
+	openErr := errors.New("no browser opener")
+	if o.OpenBrowser != nil {
+		openErr = o.OpenBrowser(authURL)
+	}
+	if o.OnURL != nil {
+		o.OnURL(authURL, openErr)
+	}
 
 	var res result
 	select {
@@ -134,6 +178,12 @@ func Login(ctx context.Context, o LoginOptions) (*Credentials, error) {
 		return nil, errors.New("registration callback did not include the issued client_id")
 	}
 
+	if o.Saved == nil && o.OnRegistration != nil {
+		// Persist the issued registration before the one-time code is spent.
+		if err := o.OnRegistration(clientID); err != nil {
+			return nil, fmt.Errorf("saving the registration: %w", err)
+		}
+	}
 	tr, err := o.OAuth.Exchange(ctx, clientID, res.code, verifier, redirectURI)
 	if err != nil {
 		return nil, err
@@ -156,6 +206,27 @@ func Login(ctx context.Context, o LoginOptions) (*Credentials, error) {
 	c := &Credentials{ClientID: clientID, Subject: idt.Subject, Email: claims.Email}
 	c.apply(tr, time.Now())
 	return c, nil
+}
+
+var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,200}$`)
+
+// setCallbackHeaders keeps the callback page out of caches and referrers, and
+// allows only its own inline script and style (by nonce).
+func setCallbackHeaders(w http.ResponseWriter, nonce string) {
+	h := w.Header()
+	h.Set("Cache-Control", "no-store")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+}
+
+// writeCallbackPage shows the outcome and removes ?code=&state= from the address bar.
+func writeCallbackPage(w http.ResponseWriter, nonce, title, msg string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%[2]s</title>
+<style nonce="%[1]s">body{font:16px system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;color:#222}main{max-width:26rem;padding:1.5rem;text-align:center}h1{font-size:1.25rem}</style>
+<main><h1>%[2]s</h1><p>%[3]s</p></main>
+<script nonce="%[1]s">history.replaceState(null,"",location.pathname)</script></html>`, nonce, html.EscapeString(title), html.EscapeString(msg))
 }
 
 func randToken() string {

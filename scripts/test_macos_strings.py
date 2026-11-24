@@ -31,5 +31,16 @@ class MacStrings(unittest.TestCase):
             self.assertEqual(en[key].count("%"), es[key].count("%"), "format specifiers of " + key)
 
 
+    def test_every_line_is_an_entry(self):
+        # A stray line (a leftover merge marker, say) can make the system parser drop the
+        # entries after it, although this test's line-by-line reading would still see them.
+        for lang in ("en", "es"):
+            path = os.path.join(ROOT, "Resources", lang + ".lproj", "Localizable.strings")
+            with open(path, encoding="utf-8") as f:
+                for n, line in enumerate(f.read().splitlines(), 1):
+                    if line.strip() and not line.startswith(("/*", "//")):
+                        self.assertRegex(line, ENTRY, f"{lang}.lproj line {n}")
+
+
 if __name__ == "__main__":
     unittest.main()

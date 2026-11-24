@@ -5,6 +5,7 @@ import { setMode } from './lib/mode'
 import { setMissingTools } from './lib/tools'
 import { lang } from './lib/i18n'
 import { flushPending } from './lib/flush'
+import { installWindowDrag } from './lib/windowDrag'
 import './index.css'
 
 declare global {
@@ -14,6 +15,7 @@ declare global {
   }
 }
 window.refractFlush = () => flushPending()
+installWindowDrag()
 
 const root = createRoot(document.getElementById('root')!)
 // The app downloads while the session is checked; signed out

@@ -36,6 +36,14 @@ type SIWC struct {
 	noSummary    bool            // the route refused reasoning summaries: stop asking
 }
 
+// client is p.HTTP with redirects refused, whatever the caller configured: the
+// bearer token and body must never be forwarded to another origin.
+func (p *SIWC) client() *http.Client {
+	c := *p.HTTP
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &c
+}
+
 func (p *SIWC) Status(ctx context.Context) Status {
 	st := Status{Provider: "chatgpt"}
 	c, err := p.Tokens.Credentials(ctx)
@@ -232,7 +240,7 @@ func (p *SIWC) do(ctx context.Context, method, path string, body []byte) (*http.
 		if body != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
-		resp, err := p.HTTP.Do(req)
+		resp, err := p.client().Do(req)
 		if err != nil {
 			return nil, &Error{Kind: ErrUnavailable, Message: err.Error()}
 		}
@@ -399,7 +407,10 @@ func classify(status int, ae apiError) *Error {
 		switch {
 		case status == http.StatusForbidden:
 			e.Kind = ErrNotEligible // policy/region admission check
-		case status == http.StatusTooManyRequests || status >= 500:
+		case status == http.StatusTooManyRequests:
+			// Never retried: the plan's usage limit. The UI links to Manage usage.
+			e.Kind = ErrUsageLimit
+		case status >= 500:
 			e.Kind = ErrUnavailable
 		}
 	}

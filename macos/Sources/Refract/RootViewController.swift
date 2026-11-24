@@ -8,6 +8,7 @@ final class RootViewController: NSViewController {
     private let reinstall: () -> Void
     private var web: WebViewController?
     private var current: NSView?
+    private var inset = WindowInset(left: 0, top: 0)
 
     init(restart: @escaping () -> Void, showLogs: @escaping () -> Void, reinstall: @escaping () -> Void) {
         self.restart = restart
@@ -20,17 +21,54 @@ final class RootViewController: NSViewController {
 
     override func loadView() { view = NSView() }
 
-    private func show(_ next: NSView) {
+    /// The window has no title bar: the web app reaches the top edge and lays itself out around
+    /// the traffic lights; the native views sit below them (the safe area).
+    private func show(_ next: NSView, underTitlebar: Bool = false) {
         current?.removeFromSuperview()
         next.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(next)
         NSLayoutConstraint.activate([
             next.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             next.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            next.topAnchor.constraint(equalTo: view.topAnchor),
+            next.topAnchor.constraint(equalTo: underTitlebar ? view.topAnchor : view.safeAreaLayoutGuide.topAnchor),
             next.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         current = next
+    }
+
+    /// Places the traffic lights on the bars' line and tells the page how much room they take
+    /// (called on launch and whenever AppKit may have laid the title bar out again).
+    func updateInset(for window: NSWindow) {
+        let fullScreen = window.styleMask.contains(.fullScreen)
+        var lights: TrafficLights?
+        if !fullScreen { lights = placeTrafficLights(in: window) }
+        inset = WindowInset.compute(lights: lights, fullScreen: fullScreen)
+        web?.update(inset: inset)
+    }
+
+    /// Moves the three buttons, and grows the title bar container so they fit lower than its
+    /// usual 28 points. AppKit resets both on resize, full screen and appearance changes: the
+    /// app calls this again then (the frame is only written when it differs).
+    private func placeTrafficLights(in window: NSWindow) -> TrafficLights? {
+        guard let close = window.standardWindowButton(.closeButton),
+            let mini = window.standardWindowButton(.miniaturizeButton),
+            let zoom = window.standardWindowButton(.zoomButton),
+            let bar = close.superview, let container = bar.superview
+        else { return nil }
+        let lights = TrafficLights.place(
+            buttonWidth: Double(close.frame.width), buttonHeight: Double(close.frame.height),
+            step: Double(mini.frame.minX - close.frame.minX))
+        if let host = container.superview, abs(container.frame.height - lights.containerHeight) > 0.5 {
+            container.frame = NSRect(
+                x: container.frame.minX, y: host.bounds.height - lights.containerHeight,
+                width: container.frame.width, height: lights.containerHeight)
+        }
+        for (button, x) in zip([close, mini, zoom], lights.buttonX) {
+            let origin = NSPoint(x: x, y: lights.buttonY)
+            if button.frame.origin != origin { button.setFrameOrigin(origin) }
+        }
+        container.postsFrameChangedNotifications = true
+        return lights
     }
 
     private func dropWeb() {
@@ -50,12 +88,12 @@ final class RootViewController: NSViewController {
 
     func showWeb(url: URL, token: String?) {
         if web != nil, current === web?.view { return }
-        let controller = WebViewController(origin: url) { [weak self] reason in
+        let controller = WebViewController(origin: url, inset: inset) { [weak self] reason in
             self?.showError(.startFailed(reason))
         }
         web = controller
         addChild(controller)
-        show(controller.view)
+        show(controller.view, underTitlebar: true)
         controller.load(token: token)
     }
 

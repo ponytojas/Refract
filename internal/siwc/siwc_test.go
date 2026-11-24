@@ -38,6 +38,13 @@ type fakeAuth struct {
 	nonce    string // nonce to embed in id tokens from code exchange
 	sub      string
 	scope    string
+
+	mu            sync.Mutex
+	mutate        func(grant string, resp map[string]any) // tweak a token response
+	exchanges     []string                                // client ids seen on code exchanges
+	exchangeFails int                                     // fail this many code exchanges with a 503
+	refreshID     func(clientID string) string            // id token to return on refresh, if any
+	revokeFails   int                                     // fail this many revocations with a 503
 }
 
 func newFakeAuth(t *testing.T) *fakeAuth {
@@ -71,8 +78,14 @@ func (f *fakeAuth) idToken(aud, sub, nonce string, exp time.Time) string {
 
 func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if r.URL.Path == "/revoke" {
 		f.revoked.Add(1)
+		if f.revokeFails > 0 {
+			f.revokeFails--
+			w.WriteHeader(503)
+		}
 		return
 	}
 	if r.Form.Get("resource") != Resource {
@@ -83,9 +96,17 @@ func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"error":%q}`, f.failWith)
 		return
 	}
-	resp := map[string]any{"expires_in": 3600, "scope": f.scope}
-	switch r.Form.Get("grant_type") {
+	resp := map[string]any{"expires_in": 3600, "scope": f.scope, "token_type": "Bearer"}
+	grant := r.Form.Get("grant_type")
+	switch grant {
 	case "authorization_code":
+		f.exchanges = append(f.exchanges, r.Form.Get("client_id"))
+		if f.exchangeFails > 0 {
+			f.exchangeFails--
+			w.WriteHeader(503)
+			fmt.Fprint(w, `{"error":"temporarily_unavailable"}`)
+			return
+		}
 		if r.Form.Get("code") != "the-code" || r.Form.Get("code_verifier") == "" {
 			w.WriteHeader(400)
 			fmt.Fprint(w, `{"error":"invalid_grant"}`)
@@ -98,6 +119,12 @@ func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(20 * time.Millisecond) // widen the race window
 		resp["access_token"] = fmt.Sprintf("access-%d", n)
 		resp["refresh_token"] = fmt.Sprintf("refresh-%d", n)
+		if f.refreshID != nil {
+			resp["id_token"] = f.refreshID(r.Form.Get("client_id"))
+		}
+	}
+	if f.mutate != nil {
+		f.mutate(grant, resp)
 	}
 	json.NewEncoder(w).Encode(resp)
 }
@@ -270,7 +297,7 @@ func login(t *testing.T, f *fakeAuth, saved *Credentials, callback func(q url.Va
 	defer cancel()
 	return Login(ctx, LoginOptions{
 		HostID: "urn:uuid:test", Saved: saved, Port: -1, OAuth: f.oauth(), AuthorizeURL: "https://auth.invalid/authorize",
-		OpenBrowser: func(authURL string) {
+		OpenBrowser: func(authURL string) error {
 			u, _ := url.Parse(authURL)
 			q := u.Query()
 			f.nonce = q.Get("nonce")
@@ -279,6 +306,7 @@ func login(t *testing.T, f *fakeAuth, saved *Credentials, callback func(q url.Va
 				cb = callback(cb)
 			}
 			go http.Get(q.Get("redirect_uri") + "?" + cb.Encode())
+			return nil
 		},
 	})
 }
@@ -319,11 +347,12 @@ func TestLogin(t *testing.T) {
 		f := newFakeAuth(t)
 		_, err := Login(context.Background(), LoginOptions{
 			HostID: "h", Port: -1, OAuth: f.oauth(), AuthorizeURL: "https://auth.invalid/a",
-			OpenBrowser: func(authURL string) {
+			OpenBrowser: func(authURL string) error {
 				u, _ := url.Parse(authURL)
 				q := u.Query()
 				f.nonce = "not-the-nonce"
 				go http.Get(q.Get("redirect_uri") + "?" + url.Values{"state": {q.Get("state")}, "code": {"the-code"}, "client_id": {testClient}}.Encode())
+				return nil
 			},
 		})
 		if err == nil {

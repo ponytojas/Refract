@@ -454,6 +454,13 @@ func TestFailedUpgradeChangesNothing(t *testing.T) {
 	if got := versionOf(t, path); got != n {
 		t.Fatalf("user_version = %d after a failed upgrade, want %d", got, n)
 	}
+	// The message names the copy, and the copy is there and openable at the old version.
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), path+".pre-upgrade") || !strings.Contains(err.Error(), "not changed") {
+		t.Fatalf("the error doesn't name the copy: %v", err)
+	}
+	if got := versionOf(t, path+".pre-upgrade"); got != n {
+		t.Fatalf("the copy is at version %d, want %d", got, n)
+	}
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	if err != nil {
 		t.Fatal(err)

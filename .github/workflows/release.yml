@@ -147,6 +147,43 @@ jobs:
         run: |
           python3 -I scripts/tools-archive.py release dist "$GITHUB_REF_NAME"
           python3 -I scripts/tools-archive.py gaps "$GITHUB_REF_NAME" > "dist/refract-tools-${GITHUB_REF_NAME}-gaps.txt"
+      # The macOS app's update feeds (macos-app.yml, #70), when this release has them: one per
+      # architecture, each pointing at an archive this release attaches. A feed that points anywhere
+      # else would send people's apps to the wrong file, so it stops here. Feeds are looked up at
+      # releases/latest/download/appcast-<arch>.xml: publish them as assets of a full (not pre-)release.
+      # A full release that attaches the app must carry both feeds (checked below); until the app is
+      # part of every release (#71), one without the app has none and is allowed.
+      - name: Check the appcasts
+        run: |
+          set -- dist/appcast-*.xml
+          if [ ! -e "$1" ]; then
+            # Installed apps read releases/latest/download/appcast-<arch>.xml: a full release that
+            # carries the app (Refract-<arch>.zip) but no appcast would become "latest" and break
+            # every installed app's feed (404). Only a prerelease (a '-' in the tag) may go without.
+            case "$GITHUB_REF_NAME" in
+              *-*) echo "no appcasts in this prerelease"; exit 0 ;;
+            esac
+            if ls dist/Refract-arm64.zip dist/Refract-amd64.zip >/dev/null 2>&1; then
+              echo "::error::this release attaches the macOS app but no appcast-<arch>.xml: as the latest release it would break every installed app's update feed"; exit 1
+            fi
+            echo "no appcasts in this release (it has no macOS app)"; exit 0
+          fi
+          for arch in arm64 amd64; do
+            [ -f "dist/appcast-$arch.xml" ] || { echo "::error::appcast-$arch.xml is missing: an app of that architecture could never update"; exit 1; }
+          done
+          for f in "$@"; do
+            url=$(sed -n 's/.*<enclosure url="\([^"]*\)".*/\1/p' "$f")
+            case "$url" in
+              "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/"*) ;;
+              *) echo "::error::$f points at $url, not at this release"; exit 1 ;;
+            esac
+            [ -f "dist/${url##*/}" ] || { echo "::error::$f names ${url##*/}, which this release does not attach"; exit 1; }
+            arch=${f##*/appcast-}; arch=${arch%.xml}
+            case "${url##*/}" in
+              *"-$arch.zip") ;;
+              *) echo "::error::$f points at ${url##*/}, an archive of another architecture"; exit 1 ;;
+            esac
+          done
       # The notes are the version's section of CHANGELOG.md ("## [0.1.0] - …"),
       # minus the link definitions at the end of the file. Without that
       # section, GitHub lists the commits instead.
@@ -159,7 +196,11 @@ jobs:
           if [ -s "$notes_file" ]; then notes="--notes-file=$notes_file"; else notes="--generate-notes"; fi
           cd dist
           sha256sum * > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" "$notes"
+          # A prerelease (a '-' in the tag) may carry no appcasts: keep it out of releases/latest,
+          # where installed apps look for their feeds.
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; *) pre="" ;; esac
+          # shellcheck disable=SC2086
+          gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" "$notes" $pre
 
   # The default token cannot write to a different repository. Opt in after
   # adding a fine-grained HOMEBREW_TAP_TOKEN for ponytojas/homebrew-tap.

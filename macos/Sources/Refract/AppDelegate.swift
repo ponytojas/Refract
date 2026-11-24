@@ -6,6 +6,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var root: RootViewController!
     private var window: NSWindow!
     private var quitting = false
+    private var pendingStops: [(Bool) -> Void] = []
+    private var terminateReplyPending = false
+    private var updates: UpdateController!
     /// A restart was asked for: only then is "stopping" the first half of one.
     private var restarting = false
     private let portKey = "serverPort"
@@ -20,8 +23,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if activateRunningInstance() {
             exit(0)
         }
-        installMenu()
-
         let layout = BundleLayout()
         var config = ServerSupervisor.Config(
             executable: layout.server,
@@ -32,6 +33,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ~/Library/Application Support/Refract.
         config.workingDirectory = NSHomeDirectory()
         supervisor = ServerSupervisor(config: config)
+        updates = UpdateController(settings: UpdateSettings.resolve(
+            info: Bundle.main.infoDictionary ?? [:], environment: ProcessInfo.processInfo.environment))
+        updates.stopServer = { [weak self] forUpdate, done in self?.stopServer(forUpdate: forUpdate, then: done) }
+        updates.resumeServer = { [weak self] in
+            guard let self else { return }
+            self.quitting = false
+            self.supervisor.restart()
+        }
+        installMenu()
         let saved = Self.defaults.integer(forKey: portKey)
         supervisor.preferredPort = saved > 0 ? saved : nil
 
@@ -43,13 +53,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showLogs: { NSWorkspace.shared.activateFileViewerSelecting([AppLog.store.file]) },
             reinstall: { NSWorkspace.shared.open(URL(string: "https://github.com/ponytojas/Refract/releases/latest")!) })
         window = NSWindow(contentViewController: root)
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        // No title bar of its own: the web app reaches the top edge, the traffic lights float
+        // over it. The title stays (Mission Control, the Window menu, VoiceOver) but isn't drawn.
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.title = "Refract"
         window.minSize = NSSize(width: 640, height: 420)
         window.setContentSize(NSSize(width: 1280, height: 820))
         window.setFrameAutosaveName("RefractMainWindow")
         if !window.setFrameUsingName("RefractMainWindow") { window.center() }
         window.makeKeyAndOrderFront(nil)
+        root.updateInset(for: window)
+        for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification,
+            NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
+            NSWindow.didBecomeKeyNotification, NSWindow.didChangeScreenNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                guard let self else { return }
+                self.root.updateInset(for: self.window)
+            }
+        }
+        // AppKit lays the title bar out again for its own reasons (appearance, tabs, full screen):
+        // when its container changes, the lights go back where the bars expect them.
+        if let container = window.standardWindowButton(.closeButton)?.superview?.superview {
+            NotificationCenter.default.addObserver(
+                forName: NSView.frameDidChangeNotification, object: container, queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                self.root.updateInset(for: self.window)
+            }
+        }
         NSApp.activate(ignoringOtherApps: true)
 
         supervisor.onChange = { [weak self] in self?.apply($0) }
@@ -109,11 +142,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let supervisor else { return .terminateNow }
-        if quitting { return .terminateLater }
         // A terminal instance has nothing to stop, but its page may hold unsaved typing.
         switch supervisor.state {
         case .starting, .stopping, .ready: break
         default: return .terminateNow
+        }
+        // A second ⌘Q while one is pending waits for the same reply.
+        if terminateReplyPending { return .terminateLater }
+        terminateReplyPending = true
+        stopServer(forUpdate: false) { proceed in
+            self.terminateReplyPending = false
+            if proceed { AppLog.note("quitting after the server stopped") }
+            NSApp.reply(toApplicationShouldTerminate: proceed)
+        }
+        return .terminateLater
+    }
+
+    /// The quit sequence up to the server's end, shared by ⌘Q and by an update's relaunch: the
+    /// page saves what was typed (asking, if it can't), standard input closes, and the server
+    /// finishes its requests and closes the database (killed only after 30 seconds, see
+    /// ServerSupervisor). Calls back `true` once the server is gone, `false` if the person
+    /// chose to keep working. Calls arriving while one runs wait for its result.
+    private func stopServer(forUpdate: Bool = false, then done: @escaping (Bool) -> Void) {
+        pendingStops.append(done)
+        guard pendingStops.count == 1 else { return }
+        switch supervisor.state {
+        case .starting, .stopping, .ready: break
+        default:
+            finishStop(true)
+            return
         }
         quitting = true
         Task { @MainActor in
@@ -122,13 +179,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let alert = NSAlert()
                 alert.alertStyle = .warning
                 alert.messageText = L("quit.unsaved.title", "Some changes couldn't be saved")
-                alert.informativeText = L("quit.unsaved.message", "Refract couldn't save everything you typed (the project may be locked or gone). Quit anyway and lose it?")
-                alert.addButton(withTitle: L("quit.unsaved.cancel", "Don't Quit"))
-                alert.addButton(withTitle: L("quit.unsaved.quit", "Quit Anyway"))
+                if forUpdate {
+                    alert.informativeText = L("update.unsaved.message", "Refract couldn't save everything you typed (the project may be locked or gone). Install the update anyway and lose it?")
+                    alert.addButton(withTitle: L("update.unsaved.cancel", "Not Now"))
+                    alert.addButton(withTitle: L("update.unsaved.install", "Install Anyway"))
+                } else {
+                    alert.informativeText = L("quit.unsaved.message", "Refract couldn't save everything you typed (the project may be locked or gone). Quit anyway and lose it?")
+                    alert.addButton(withTitle: L("quit.unsaved.cancel", "Don't Quit"))
+                    alert.addButton(withTitle: L("quit.unsaved.quit", "Quit Anyway"))
+                }
                 if alert.runModal() == .alertFirstButtonReturn {
                     quitting = false
                     apply(supervisor.state)
-                    NSApp.reply(toApplicationShouldTerminate: false)
+                    finishStop(false)
                     return
                 }
             }
@@ -139,11 +202,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             supervisor.stop { outcome in
                 slow.invalidate()
-                AppLog.note("quitting after the server stopped (\(outcome))")
-                NSApp.reply(toApplicationShouldTerminate: true)
+                AppLog.note("the server stopped (\(outcome))")
+                self.finishStop(true)
             }
         }
-        return .terminateLater
+    }
+
+    private func finishStop(_ proceed: Bool) {
+        let waiting = pendingStops
+        pendingStops = []
+        waiting.forEach { $0(proceed) }
     }
 
     // MARK: Menu (a minimum: ⌘Q, ⌘W and the editing commands the web view needs; #68 replaces it)
@@ -162,6 +230,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let app = submenu("Refract")
         add(app, L("menu.about", "About Refract"), #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
+        let check = app.addItem(withTitle: L("menu.checkForUpdates", "Check for Updates…"), action: #selector(UpdateController.checkForUpdates(_:)), keyEquivalent: "")
+        check.target = updates
         app.addItem(.separator())
         add(app, L("menu.hide", "Hide Refract"), #selector(NSApplication.hide(_:)), "h")
         add(app, L("menu.hideOthers", "Hide Others"), #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option])

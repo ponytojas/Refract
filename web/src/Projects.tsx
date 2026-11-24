@@ -364,7 +364,11 @@ function ProjectList({ status }: { status: ChatGPTStatus | null }) {
       onDrop={onDrop}
     >
       <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs">
-        <header className="flex flex-wrap items-center gap-2 px-5 py-4">
+        <header
+          data-window-bar
+          data-window-drag
+          className="flex flex-wrap items-center gap-2 px-5 py-4 [--bar-pad:1.25rem]"
+        >
           <h1 className="mr-auto flex items-center gap-2.5 text-lg font-semibold tracking-tight">
             <img src="/logo.svg" alt="Refract" className="size-7" style={{ viewTransitionName: 'logo' }} />
             {t('All projects')}
@@ -656,10 +660,10 @@ function TrashView({ status }: { status: ChatGPTStatus | null }) {
   return (
     <div className="flex h-full flex-col p-2">
       <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs">
-        <header className="flex flex-col gap-1 px-5 py-4">
+        <header data-window-bar data-window-drag className="flex flex-col gap-1 px-5 py-4 [--bar-pad:1.25rem]">
           <Link
             to="/"
-            className="mb-1 flex w-fit items-center gap-1.5 text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground"
+            className="mb-1 flex w-fit items-center gap-1.5 text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground [[data-desktop]_&]:min-h-9"
           >
             <ArrowLeft className="size-3.5" /> {t('All projects')}
           </Link>

@@ -25,6 +25,7 @@
 "loading.starting" = "Starting Refract…";
 "loading.stopping" = "Saving and closing Refract…";
 "menu.about" = "About Refract";
+"menu.checkForUpdates" = "Check for Updates…";
 "menu.close" = "Close Window";
 "menu.copy" = "Copy";
 "menu.cut" = "Cut";
@@ -44,4 +45,13 @@
 "quit.unsaved.message" = "Refract couldn't save everything you typed (the project may be locked or gone). Quit anyway and lose it?";
 "quit.unsaved.quit" = "Quit Anyway";
 "quit.unsaved.title" = "Some changes couldn't be saved";
+"update.disabled.broken" = "This copy of Refract has no valid update settings. Download it again from the releases page; your projects aren't touched.";
+"update.disabled.dev" = "This copy of Refract was built for development and can't verify updates. Download the current version from the releases page.";
+"update.disabled.feed" = "This copy's update address isn't https (or a local one for tests), so it can't be used. If you set REFRACT_APP_UPDATE_FEED, remove it or give an https address; otherwise download Refract again from the releases page.";
+"update.disabled.ok" = "OK";
+"update.disabled.releases" = "Open Releases Page";
+"update.disabled.title" = "Updates are turned off in this copy";
+"update.unsaved.cancel" = "Not Now";
+"update.unsaved.install" = "Install Anyway";
+"update.unsaved.message" = "Refract couldn't save everything you typed (the project may be locked or gone). Install the update anyway and lose it?";
 "error.pageLoad" = "The page didn't load: %@";

@@ -6,6 +6,7 @@ package siwc
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,6 +49,21 @@ type Credentials struct {
 	EarliestRefreshAt time.Time `json:"earliest_refresh_at,omitzero"`
 	Subject           string    `json:"sub"`
 	Email             string    `json:"email,omitempty"`
+	// Pending is a rotated token set received but not yet verified. The old
+	// refresh token is spent once it exists, so it is saved first and promoted
+	// after the ID token checks out (or resumed after a restart).
+	Pending *Pending `json:"pending,omitempty"`
+}
+
+// Pending is a rotated token set, with the time the response arrived.
+type Pending struct {
+	AccessToken       string    `json:"access_token"`
+	RefreshToken      string    `json:"refresh_token"`
+	IDToken           string    `json:"id_token,omitempty"`
+	Scope             string    `json:"scope,omitempty"`
+	ExpiresAt         time.Time `json:"expires_at"`
+	EarliestRefreshAt time.Time `json:"earliest_refresh_at,omitzero"`
+	ReceivedAt        time.Time `json:"received_at"`
 }
 
 // PlanGranted reports whether the user granted ChatGPT plan usage.
@@ -99,6 +115,7 @@ type tokenResponse struct {
 	RefreshToken      string          `json:"refresh_token"`
 	IDToken           string          `json:"id_token"`
 	Scope             string          `json:"scope"`
+	TokenType         string          `json:"token_type"`
 	ExpiresIn         int64           `json:"expires_in"`
 	EarliestRefreshAt json.RawMessage `json:"earliest_refresh_at"`
 }
@@ -112,24 +129,74 @@ func (o *OAuth) Exchange(ctx context.Context, clientID, code, verifier, redirect
 		"code_verifier": {verifier},
 		"redirect_uri":  {redirectURI},
 		"resource":      {Resource},
-	})
+	}, true)
 }
 
-// Refresh rotates the refresh token. The caller must persist the result
-// before using the new access token: the old refresh token is now spent.
-func (o *OAuth) Refresh(ctx context.Context, c *Credentials) (*Credentials, error) {
+// Refresh rotates the refresh token and returns the new set, not yet verified.
+// The old refresh token is now spent: the caller must save the result at once.
+func (o *OAuth) Refresh(ctx context.Context, c *Credentials) (*Pending, error) {
 	tr, err := o.token(ctx, url.Values{
 		"grant_type":    {"refresh_token"},
 		"client_id":     {c.ClientID},
 		"refresh_token": {c.RefreshToken},
 		"resource":      {Resource},
-	})
+	}, false)
 	if err != nil {
 		return nil, err
 	}
-	next := *c
-	next.apply(tr, time.Now())
-	return &next, nil
+	now := time.Now()
+	return &Pending{
+		AccessToken:       tr.AccessToken,
+		RefreshToken:      tr.RefreshToken,
+		IDToken:           tr.IDToken,
+		Scope:             tr.Scope,
+		ExpiresAt:         now.Add(time.Duration(tr.ExpiresIn) * time.Second),
+		EarliestRefreshAt: parseTime(tr.EarliestRefreshAt),
+		ReceivedAt:        now,
+	}, nil
+}
+
+// ErrVerifyUnavailable means the ID token could not be checked right now (the
+// signing keys are unreachable); trying again later may work.
+var ErrVerifyUnavailable = errors.New("could not verify the ChatGPT sign-in: signing keys unreachable")
+
+// ErrAccountMismatch means a refresh returned an identity other than the stored one.
+var ErrAccountMismatch = errors.New("ChatGPT returned a different account than the one signed in; sign in again")
+
+// VerifyPending checks the ID token of a rotated set, if it has one: signature,
+// issuer, audience and, when subject is known, that it is the same account.
+// Expiry is judged at the time the response was received.
+func (o *OAuth) VerifyPending(ctx context.Context, clientID, subject string, p *Pending) error {
+	if p.IDToken == "" {
+		return nil
+	}
+	v := oidc.NewVerifier(Issuer, o.Keys, &oidc.Config{ClientID: clientID, Now: func() time.Time { return p.ReceivedAt }})
+	idt, err := v.Verify(ctx, p.IDToken)
+	if err != nil {
+		if strings.Contains(err.Error(), "fetching keys") || ctx.Err() != nil {
+			return fmt.Errorf("%w: %v", ErrVerifyUnavailable, err)
+		}
+		return fmt.Errorf("refreshed id token rejected: %w", err)
+	}
+	if subject != "" && subtle.ConstantTimeCompare([]byte(idt.Subject), []byte(subject)) != 1 {
+		return ErrAccountMismatch
+	}
+	return nil
+}
+
+// promote makes a verified pending set the current one.
+func (c *Credentials) promote(p *Pending) {
+	c.AccessToken = p.AccessToken
+	c.ExpiresAt = p.ExpiresAt
+	c.EarliestRefreshAt = p.EarliestRefreshAt
+	c.RefreshToken = p.RefreshToken
+	if p.IDToken != "" {
+		c.IDToken = p.IDToken
+	}
+	if p.Scope != "" {
+		c.Scope = p.Scope
+	}
+	c.Pending = nil
 }
 
 func (c *Credentials) apply(tr *tokenResponse, now time.Time) {
@@ -165,7 +232,7 @@ func parseTime(raw json.RawMessage) time.Time {
 	return time.Time{}
 }
 
-func (o *OAuth) token(ctx context.Context, form url.Values) (*tokenResponse, error) {
+func (o *OAuth) token(ctx context.Context, form url.Values, needIDToken bool) (*tokenResponse, error) {
 	body, status, err := o.postForm(ctx, o.TokenURL, form)
 	if err != nil {
 		return nil, err
@@ -180,7 +247,27 @@ func (o *OAuth) token(ctx context.Context, form url.Values) (*tokenResponse, err
 	if tr.AccessToken == "" {
 		return nil, errors.New("token endpoint: response without access_token")
 	}
+	if err := tr.validate(needIDToken); err != nil {
+		return nil, fmt.Errorf("token endpoint: %w; sign in again", err)
+	}
 	return &tr, nil
+}
+
+// validate rejects a token response that breaks the contract we rely on.
+func (tr *tokenResponse) validate(needIDToken bool) error {
+	switch {
+	case tr.Scope == "":
+		return errors.New("response without scope")
+	case !strings.EqualFold(tr.TokenType, "bearer"):
+		return fmt.Errorf("unexpected token_type %q", tr.TokenType)
+	case tr.ExpiresIn <= 0:
+		return errors.New("response without a positive expires_in")
+	case tr.RefreshToken == "" && slices.Contains(strings.Fields(tr.Scope), "offline_access"):
+		return errors.New("offline_access was granted but no refresh_token was returned")
+	case needIDToken && tr.IDToken == "":
+		return errors.New("response without id_token")
+	}
+	return nil
 }
 
 // parseTokenError accepts both {"error":"code"} (RFC 6749) and {"error":{"code":...}}.
@@ -208,13 +295,24 @@ func parseTokenError(status int, body []byte) *TokenError {
 	return e
 }
 
+var revokeRetryDelay = 300 * time.Millisecond
+
 // Revoke revokes the refresh token. An empty 200 is success, also for already-invalid tokens.
 func (o *OAuth) Revoke(ctx context.Context, c *Credentials) error {
-	body, status, err := o.postForm(ctx, o.RevokeURL, url.Values{
+	form := url.Values{
 		"token":           {c.RefreshToken},
 		"token_type_hint": {"refresh_token"},
 		"client_id":       {c.ClientID},
-	})
+	}
+	body, status, err := o.postForm(ctx, o.RevokeURL, form)
+	if err != nil || status >= 500 {
+		// One retry for a network error or a server error.
+		select {
+		case <-ctx.Done():
+		case <-time.After(revokeRetryDelay):
+			body, status, err = o.postForm(ctx, o.RevokeURL, form)
+		}
+	}
 	if err != nil {
 		return err
 	}

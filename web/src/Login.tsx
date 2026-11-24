@@ -55,6 +55,7 @@ export default function Login({ signedIn = false }: { signedIn?: boolean }) {
 function Screen({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background p-4">
+      <div className="window-strip" data-window-drag aria-hidden />
       <div className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-3 text-center">
           <img src="/logo.svg" alt="" className="size-10" />

@@ -33,7 +33,10 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
         className,
       )}
       {...props}
-    />
+    >
+      {/* In the macOS app, the top of the screen still moves the window behind a dialog. */}
+      <div className="window-strip" data-window-drag aria-hidden />
+    </DialogPrimitive.Backdrop>
   )
 }
 

@@ -9,6 +9,12 @@
 #   NOTARY_KEY_P8_BASE64    the App Store Connect API key (.p8), base64
 #   NOTARY_KEY_ID           its key id
 #   NOTARY_ISSUER_ID        the issuer id
+# Updates (#70; macos/README.md, "Updates"):
+#   SPARKLE_ED_PRIVATE_KEY            secret: the EdDSA private key that signs the updates (Sparkle's generate_keys -x)
+#   REFRACT_SPARKLE_PUBLIC_KEY        repository variable: its public half, baked into the app (SUPublicEDKey)
+# A signed build needs both: an app that can't verify updates, or an appcast that no app can verify, is not
+# a release. The appcast of each architecture (appcast-<arch>.xml) is built from the final, stapled zip and
+# uploaded as the artifact appcast-<arch>, next to Refract-app-<arch>, for the release (#71) to attach.
 # Without all six (a fork's pull request, a repository that hasn't set them) the app is built
 # signed ad hoc, with a notice: it runs here but Gatekeeper rejects it, so it is never a release.
 name: macos-app
@@ -35,6 +41,7 @@ on:
       NOTARY_KEY_P8_BASE64: { required: false }
       NOTARY_KEY_ID: { required: false }
       NOTARY_ISSUER_ID: { required: false }
+      SPARKLE_ED_PRIVATE_KEY: { required: false }
   workflow_dispatch:
     inputs:
       version:
@@ -116,6 +123,8 @@ jobs:
           NOTARY_KEY: ${{ github.event_name != 'pull_request' && secrets.NOTARY_KEY_P8_BASE64 || '' }}
           NOTARY_KEY_ID: ${{ github.event_name != 'pull_request' && secrets.NOTARY_KEY_ID || '' }}
           NOTARY_ISSUER_ID: ${{ github.event_name != 'pull_request' && secrets.NOTARY_ISSUER_ID || '' }}
+          SPARKLE_PRIVATE: ${{ github.event_name != 'pull_request' && secrets.SPARKLE_ED_PRIVATE_KEY || '' }}
+          SPARKLE_PUBLIC: ${{ vars.REFRACT_SPARKLE_PUBLIC_KEY }}
         run: |
           if [ "$REQUIRE_SIGNED" = true ] && { [ "$EVENT" = pull_request ] || [ -z "$CERT" ] || [ -z "$CERT_PASSWORD" ] || [ -z "$IDENTITY" ] || [ -z "$NOTARY_KEY" ] || [ -z "$NOTARY_KEY_ID" ] || [ -z "$NOTARY_ISSUER_ID" ]; }; then
             echo "::error title=macOS app cannot be signed::A signed build was required, but the signing secrets are not all available (see macos/README.md)."
@@ -126,6 +135,9 @@ jobs:
           elif [ -z "$CERT" ] || [ -z "$CERT_PASSWORD" ] || [ -z "$IDENTITY" ] || [ -z "$NOTARY_KEY" ] || [ -z "$NOTARY_KEY_ID" ] || [ -z "$NOTARY_ISSUER_ID" ]; then
             echo "::notice title=macOS app is not signed::The signing secrets are not available here (see macos/README.md), so the app is built signed ad hoc and is not notarized. Gatekeeper will reject it: do not publish it."
             echo "sign=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$SPARKLE_PRIVATE" ] || [ -z "$SPARKLE_PUBLIC" ]; then
+            echo "::error title=No update key::A signed app must be updatable: set the secret SPARKLE_ED_PRIVATE_KEY and the repository variable REFRACT_SPARKLE_PUBLIC_KEY (macos/README.md, \"Updates\")."
+            exit 1
           else
             echo "sign=true" >> "$GITHUB_OUTPUT"
           fi
@@ -173,6 +185,7 @@ jobs:
           REFRACT_NOTARY_TIMEOUT: 45m
           REFRACT_NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           REFRACT_NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER_ID }}
+          REFRACT_SPARKLE_PUBLIC_KEY: ${{ vars.REFRACT_SPARKLE_PUBLIC_KEY }}
         run: make mac-release MAC_ARCH="$ARCH" MAC_VERSION="$VERSION"
 
       - name: Build (ad hoc)
@@ -250,6 +263,19 @@ jobs:
         with:
           name: ${{ steps.secrets.outputs.sign == 'true' && 'Refract-dmg' || 'Refract-dmg-adhoc' }}-${{ matrix.arch }}
           path: build/mac/${{ matrix.arch }}/Refract-${{ matrix.arch }}.dmg
+      # The appcast of this architecture, signed with the update key from the final zip. A development
+      # version (v0.0.0-dev) or a prerelease tag gets none: the script says so and writes no file.
+      - name: Appcast
+        if: steps.secrets.outputs.sign == 'true'
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: python3 -I scripts/make-appcast.py --version "$VERSION" --arch "$ARCH" --archive "build/mac/$ARCH/Refract-$ARCH.zip" --output "build/mac/$ARCH/appcast-$ARCH.xml"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: hashFiles(format('build/mac/{0}/appcast-{0}.xml', matrix.arch)) != ''
+        with:
+          name: appcast-${{ matrix.arch }}
+          path: build/mac/${{ matrix.arch }}/appcast-${{ matrix.arch }}.xml
           if-no-files-found: error
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -3,10 +3,12 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ponytojas/Refract/internal/siwc"
@@ -307,5 +309,43 @@ func TestUsageReadsNestedDetails(t *testing.T) {
 	}
 	if want := (Usage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3}); u != want {
 		t.Fatalf("usage = %+v, want %+v", u, want)
+	}
+}
+
+func TestRedirectIsNotFollowed(t *testing.T) {
+	var elsewhere atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhere.Add(1)
+	}))
+	t.Cleanup(other.Close)
+	p := provider(t, signedIn(), func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL, http.StatusTemporaryRedirect)
+	})
+	_, err := collect(t, p)
+	var e *Error
+	if !errors.As(err, &e) {
+		t.Fatalf("err = %v, want an *Error", err)
+	}
+	if elsewhere.Load() != 0 {
+		t.Fatal("the request was forwarded to another origin")
+	}
+}
+
+func TestRateLimitIsUsageLimitAndNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	p := provider(t, signedIn(), func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	_, err := collect(t, p)
+	var e *Error
+	if !errors.As(err, &e) || e.Kind != ErrUsageLimit {
+		t.Fatalf("err = %v, want a usage-limit error", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("429 was retried: %d calls", calls.Load())
+	}
+	if !p.Status(context.Background()).LimitReached {
+		t.Fatal("usage limit not recorded in the status")
 	}
 }

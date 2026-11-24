@@ -25,6 +25,7 @@
 "loading.starting" = "Iniciando Refract…";
 "loading.stopping" = "Guardando y cerrando Refract…";
 "menu.about" = "Acerca de Refract";
+"menu.checkForUpdates" = "Buscar actualizaciones…";
 "menu.close" = "Cerrar ventana";
 "menu.copy" = "Copiar";
 "menu.cut" = "Cortar";
@@ -44,4 +45,13 @@
 "quit.unsaved.message" = "Refract no pudo guardar todo lo que escribiste (puede que el proyecto esté bloqueado o ya no exista). ¿Salir de todos modos y perderlo?";
 "quit.unsaved.quit" = "Salir de todos modos";
 "quit.unsaved.title" = "No se pudieron guardar algunos cambios";
+"update.disabled.broken" = "Esta copia de Refract no tiene una configuración de actualización válida. Descárgala de nuevo desde la página de versiones; tus proyectos no se tocan.";
+"update.disabled.dev" = "Esta copia de Refract se compiló para desarrollo y no puede verificar actualizaciones. Descarga la versión actual desde la página de versiones.";
+"update.disabled.feed" = "La dirección de actualización de esta copia no es https (ni una local para pruebas), así que no se puede usar. Si definiste REFRACT_APP_UPDATE_FEED, quítala o pon una dirección https; si no, descarga Refract de nuevo desde la página de versiones.";
+"update.disabled.ok" = "Aceptar";
+"update.disabled.releases" = "Abrir la página de versiones";
+"update.disabled.title" = "Las actualizaciones están desactivadas en esta copia";
+"update.unsaved.cancel" = "Ahora no";
+"update.unsaved.install" = "Instalar de todos modos";
+"update.unsaved.message" = "Refract no pudo guardar todo lo que escribiste (puede que el proyecto esté bloqueado o ya no exista). ¿Instalar la actualización de todos modos y perderlo?";
 "error.pageLoad" = "La página no se cargó: %@";

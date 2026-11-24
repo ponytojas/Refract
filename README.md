@@ -435,6 +435,8 @@ To go back to an older version after an upgrade:
 
 An older Refract refuses to open a database a newer one has upgraded.
 
+If an upgrade fails, the database is left as it was (the migrations are one transaction) and Refract refuses to start, saying so and naming `refract.db.pre-upgrade`. The macOS app updates itself the same way (the update replaces the app, never the data folder) and going back to an older app is only supported by this same restore. See [macos/README.md](macos/README.md#updates).
+
 Stopping Refract lets requests in flight and auto-pushes finish, and running assistant turns record that they were stopped: up to about 20 seconds. Docker's default is to kill the container after 10, so start it with `--stop-timeout 30` as above.
 
 ### Moving from `REFRACT_AUTH=none` to a sign-in mode
@@ -461,6 +463,8 @@ Refract can use a ChatGPT subscription through "Sign in with ChatGPT", so reques
 3. Upload the credential file it writes in **Settings → Assistant**.
 
 For a macOS binary downloaded manually with a browser, run `xattr -d com.apple.quarantine refract` once if macOS quarantines it because it isn't signed.
+
+The sign-in checks what ChatGPT returns (tokens, account and callback), keeps the sign-in address free of tokens and prints it if the browser can't be opened.
 
 To restrict a server to one ChatGPT account, set `REFRACT_ALLOWED_SUBJECT` to the subject `refract login` prints.
 

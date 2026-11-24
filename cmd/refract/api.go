@@ -61,7 +61,7 @@ func (a *api) forUser(ctx context.Context) *userAI {
 		return a.providers.List(ctx, u.ID)
 	}}
 	if a.mode.ChatGPT() { // never in saas, even with credentials stored earlier
-		router.ChatGPT = &ai.SIWC{Tokens: s, BaseURL: siwc.Resource, HTTP: &http.Client{}}
+		router.ChatGPT = &ai.SIWC{Tokens: s, BaseURL: siwc.Resource, HTTP: &http.Client{CheckRedirect: noRedirect}}
 	}
 	v, _ := a.users.LoadOrStore(u.ID, &userAI{session: s, router: router})
 	return v.(*userAI)
@@ -281,3 +281,7 @@ func httpError(w http.ResponseWriter, err error, status int) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"kind": "other", "message": err.Error()}})
 }
+
+// noRedirect refuses redirects: a request body and its bearer token must never
+// be forwarded to another origin.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

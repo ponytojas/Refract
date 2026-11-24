@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -55,11 +54,27 @@ func runLogin(args []string) error {
 		HostID: hostID,
 		Saved:  saved,
 		OAuth:  siwc.NewOAuth(ctx),
-		OpenBrowser: func(u string) {
-			fmt.Println("Continue with ChatGPT in your browser. If it does not open, visit:\n\n  " + u + "\n")
-			if !*noBrowser {
-				openBrowser(u)
+		OpenBrowser: func(u string) error {
+			if *noBrowser {
+				return errors.New("-no-browser")
 			}
+			return openBrowser(u)
+		},
+		OnURL: func(u string, openErr error) {
+			if openErr != nil {
+				fmt.Println("Open this address in your browser to continue with ChatGPT:\n\n  " + u + "\n")
+				return
+			}
+			fmt.Println("Continue with ChatGPT in your browser.")
+		},
+		// Keep the issued registration if the exchange fails, so running login
+		// again reuses it. Never overwrite an existing credential file with it.
+		OnRegistration: func(clientID string) error {
+			if _, err := os.Stat(*out); err == nil {
+				return nil
+			}
+			raw, _ := json.MarshalIndent(siwc.Credentials{ClientID: clientID}, "", "  ")
+			return writeFileAtomic(*out, raw)
 		},
 	})
 	if err != nil {
@@ -112,7 +127,7 @@ func writeFileAtomic(path string, data []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-func openBrowser(u string) {
+func openBrowser(u string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -123,8 +138,8 @@ func openBrowser(u string) {
 		cmd = exec.Command("xdg-open", u)
 	}
 	if err := cmd.Start(); err != nil {
-		slog.Warn("couldn't open the browser", "url", u, "err", err)
-		return
+		return err
 	}
 	go cmd.Wait() // reap the launcher, which exits once the browser has the URL
+	return nil
 }
