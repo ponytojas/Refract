@@ -52,7 +52,7 @@ test('shows the download in progress and what was kept afterwards', async ({ pag
   await page.screenshot({ path: test.info().outputPath('downloading.png') })
   await expect(chip(page)).toContainText('Compiled', { timeout: 10_000 })
   await chip(page).click()
-  await expect(page.getByText('Downloaded 3 files. They’re kept on this computer for offline use.')).toBeVisible()
+  await expect(page.getByText('Downloaded 3 files. They’re kept for later compiles.')).toBeVisible()
   await page.screenshot({ path: test.info().outputPath('downloaded.png') })
 })
 
@@ -65,23 +65,25 @@ test('offline: explains what is missing and offers to try again', async ({ page,
   await page.getByRole('button', { name: 'Compile', exact: true }).click()
   await expect(chip(page)).toContainText('Needs a download', { timeout: 10_000 })
   await chip(page).click()
-  await expect(page.getByText('This document needs files that aren’t on this computer yet')).toBeVisible()
+  await expect(page.getByText('This document needs files Refract doesn’t have yet')).toBeVisible()
   await expect(page.getByText('siunitx.sty, tikz.sty')).toBeVisible()
-  await expect(page.getByText('Your document is saved. Connect to the internet and try again.')).toBeVisible()
+  await expect(
+    page.getByText('Your document is saved. Refract can’t reach the package server right now: try again in a moment.'),
+  ).toBeVisible()
   await page.screenshot({ path: test.info().outputPath('needs-download.png') })
   const again = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/compile'))
   await page.getByRole('button', { name: 'Try again' }).click()
   await again
 })
 
-test('shows the retry while the package server is unreachable', async ({ page, request }) => {
+test('shows the retry while a download fails', async ({ page, request }) => {
   await mock(page, [{ state: 'downloading', file: 'a.sty', downloaded: 0, retrying: true }], {
     ...base,
     downloads: { fetched: 0, missing: ['a.sty'], offline: true },
   })
   await open(page, request)
   await page.getByRole('button', { name: 'Compile', exact: true }).click()
-  await expect(chip(page)).toContainText('Can’t reach the package server…', { timeout: 5000 })
+  await expect(chip(page)).toContainText('Retrying a download…', { timeout: 5000 })
   await page.screenshot({ path: test.info().outputPath('retrying.png') })
 })
 
