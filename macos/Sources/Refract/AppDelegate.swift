@@ -51,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.supervisor.restart()
             },
             showLogs: { NSWorkspace.shared.activateFileViewerSelecting([AppLog.store.file]) },
-            reinstall: { NSWorkspace.shared.open(URL(string: "https://github.com/ponytojas/Refract/releases/latest")!) })
+            reinstall: { NSWorkspace.shared.open(URL(string: "https://github.com/Use-Refract/Refract/releases/latest")!) })
         window = NSWindow(contentViewController: root)
         // No title bar of its own: the web app reaches the top edge, the traffic lights float
         // over it. The title stays (Mission Control, the Window menu, VoiceOver) but isn't drawn.

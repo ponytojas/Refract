@@ -41,7 +41,7 @@ SPARKLE_VERSION = "2.10.1"
 SPARKLE_URL = f"https://github.com/sparkle-project/Sparkle/releases/download/{SPARKLE_VERSION}/Sparkle-{SPARKLE_VERSION}.tar.xz"
 SPARKLE_SHA256 = "1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27"
 NAMESPACE = "http://www.andymatuschke.org/xmlns/sparkle"
-REPO = "ponytojas/Refract"
+REPO = "Use-Refract/Refract"
 VERSION_RE = re.compile(r"^v?(\d+(?:\.\d+){0,2})(.*)$")
 
 

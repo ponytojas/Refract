@@ -3,7 +3,7 @@ import XCTest
 
 final class UpdateSettingsTests: XCTestCase {
     private let key = Data(repeating: 7, count: 32).base64EncodedString()
-    private let feed = "https://github.com/ponytojas/Refract/releases/latest/download/appcast-arm64.xml"
+    private let feed = "https://github.com/Use-Refract/Refract/releases/latest/download/appcast-arm64.xml"
 
     private func info(key: String? = nil, feed: String? = nil, overridable: Bool = false) -> [String: Any] {
         var d: [String: Any] = [:]

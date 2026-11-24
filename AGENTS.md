@@ -43,10 +43,10 @@ Needs [Docker](https://docs.docker.com/get-docker/). Check with `docker version`
 openssl rand -base64 32 > refract.key && chmod 600 refract.key
 docker run -d --name refract -p 127.0.0.1:8080:8080 -v refract-data:/data \
   -e REFRACT_SECRET_KEY="$(cat refract.key)" -e REFRACT_AUTH=none -e REFRACT_ALLOWED_HOSTS=localhost \
-  ghcr.io/ponytojas/refract
+  ghcr.io/use-refract/refract
 ```
 
-The image is published for amd64 and arm64. To build it from the source instead: `git clone https://github.com/ponytojas/Refract.git && cd Refract && docker build -t refract .`, then use `refract` as the image name.
+The image is published for amd64 and arm64. To build it from the source instead: `git clone https://github.com/Use-Refract/Refract.git && cd Refract && docker build -t refract .`, then use `refract` as the image name.
 
 Verify: `curl -s http://127.0.0.1:8080/healthz` prints `ok`. Then tell them to open <http://localhost:8080>, create a project and press ⌘↵ (Ctrl+Enter) to compile. The first compile downloads LaTeX packages and takes longer.
 
@@ -72,7 +72,7 @@ Check each tool and install what's missing. Versions are those the project build
 ### Run it
 
 ```sh
-git clone https://github.com/ponytojas/Refract.git
+git clone https://github.com/Use-Refract/Refract.git
 cd Refract
 make dev
 ```
@@ -118,7 +118,7 @@ Follow the README's [Deploy](README.md#deploy) section. Decide these with the pe
 2. **The address and https**: a domain pointing at the server and a reverse proxy with TLS (the README has Caddy and nginx examples; the proxy must send `X-Forwarded-Proto` and must not buffer responses).
 3. **Where the secret key lives**: somewhere it survives reinstalls and is backed up with the data volume.
 
-Then start the container from the published image (`ghcr.io/ponytojas/refract:0.2`), create the first account (`docker exec refract refract users add <email>`), and verify `https://<domain>/healthz` prints `ok` and the sign-in page loads.
+Then start the container from the published image (`ghcr.io/use-refract/refract:0.2`), create the first account (`docker exec refract refract users add <email>`), and verify `https://<domain>/healthz` prints `ok` and the sign-in page loads.
 
 ## When something goes wrong
 

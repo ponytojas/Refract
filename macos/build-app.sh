@@ -35,7 +35,7 @@ case "$ARCH" in
   *) echo "error: arch must be arm64 or amd64" >&2; exit 2 ;;
 esac
 SPARKLE_KEY=${REFRACT_SPARKLE_PUBLIC_KEY:-}
-FEED_BASE=${REFRACT_UPDATE_FEED_BASE:-https://github.com/ponytojas/Refract/releases/latest/download}
+FEED_BASE=${REFRACT_UPDATE_FEED_BASE:-https://github.com/Use-Refract/Refract/releases/latest/download}
 # A release without the key could never be updated (and an update could never be verified): refuse
 # before spending ten minutes on the build. A release is `make mac-release` (REFRACT_RELEASE=1) or
 # any Developer ID build; other builds (ad hoc, Apple Development, self-signed) without the key run

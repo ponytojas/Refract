@@ -347,7 +347,7 @@ def write_notice(out, lock, attribution, tectonic_ver):
         "and the Subversion tree is https://tug.org/svn/texlive/tags/texlive-2022.0/. The unmodified",
         "bundle is the tar at the URL above. For three years from a Refract release, the Refract",
         "maintainers will also send a copy of any of these sources on request",
-        "(https://github.com/ponytojas/Refract/issues).",
+        "(https://github.com/Use-Refract/Refract/issues).",
         "",
         "## Licence texts in this folder",
         "",
