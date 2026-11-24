@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Generate Homebrew and WinGet metadata from the exact release archives.
 
+Writes the CLI's formula (refract), the macOS app's cask (refract-app, from the
+signed disk images Refract-<arch>.dmg) and the WinGet manifests.
+
 Usage: python3 scripts/package-metadata.py v0.1.2 dist packaging-output
 Only the Python standard library is required. Run before publishing the release.
 """
@@ -41,6 +44,13 @@ def generate(tag: str, archives: Path, output: Path) -> None:
             with path.open("rb") as source:
                 hashes[platform, arch] = hashlib.file_digest(source, "sha256").hexdigest()
 
+    # The app's disk images (macos-app.yml): both architectures, read before anything is written.
+    dmgs = {}
+    for arch in ("arm64", "amd64"):
+        path = archives / f"Refract-{arch}.dmg"
+        with path.open("rb") as source:
+            dmgs[arch] = hashlib.file_digest(source, "sha256").hexdigest()
+
     formula = output / "homebrew" / "refract.rb"
     formula.parent.mkdir(parents=True, exist_ok=True)
     base = f"{REPO}/releases/download/{tag}"
@@ -78,6 +88,44 @@ def generate(tag: str, archives: Path, output: Path) -> None:
     assert_match "refract login", shell_output("#{{bin}}/refract --help")
     assert_match "-no-browser", shell_output("#{{bin}}/refract login --help 2>&1")
   end
+end
+''', encoding="utf-8")
+
+    # The app cask. Uninstalling, even with --zap, never removes the person's projects (the data
+    # folder, Application Support/Refract) or their key (Keychain): only what the app can rebuild.
+    cask = output / "homebrew" / "refract-app.rb"
+    cask.write_text(f'''cask "refract-app" do
+  arch arm: "arm64", intel: "amd64"
+
+  version "{version}"
+  sha256 arm:   "{dmgs['arm64']}",
+         intel: "{dmgs['amd64']}"
+
+  url "{REPO}/releases/download/v#{{version}}/Refract-#{{arch}}.dmg"
+  name "Refract"
+  desc "LaTeX workspace with an AI assistant"
+  homepage "{REPO}"
+
+  auto_updates true
+  depends_on macos: :ventura
+
+  app "Refract.app"
+
+  zap trash: [
+    "~/Library/Caches/io.github.ponytojas.Refract",
+    "~/Library/HTTPStorages/io.github.ponytojas.Refract",
+    "~/Library/Logs/Refract",
+    "~/Library/Preferences/io.github.ponytojas.Refract.plist",
+    "~/Library/Saved Application State/io.github.ponytojas.Refract.savedState",
+    "~/Library/WebKit/io.github.ponytojas.Refract",
+  ]
+
+  caveats <<~EOS
+    Uninstalling, even with --zap, keeps your projects in
+      ~/Library/Application Support/Refract
+    and Refract's key in the Keychain (item "Refract"). Delete them yourself
+    only if you no longer need those projects.
+  EOS
 end
 ''', encoding="utf-8")
 
