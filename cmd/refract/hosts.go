@@ -208,10 +208,17 @@ func newServer(mux http.Handler, hosts hostPolicy) *http.Server {
 // listens on all its interfaces gets none: OpenAI's redirect to the host's
 // 127.0.0.1 can't reach it.
 func loginsFor(addr net.Addr) *siwc.Logins {
-	if tcp, ok := addr.(*net.TCPAddr); ok && tcp.IP.IsLoopback() {
+	if onThisComputer(addr) {
 		// The server opens the browser itself: a page's window.open after a
 		// request is a popup that browsers and the desktop app's web view may drop.
 		return &siwc.Logins{OpenBrowser: openBrowser}
 	}
 	return nil
+}
+
+// onThisComputer is whether a server listening on addr is reached only from
+// this computer, where the person's browser is: it may open pages in it.
+func onThisComputer(addr net.Addr) bool {
+	tcp, ok := addr.(*net.TCPAddr)
+	return ok && tcp.IP.IsLoopback()
 }

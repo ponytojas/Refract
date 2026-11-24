@@ -6,6 +6,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 
 ### Added
 
+- Connecting GitHub works with no setup in `refract local` and the Mac app: they use Refract's own OAuth App (device flow) unless `REFRACT_GITHUB_CLIENT_ID` names another. On your own computer, Refract opens GitHub's page in the browser itself.
 - **Sign in with ChatGPT** in Settings → Assistant when Refract runs on your own computer (it listens on loopback): the server runs the sign-in, waits for ChatGPT's redirect on `127.0.0.1:1455` and stores the credential, with no terminal or file. Refract opens the sign-in in the default browser, and shows the link if it can't. Uploading a credential file from `refract login` still works, and is the way for servers elsewhere.
 - Refract can read its encryption key, OpenID Connect client secret, SMTP URL and OpenAlex API key from files using the corresponding `REFRACT_*_FILE` variables. `refract users` and `refract local` also accept the encryption key from a file, and the systemd unit starts Refract directly with a systemd credential.
 - `REFRACT_OUTBOUND` (`any` by default, or `public`) chooses whether AI provider base URLs and git remotes may reach loopback and private networks. `public` does what `REFRACT_MODE=saas` did for outbound requests, and checks at startup that git is 2.37 or later. With `public`, provider requests and redirects must be https, and link-local git remotes are refused in every mode. `REFRACT_MODE=saas` no longer changes it.

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,10 @@ type remoteAPI struct {
 	key    []byte
 	github *github.Client  // nil when REFRACT_GITHUB_CLIENT_ID is not set
 	acc    *access.Checker // auto-push rechecks who may push
+	// openBrowser, set when the server runs on the person's computer, opens
+	// GitHub's device page there: a page's window.open after a request is a
+	// popup that browsers and the desktop app's web view may drop.
+	openBrowser func(url string) error
 
 	mu      sync.Mutex
 	last    map[string]syncStatus         // project → last push/pull
@@ -228,8 +233,12 @@ func (a *remoteAPI) githubStart(w http.ResponseWriter, r *http.Request) {
 	}
 	a.devices[requestUser(r.Context())] = d
 	a.mu.Unlock()
+	// Only GitHub's own page: the address comes from GitHub's answer, and the
+	// opener would follow any scheme.
+	opened := a.openBrowser != nil && strings.HasPrefix(d.VerificationURI, a.github.Web+"/") &&
+		a.openBrowser(d.VerificationURI) == nil
 	// The device code stays on the server; the browser only shows the user code.
-	writeJSON(w, map[string]any{"user_code": d.UserCode, "verification_uri": d.VerificationURI, "interval": d.Interval, "expires_in": d.ExpiresIn})
+	writeJSON(w, map[string]any{"user_code": d.UserCode, "verification_uri": d.VerificationURI, "interval": d.Interval, "expires_in": d.ExpiresIn, "opened": opened})
 }
 
 func (a *remoteAPI) githubPoll(w http.ResponseWriter, r *http.Request) {

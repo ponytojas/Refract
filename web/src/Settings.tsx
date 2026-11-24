@@ -1004,7 +1004,7 @@ function Providers({ onChange }: { onChange: () => void }) {
 }
 
 type GitHubState = { configured: boolean; connected: boolean; login?: string }
-type Device = { user_code: string; verification_uri: string; interval: number; expires_in: number }
+type Device = { user_code: string; verification_uri: string; interval: number; expires_in: number; opened?: boolean }
 
 // GitHub account, connected with the device flow: Refract shows a code, you
 // enter it on github.com, and the token stays sealed on the server.
@@ -1056,7 +1056,8 @@ function Integrations() {
     try {
       const d = await api<Device>('/api/github/device', { method: 'POST' })
       setDevice(d)
-      window.open(d.verification_uri, '_blank', 'noopener')
+      // The server opens GitHub's page itself when it runs on this computer.
+      if (!d.opened) window.open(d.verification_uri, '_blank', 'noopener')
     } catch (e) {
       toast.error(errorText(e))
     } finally {
