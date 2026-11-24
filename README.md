@@ -597,7 +597,9 @@ A missing tool doesn't stop Refract: it logs what won't work without it and the 
 
 ### Connect GitHub
 
-Without this, any project can still push to and pull from an https git remote with a personal access token. To let users pick or create GitHub repositories from Refract:
+On your own computer (`refract local` and the Mac app) this works with no setup: Refract uses its own GitHub OAuth App, and **Settings → Integrations → Connect** opens GitHub in your browser. Each person authorizes it with their own account; the token stays sealed in their Refract. Set `REFRACT_GITHUB_CLIENT_ID` to use your own app instead.
+
+A server needs its own OAuth App. Without one, any project can still push to and pull from an https git remote with a personal access token. To let users pick or create GitHub repositories from Refract:
 
 1. Create a [GitHub OAuth App](https://github.com/settings/developers) and check **Enable Device Flow**. The callback URL is not used, and no client secret is needed.
 2. Set `REFRACT_GITHUB_CLIENT_ID` to its client ID.

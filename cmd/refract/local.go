@@ -261,6 +261,9 @@ func startLocal(ctx context.Context, o localOptions) error {
 		key:      key,
 		authKind: "none",
 		texSeed:  true,
+		// Refract's OAuth App (device flow, public client id, no secret), owned
+		// by the Use-Refract organization. REFRACT_GITHUB_CLIENT_ID overrides it.
+		githubClientID: refractGitHubClientID,
 		listen: func() (net.Listener, error) {
 			if o.embedded && !o.portSet && o.getenv("REFRACT_ADDR") == "" {
 				return listenTCP(&net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)}) // a free port
@@ -548,6 +551,10 @@ func writeAndSync(f *os.File, data []byte) error {
 	}
 	return err
 }
+
+// refractGitHubClientID is the client id of Refract's GitHub OAuth App. It is
+// public: it names the app on GitHub's authorization page and grants nothing.
+const refractGitHubClientID = "Ov23liYnkF9XAiPRni54"
 
 func listenTCP(a *net.TCPAddr) (net.Listener, error) { return net.ListenTCP("tcp", a) }
 

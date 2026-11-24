@@ -152,6 +152,9 @@ type runOptions struct {
 	texSeed bool
 	// wrap, when set, goes around every route, inside the host check.
 	wrap func(http.Handler) http.Handler
+	// githubClientID is used when REFRACT_GITHUB_CLIENT_ID is not set
+	// (refract local: Refract's own OAuth App, so Connect works with no setup).
+	githubClientID string
 }
 
 // run serves Refract until ctx ends, then shuts down gracefully.
@@ -344,8 +347,11 @@ func run(ctx context.Context, opts runOptions) error {
 	acc := &access.Checker{DB: db, SkipVerified: authKind != "builtin"}
 	asa.svc.Access = acc
 	ra := &remoteAPI{svc: pa.svc, db: db, key: key, acc: acc}
-	if id := os.Getenv("REFRACT_GITHUB_CLIENT_ID"); id != "" {
+	if id := cmp.Or(os.Getenv("REFRACT_GITHUB_CLIENT_ID"), opts.githubClientID); id != "" {
 		ra.github = &github.Client{HTTP: outbound, ClientID: id, Web: "https://github.com", API: "https://api.github.com"}
+	}
+	if onThisComputer(ln.Addr()) {
+		ra.openBrowser = openBrowser
 	}
 	pa.svc.OnCommit = ra.AutoPush
 	pa.svc.GitHubToken = ra.Token

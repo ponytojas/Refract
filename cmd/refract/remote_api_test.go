@@ -13,6 +13,7 @@ import (
 
 	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/auth"
+	"github.com/ponytojas/Refract/internal/github"
 	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/store"
 )
@@ -98,5 +99,47 @@ func TestRemotePutIgnoresTokenOrigin(t *testing.T) {
 	}
 	if st := a.record(p.ID, "push", true, errors.New("other")); st.ErrorKind != "" {
 		t.Errorf("sync status = %+v", st)
+	}
+}
+
+// On this computer the server opens GitHub's device page itself, and only
+// GitHub's own page; elsewhere it leaves that to the browser.
+func TestGitHubStartOpensTheDevicePage(t *testing.T) {
+	verification := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"device_code": "dc", "user_code": "ABCD-1234", "verification_uri": verification, "expires_in": 900, "interval": 5})
+	}))
+	defer srv.Close()
+	start := func(open func(string) error) (opened bool) {
+		t.Helper()
+		a := &remoteAPI{github: &github.Client{HTTP: srv.Client(), ClientID: "cid", Web: srv.URL, API: srv.URL}, openBrowser: open}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/api/github/device", nil)
+		a.githubStart(w, r.WithContext(auth.WithUser(r.Context(), auth.User{ID: "ana"})))
+		var out struct {
+			Opened bool `json:"opened"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("%d %s", w.Code, w.Body)
+		}
+		return out.Opened
+	}
+	var got []string
+	open := func(u string) error { got = append(got, u); return nil }
+
+	verification = srv.URL + "/login/device"
+	if !start(open) || len(got) != 1 || got[0] != verification {
+		t.Fatalf("opened %v", got)
+	}
+	verification = "file:///etc/passwd"
+	if start(open) || len(got) != 1 {
+		t.Fatalf("opened a page that isn't GitHub's: %v", got)
+	}
+	verification = srv.URL + "/login/device"
+	if start(nil) {
+		t.Fatal("reported opened without an opener (a server elsewhere)")
+	}
+	if start(func(string) error { return errors.New("no browser") }) {
+		t.Fatal("reported opened when the browser failed")
 	}
 }
