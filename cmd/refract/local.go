@@ -241,8 +241,8 @@ func startLocal(ctx context.Context, o localOptions) error {
 	}
 	defer lock.Release()
 	lock.embedded = o.embedded
-	var key []byte // nil: run reads REFRACT_SECRET_KEY, which wins when set
-	if o.getenv("REFRACT_SECRET_KEY") == "" {
+	var key []byte // nil: run reads the configured key from the environment or file
+	if o.getenv("REFRACT_SECRET_KEY") == "" && o.getenv("REFRACT_SECRET_KEY_FILE") == "" {
 		if key, err = resolveLocalKey(o.keys, dataDir); err != nil {
 			return err
 		}

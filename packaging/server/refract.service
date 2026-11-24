@@ -14,11 +14,10 @@ After=network.target
 [Service]
 User=refract
 Group=refract
-# systemd reads the key as root and gives the service a private copy; the
-# wrapper turns it into the variable Refract reads, so it is never in a unit
-# file, a process listing or a world-readable file.
+# systemd reads the key as root and gives the service a private copy.
 LoadCredential=refract.key:/etc/refract/refract.key
-ExecStart=/bin/sh -c 'REFRACT_SECRET_KEY="$(cat "$CREDENTIALS_DIRECTORY/refract.key")" exec refract'
+Environment=REFRACT_SECRET_KEY_FILE=%d/refract.key
+ExecStart=refract
 Restart=on-failure
 TimeoutStopSec=30
 

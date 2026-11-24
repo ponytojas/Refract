@@ -398,12 +398,12 @@ public final class ServerSupervisor {
     }
 
     /// The environment the server gets: the app's own, without what would make it
-    /// something other than `refract local` for this person (another data folder, a
-    /// sign-in mode, a fixed address or a token that must come from the pipe).
+    /// something other than `refract local` for this person (another data folder or
+    /// secret key, a sign-in mode, a fixed address or a token that must come from the pipe).
     public static func serverEnvironment(from env: [String: String]) -> [String: String] {
         let blocked: Set = [
-            "REFRACT_DATA_DIR", "REFRACT_SECRET_KEY", "REFRACT_AUTH", "REFRACT_MODE", "REFRACT_PROFILE",
-            "REFRACT_EMBED_TOKEN", "REFRACT_ADDR",
+            "REFRACT_DATA_DIR", "REFRACT_SECRET_KEY", "REFRACT_SECRET_KEY_FILE",
+            "REFRACT_AUTH", "REFRACT_MODE", "REFRACT_PROFILE", "REFRACT_EMBED_TOKEN", "REFRACT_ADDR",
         ]
         // REFRACT_APP_* configure the app itself, not the server.
         return env.filter { !blocked.contains($0.key) && !$0.key.hasPrefix("REFRACT_APP_") }

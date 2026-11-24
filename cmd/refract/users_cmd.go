@@ -26,13 +26,13 @@ const usersUsage = `usage:
   refract users list                      list accounts`
 
 // runUsers manages accounts on the server's own database (same
-// REFRACT_DATA_DIR and REFRACT_SECRET_KEY as the server).
+// REFRACT_DATA_DIR and encryption key as the server).
 func runUsers(args []string, out io.Writer) error {
 	arity := map[string][]int{"list": {1}, "add": {2}, "rename": {3}, "signout": {2}, "unlock": {2}, "remove": {2, 3}}
 	if len(args) == 0 || !slices.Contains(arity[args[0]], len(args)) || args[0] == "remove" && len(args) == 3 && args[2] != "--yes" {
 		return errors.New(usersUsage)
 	}
-	key, err := store.ParseKey(os.Getenv("REFRACT_SECRET_KEY"))
+	key, err := secretKeyFromEnv()
 	if err != nil {
 		return err
 	}

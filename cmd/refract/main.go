@@ -105,11 +105,42 @@ func main() {
 	}
 }
 
+// secretFromEnv reads a secret from its environment variable or a file.
+// File contents are trimmed to allow a trailing newline.
+func secretFromEnv(name string) (string, error) {
+	value := os.Getenv(name)
+	fileVar := name + "_FILE"
+	path := os.Getenv(fileVar)
+	if path == "" {
+		return value, nil
+	}
+	if value != "" {
+		return "", fmt.Errorf("set only one of %s and %s", name, fileVar)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		var pathErr *os.PathError
+		if errors.As(err, &pathErr) {
+			err = pathErr.Err
+		}
+		return "", fmt.Errorf("read file for %s: %w", fileVar, err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func secretKeyFromEnv() ([]byte, error) {
+	raw, err := secretFromEnv("REFRACT_SECRET_KEY")
+	if err != nil {
+		return nil, err
+	}
+	return store.ParseKey(raw)
+}
+
 // runOptions lets a caller other than the environment decide parts of the
 // server's setup (refract local). Zero values mean "read the environment".
 type runOptions struct {
 	dataDir  string // instead of REFRACT_DATA_DIR
-	key      []byte // instead of REFRACT_SECRET_KEY
+	key      []byte // instead of REFRACT_SECRET_KEY or REFRACT_SECRET_KEY_FILE
 	authKind string // instead of REFRACT_AUTH, after authMode
 	// listen opens the listener instead of REFRACT_ADDR.
 	listen func() (net.Listener, error)
@@ -202,9 +233,13 @@ func run(ctx context.Context, opts runOptions) error {
 
 	key := opts.key
 	if key == nil {
-		if key, err = store.ParseKey(os.Getenv("REFRACT_SECRET_KEY")); err != nil {
+		if key, err = secretKeyFromEnv(); err != nil {
 			return err
 		}
+	}
+	openAlexKey, err := secretFromEnv("REFRACT_OPENALEX_API_KEY")
+	if err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
@@ -286,7 +321,7 @@ func run(ctx context.Context, opts runOptions) error {
 	papers := &cite.Service{
 		Provider: nil, // set per request: each user's own (see papersAPI)
 		Arxiv:    &arxiv.Client{HTTP: outbound, BaseURL: "https://export.arxiv.org/api/query"},
-		OpenAlex: &openalex.Client{HTTP: outbound, BaseURL: "https://api.openalex.org", DOIURL: "https://doi.org", APIKey: os.Getenv("REFRACT_OPENALEX_API_KEY")},
+		OpenAlex: &openalex.Client{HTTP: outbound, BaseURL: "https://api.openalex.org", DOIURL: "https://doi.org", APIKey: openAlexKey},
 	}
 	asa := &assistantAPI{svc: &assistant.Service{
 		DB:       db,
@@ -445,6 +480,10 @@ func publicBase(raw string) (string, error) {
 // It fails closed: running without auth must be requested explicitly. login is
 // set for REFRACT_AUTH=builtin, which signs users in itself.
 func authMiddleware(people *users.Service, kind string) (guard func(http.Handler) http.Handler, login *loginAPI, err error) {
+	secret, err := secretFromEnv("REFRACT_OIDC_CLIENT_SECRET")
+	if err != nil {
+		return nil, nil, err
+	}
 	switch kind {
 	case "cloudflare":
 		team, aud := os.Getenv("REFRACT_CF_TEAM_DOMAIN"), os.Getenv("REFRACT_CF_AUD")
@@ -459,7 +498,7 @@ func authMiddleware(people *users.Service, kind string) (guard func(http.Handler
 			if err != nil {
 				return nil, nil, errors.New("REFRACT_OIDC_ISSUER needs REFRACT_PUBLIC_URL, the address users open Refract at (e.g. https://refract.example.com)")
 			}
-			id, secret := os.Getenv("REFRACT_OIDC_CLIENT_ID"), os.Getenv("REFRACT_OIDC_CLIENT_SECRET")
+			id := os.Getenv("REFRACT_OIDC_CLIENT_ID")
 			if id == "" {
 				return nil, nil, errors.New("REFRACT_OIDC_ISSUER needs REFRACT_OIDC_CLIENT_ID (and usually REFRACT_OIDC_CLIENT_SECRET)")
 			}
@@ -482,10 +521,14 @@ func authMiddleware(people *users.Service, kind string) (guard func(http.Handler
 	}
 }
 
-// mailFromEnv reads REFRACT_SMTP_URL and REFRACT_MAIL_FROM: nil when neither
-// is set, an error when only one is or either is invalid.
+// mailFromEnv reads the SMTP URL and REFRACT_MAIL_FROM. It returns nil when
+// neither is set, and an error when only one is set or either is invalid.
 func mailFromEnv() (*mail.SMTP, error) {
-	raw, from := os.Getenv("REFRACT_SMTP_URL"), os.Getenv("REFRACT_MAIL_FROM")
+	raw, err := secretFromEnv("REFRACT_SMTP_URL")
+	if err != nil {
+		return nil, err
+	}
+	from := os.Getenv("REFRACT_MAIL_FROM")
 	switch {
 	case raw == "" && from == "":
 		return nil, nil

@@ -36,18 +36,18 @@ type SMTP struct {
 }
 
 // ParseSMTP reads REFRACT_SMTP_URL (smtp://[user[:pass]@]host[:port], default
-// port 587) and REFRACT_MAIL_FROM ("Name <addr>" or "addr"). Errors never
-// contain the password.
+// port 587) and REFRACT_MAIL_FROM ("Name <addr>" or "addr"). Errors omit
+// the input values.
 func ParseSMTP(rawURL, from string) (*SMTP, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("REFRACT_SMTP_URL is not a valid URL")
 	}
 	if u.Scheme != "smtp" {
-		return nil, fmt.Errorf("REFRACT_SMTP_URL must start with smtp:// (STARTTLS on port 587), not %q", u.Scheme+"://")
+		return nil, fmt.Errorf("REFRACT_SMTP_URL must start with smtp:// (STARTTLS on port 587)")
 	}
 	if u.Hostname() == "" {
-		return nil, fmt.Errorf("REFRACT_SMTP_URL has no host: %s", u.Redacted())
+		return nil, fmt.Errorf("REFRACT_SMTP_URL has no host")
 	}
 	addr, err := netmail.ParseAddress(from)
 	if err != nil {

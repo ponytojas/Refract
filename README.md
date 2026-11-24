@@ -158,7 +158,7 @@ refract local
 It needs no configuration. It opens Refract in your browser and keeps running until you press <kbd>Ctrl</kbd>+<kbd>C</kbd>. By default the address is <http://127.0.0.1:8080>, or another free port if 8080 is taken; it prints the one it uses. `--port` chooses the port and fails if it is taken; `--no-browser` doesn't open the browser.
 
 - **Your data** goes in your user folder: `~/Library/Application Support/Refract` on macOS, `~/.local/share/refract` on Linux (or `$XDG_DATA_HOME/refract`), `%LocalAppData%\Refract` on Windows. `REFRACT_DATA_DIR` chooses another folder.
-- **The secret key** that protects stored passwords and API keys lives in your system's credential store when there is one: macOS Keychain, the Secret Service on Linux (GNOME Keyring, KWallet) or Windows Credential Manager. It is the item `Refract` with an account name derived from the data folder (`data-` and a hash of its path), so two data folders keep two keys. The first run creates it; Refract never prints or logs it. When no store can be reached (headless Linux, no D-Bus session, a locked store), Refract says so once in the log and keeps the key in an owner-only `secret.key` in the data folder instead; it refuses to start if other users can read that file. On Windows the file has the folder's permissions; `%LocalAppData%` is private to your account, so choose an equally private folder if you set `REFRACT_DATA_DIR`. If `REFRACT_SECRET_KEY` is set, Refract uses it instead and stores nothing.
+- **The secret key** that protects stored passwords and API keys lives in your system's credential store when there is one: macOS Keychain, the Secret Service on Linux (GNOME Keyring, KWallet) or Windows Credential Manager. It is the item `Refract` with an account name derived from the data folder (`data-` and a hash of its path), so two data folders keep two keys. The first run creates it; Refract never prints or logs it. When no store can be reached (headless Linux, no D-Bus session, a locked store), Refract says so once in the log and keeps the key in an owner-only `secret.key` in the data folder instead; it refuses to start if other users can read that file. On Windows the file has the folder's permissions; `%LocalAppData%` is private to your account, so choose an equally private folder if you set `REFRACT_DATA_DIR`. If `REFRACT_SECRET_KEY` or `REFRACT_SECRET_KEY_FILE` is set, Refract uses the supplied key and stores nothing.
   - **A `secret.key` that already exists is kept**, even when a credential store works: nothing moves silently.
   - **Back it up with the data.** With a credential store, the data folder alone is not enough: restoring it on another computer, or after the item is deleted, starts with a new key and the stored ChatGPT sign-in, API keys and git tokens can't be read (Refract logs this when it happens; add them again in Settings). Every start logs where the key is and its `account` (`data-` and a hash of the folder's real path), also when the key is in `secret.key`. The account follows the folder's path: moving or renaming the data folder starts with a new key, like restoring it elsewhere, so move the key with it (below). To read the key in the same form as `secret.key`: on macOS `v=$(security find-generic-password -s Refract -a <account> -w); case $v in go-keyring-base64:*) printf %s "${v#go-keyring-base64:}" | base64 -D;; *) printf '%s\n' "$v";; esac` (an item Refract created carries that prefix; one you added by hand, as below, doesn't); on Linux `secret-tool lookup service Refract username <account>`. Windows Credential Manager lists the item as `Refract:<account>` but can't show its value: on Windows, if you want a key you can back up, create `secret.key` yourself before the first run (`openssl rand -base64 32`), since an existing file always wins.
   - **From keychain to file:** save that value as `secret.key` in the data folder (`chmod 600`) and Refract uses the file from then on. **From file to keychain:** with Refract stopped, store the file's contents as the `Refract` item for that account, then delete `secret.key`. On macOS run `security add-generic-password -s Refract -a <account> -w` and paste the contents when it asks (passing the key after `-w` would show it to other processes); on Linux `secret-tool store --label=Refract service Refract username <account> < secret.key`.
@@ -240,7 +240,7 @@ Set `REFRACT_PUBLIC_URL` to the address people open Refract at: Refract then ref
 
 Each release publishes the image for amd64 and arm64 as `latest`, as `0.1` (the newest 0.1.x, which only gets fixes) and as the exact version, such as `0.1.0`. To build it yourself instead, run `docker build -t refract .` in this repository, or `make docker`, which also tests it for both architectures.
 
-**Keep `REFRACT_SECRET_KEY` safe and stable.** It encrypts the stored ChatGPT credentials, API keys and git tokens. With a different key, those can't be read back and users have to connect again.
+**Keep the encryption key safe and stable.** It encrypts the stored ChatGPT credentials, API keys and git tokens. With a different key, those can't be read back and users have to connect again. For Docker secrets or systemd credentials, set `REFRACT_SECRET_KEY_FILE` to the key file path inside the service. See [Read secrets from files](#read-secrets-from-files).
 
 **Decide who you trust before you invite anyone.** By default (`REFRACT_PROFILE=personal`) Tectonic runs with the server's own permissions: a document can `\input` any file the server can read, including the database (accounts, sessions, encrypted credentials) and every other account's projects. That is fine for one person, or for people who would trust each other with all of that. If the people signing in don't, run the [team profile](#run-it-for-a-team): every compile is isolated, and Refract refuses to start if it can't be. Without it, Refract warns at startup when several accounts compile without isolation.
 
@@ -522,7 +522,7 @@ All settings are environment variables.
 
 | Variable | Purpose |
 |---|---|
-| `REFRACT_SECRET_KEY` | **Required.** 32 bytes, base64 (`openssl rand -base64 32`). Encrypts stored credentials and keys. |
+| `REFRACT_SECRET_KEY` | **Required for the server**, via this variable or `REFRACT_SECRET_KEY_FILE`. 32 bytes, base64 (`openssl rand -base64 32`). Encrypts stored credentials and keys. |
 | `REFRACT_AUTH` | `cloudflare` (default), `builtin` (Refract's own sign-in; `password` still works) or `none`. See [Choose how people sign in](#choose-how-people-sign-in). |
 | `REFRACT_DATA_DIR` | Where projects, the database and caches live. Default `/data`. |
 | `REFRACT_ADDR` | Listen address. Default `127.0.0.1:8080`, this computer only; the container image sets `:8080` (every interface), where `-p` decides the mapping on the Docker host and containers on a shared Docker network can still connect. Use `:8080` or a LAN address to serve other computers directly. |
@@ -551,6 +551,19 @@ All settings are environment variables.
 | `REFRACT_TECTONIC_BUNDLE` | The Tectonic bundle: a URL (pinned in the image), or a local folder (required with the sandbox). With `refract local`, unset means the [TeX seed](#offline-first-pdf)'s bundle; naming another one turns the seed off. |
 | `REFRACT_TEX_SEED` | `refract local` only: the folder of the [TeX seed](#offline-first-pdf) to copy into the compile cache, or `none`. Default: `tex-seed/` in the bundled tools folder, when it is there and trusted. |
 | `REFRACT_TECTONIC_BIN`, `REFRACT_SYNCTEX_BIN`, `REFRACT_RG_BIN`, `REFRACT_GIT_BIN` | Use this program instead of the one [Refract finds](#where-refract-finds-its-tools). A path, or a name looked up on the `PATH`. If it isn't runnable, the tool counts as missing: Refract doesn't fall back to another. |
+
+### Read secrets from files
+
+Set the usual variable to the secret value, or use its `_FILE` counterpart to give Refract a file path. Refract trims whitespace around the file contents, including the trailing newline. Setting both variables to non-empty values or pointing to an unreadable file causes a startup error.
+
+| Secret value | File path |
+|---|---|
+| `REFRACT_SECRET_KEY` | `REFRACT_SECRET_KEY_FILE` |
+| `REFRACT_OIDC_CLIENT_SECRET` | `REFRACT_OIDC_CLIENT_SECRET_FILE` |
+| `REFRACT_SMTP_URL` | `REFRACT_SMTP_URL_FILE` |
+| `REFRACT_OPENALEX_API_KEY` | `REFRACT_OPENALEX_API_KEY_FILE` |
+
+For example, if Docker Compose mounts a secret named `refract_key` for the Refract service, set `REFRACT_SECRET_KEY_FILE=/run/secrets/refract_key` in that service's environment. The included systemd unit uses `LoadCredential=` and points `REFRACT_SECRET_KEY_FILE` to systemd's private copy. With `refract local`, either key variable overrides the automatic key lookup.
 
 ### Where Refract finds its tools
 
@@ -603,7 +616,7 @@ refract users list              list accounts
 refract version                 print the version
 ```
 
-`refract users` works on the server's database: run it with the same `REFRACT_DATA_DIR` and `REFRACT_SECRET_KEY` as the server. Inside the container, `docker exec refract refract users …` already has them.
+`refract users` works on the server's database. Run it with the same `REFRACT_DATA_DIR` and encryption key as the server, using `REFRACT_SECRET_KEY` or `REFRACT_SECRET_KEY_FILE`. Inside the container, `docker exec refract refract users …` already has the container's environment and mounted files.
 
 ## Keyboard shortcuts
 

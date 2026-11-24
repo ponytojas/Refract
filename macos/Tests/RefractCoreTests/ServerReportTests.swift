@@ -48,6 +48,7 @@ final class ServerReportTests: XCTestCase {
         let env = ServerSupervisor.serverEnvironment(from: [
             "HOME": "/h", "PATH": "/usr/bin", "REFRACT_DATA_DIR": "/x", "REFRACT_AUTH": "none", "REFRACT_EMBED_TOKEN": "t", "REFRACT_TECTONIC_BIN": "/t",
             "REFRACT_APP_LOG_DIR": "/l", "REFRACT_APP_DEFAULTS_SUITE": "s",
+            "REFRACT_SECRET_KEY_FILE": "/x/key",
         ])
         XCTAssertEqual(env, ["HOME": "/h", "PATH": "/usr/bin", "REFRACT_TECTONIC_BIN": "/t"])
     }
