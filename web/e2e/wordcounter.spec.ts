@@ -60,13 +60,6 @@ async function abstractLimit(page: Page, max = '3') {
     .click({ position: { x: 10, y: 8 } })
 }
 
-// WebKit (like macOS) selects the word under a right-click, and the quick actions toolbar for that
-// selection can cover the next line (#102). Collapse it with the keyboard, as a person would.
-async function collapseRightClickSelection(page: Page) {
-  await expect(page.getByRole('dialog')).not.toBeVisible()
-  await page.keyboard.press('ArrowRight')
-}
-
 const shorter = (page: Page) => page.getByRole('button', { name: /^Suggest a shorter version:/ })
 
 async function openWordCountSettings(page: Page) {
@@ -434,7 +427,6 @@ Other prose here.
     await openLimit(page, heading)
     await page.getByLabel('Maximum words').fill('1')
     await page.getByRole('button', { name: 'Set limit', exact: true }).click()
-    await collapseRightClickSelection(page)
   }
   for (const [line, name] of [
     ['\\section{Main}', 'Main'],
@@ -477,7 +469,6 @@ Other prose here.`
     await openLimit(page, heading)
     await page.getByLabel('Maximum words').fill('1')
     await page.getByRole('button', { name: 'Set limit', exact: true }).click()
-    await collapseRightClickSelection(page)
   }
   await page
     .locator('.cm-line')
@@ -606,4 +597,18 @@ Este texto supera su limite.`
   await expect(shorter(page)).toHaveText('Suggest a shorter version: Contexto')
   await openLimit(page, '\\subsection{Contexto}')
   await expect(page.getByLabel('Maximum words')).toHaveValue('1')
+})
+
+test('a right-click selection shows no quick actions toolbar, a keyboard selection does', async ({ page, request }) => {
+  await openProject(page, request, true)
+  const toolbar = page.getByRole('toolbar', { name: 'Quick actions' })
+  const line = page.locator('.cm-line').filter({ hasText: 'One two three' })
+  await line.click({ button: 'right', position: { x: 10, y: 8 } })
+  await expect(page.getByRole('menuitem', { name: 'Word limit…', exact: true })).toBeVisible()
+  await expect(toolbar).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await line.click({ position: { x: 10, y: 8 } })
+  await page.keyboard.press('Shift+ArrowRight')
+  await page.keyboard.press('Shift+ArrowRight')
+  await expect(toolbar).toBeVisible()
 })
