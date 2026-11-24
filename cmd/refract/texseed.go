@@ -10,6 +10,9 @@ import (
 	"github.com/ponytojas/Refract/internal/compile"
 )
 
+// backupExclude is excludeFromBackup; tests replace it.
+var backupExclude = excludeFromBackup
+
 // texSetup is what Tectonic runs with: the bundle to pass (empty = Tectonic's
 // default), the cache folder (empty = Tectonic's default) and the seed that
 // filled it.
@@ -48,8 +51,8 @@ func setupTeXSeed(getenv func(string) string, dataDir, sandbox string) texSetup 
 		slog.Info("TeX seed not used; Tectonic downloads what documents need", "why", reason)
 		return plain
 	}
-	cache := envCache
-	if cache == "" {
+	cache, managed := envCache, envCache == ""
+	if managed {
 		cache = filepath.Join(dataDir, "tectonic-cache")
 		if old := previousCache(getenv, runtime.GOOS); old != "" {
 			slog.Info("Tectonic's own cache from before the TeX seed is left untouched and no longer used: the seed's bundle differs from Tectonic's default, so its packages can't be shared; set TECTONIC_CACHE_DIR and REFRACT_TECTONIC_BUNDLE to keep using it", "old", old, "new", cache)
@@ -67,8 +70,10 @@ func setupTeXSeed(getenv func(string) string, dataDir, sandbox string) texSetup 
 		return plain
 	}
 	slog.Info("TeX seed ready", "seed", seed.Dir, "cache", cache, "copied", res.Copied, "present", res.Present, "mb", res.Bytes>>20, "ms", time.Since(start).Milliseconds())
-	if res.Copied > 0 {
-		excludeFromBackup(cache)
+	// Only the folder Refract made for itself is kept out of backups: a
+	// TECTONIC_CACHE_DIR is the person's, and may hold other things.
+	if managed && res.Copied > 0 {
+		backupExclude(cache)
 	}
 	return texSetup{bundle: seed.BundleURL, cache: cache, seed: seed}
 }

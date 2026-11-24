@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -396,5 +397,55 @@ func TestSeedReplacesDamagedSameSizeFileUnlessMarked(t *testing.T) {
 	}
 	if read(t, cls) != "class" {
 		t.Error("Ensure kept the damaged file")
+	}
+}
+
+func TestSeedWritesLastCheckStamp(t *testing.T) {
+	s := newSeed(t, "a", baseFiles())
+	cache := t.TempDir()
+	if _, err := s.Apply(cache); err != nil {
+		t.Fatal(err)
+	}
+	// Tectonic 0.17 names the stamp like the hash file with the extension
+	// replaced by "lock", and holds Unix seconds.
+	lock := filepath.Join(cache, "bundles", "hashes", "https,58,,47,,47,example.invalid,47,bundle.lock")
+	sec, err := strconv.ParseInt(strings.TrimSpace(read(t, lock)), 10, 64)
+	if err != nil || time.Since(time.Unix(sec, 0)) > time.Minute {
+		t.Fatalf("stamp %v %v", sec, err)
+	}
+	// An old stamp is renewed by Ensure; a recent one is left alone.
+	old := strconv.FormatInt(time.Now().Add(-48*time.Hour).Unix(), 10)
+	os.WriteFile(lock, []byte(old), 0o644)
+	if err := s.Ensure(cache); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(read(t, lock)); got == old {
+		t.Error("old stamp kept")
+	}
+}
+
+func TestSeedEnsureRestoresLostBundleMetadata(t *testing.T) {
+	for name, rel := range map[string]string{
+		"index": "bundles/data/" + testDigest + ".index",
+		"hash":  "bundles/hashes/https,58,,47,,47,example.invalid,47,bundle.tar",
+		"stamp": "bundles/hashes/https,58,,47,,47,example.invalid,47,bundle.lock",
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSeed(t, "a", baseFiles())
+			cache := t.TempDir()
+			if _, err := s.Apply(cache); err != nil {
+				t.Fatal(err)
+			}
+			p := filepath.Join(cache, filepath.FromSlash(rel))
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Ensure(cache); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(p); err != nil {
+				t.Errorf("%s not restored: %v", name, err)
+			}
+		})
 	}
 }

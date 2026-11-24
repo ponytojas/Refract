@@ -14,8 +14,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ponytojas/Refract/internal/tools"
 )
@@ -28,6 +30,11 @@ import (
 
 // SeedMarker is the file in the cache that says which seed it was filled from.
 const SeedMarker = "refract-seed.json"
+
+// seedLockMaxAge is how old the last-check stamp may be before Ensure writes
+// a new one. Tectonic 0.17 asks the bundle server for the bundle's hash again
+// once the stamp is a few days old (more than one day, less than eight).
+const seedLockMaxAge = 24 * time.Hour
 
 const (
 	seedManifest = "seed.json"
@@ -135,17 +142,19 @@ func (s *Seed) Apply(cacheDir string) (SeedResult, error) {
 }
 
 // Ensure applies the seed again when the cache has lost the marker (the person
-// emptied the cache). It costs one stat when nothing is wrong.
+// emptied the cache) or part of the bundle metadata Tectonic needs (a partial
+// cleanup), or when the last-check stamp is old. It costs a few stats when
+// nothing is wrong.
 func (s *Seed) Ensure(cacheDir string) error {
 	if s == nil {
 		return nil
 	}
-	if _, err := os.Lstat(filepath.Join(cacheDir, SeedMarker)); err == nil {
+	if s.intact(cacheDir) {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := os.Lstat(filepath.Join(cacheDir, SeedMarker)); err == nil {
+	if s.intact(cacheDir) {
 		return nil
 	}
 	res, err := s.apply(cacheDir)
@@ -153,6 +162,44 @@ func (s *Seed) Ensure(cacheDir string) error {
 		slog.Info("TeX seed restored", "cache", cacheDir, "copied", res.Copied)
 	}
 	return err
+}
+
+// hashRel and lockRel are Tectonic's files for the bundle URL under the
+// cache: the bundle's hash, and the time it last asked the server whether the
+// hash changed (decimal Unix seconds). Without a recent stamp Tectonic asks
+// before using the local copy, which hangs when the server stalls.
+func (s *Seed) hashRel() string {
+	return "bundles/hashes/" + strings.NewReplacer(":", ",58,", "/", ",47,").Replace(s.BundleURL)
+}
+
+func (s *Seed) lockRel() string {
+	h := s.hashRel()
+	if i := strings.LastIndex(h, "."); i > strings.LastIndex(h, "/") {
+		h = h[:i]
+	}
+	return h + ".lock"
+}
+
+func (s *Seed) indexRel() string { return "bundles/data/" + s.BundleDigest + ".index" }
+
+// intact reports whether the marker, the hash, the index and a recent stamp
+// are all in the cache.
+func (s *Seed) intact(cacheDir string) bool {
+	for _, rel := range []string{SeedMarker, s.hashRel(), s.indexRel()} {
+		if fi, err := os.Lstat(filepath.Join(cacheDir, filepath.FromSlash(rel))); err != nil || !fi.Mode().IsRegular() {
+			return false
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(cacheDir, filepath.FromSlash(s.lockRel())))
+	if err != nil {
+		return false
+	}
+	sec, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	if err != nil {
+		return false
+	}
+	age := time.Since(time.Unix(sec, 0))
+	return age < seedLockMaxAge && age > -time.Hour
 }
 
 func (s *Seed) apply(cacheDir string) (SeedResult, error) {
@@ -182,6 +229,9 @@ func (s *Seed) apply(cacheDir string) (SeedResult, error) {
 		} else {
 			res.Present++
 		}
+	}
+	if err := writeAtomic(root, s.lockRel(), []byte(strconv.FormatInt(time.Now().Unix(), 10)+"\n")); err != nil {
+		return res, err
 	}
 	marker, _ := json.Marshal(map[string]string{"seed": s.ID, "bundle_digest": s.BundleDigest})
 	if err := writeAtomic(root, SeedMarker, append(marker, '\n')); err != nil {
@@ -300,7 +350,10 @@ func mkdirAll(root *os.Root, dir string) error {
 }
 
 func writeAtomic(root *os.Root, name string, data []byte) error {
-	tmpName := fmt.Sprintf(".%s-%d.tmp", name, os.Getpid())
+	tmpName := path.Join(path.Dir(name), fmt.Sprintf(".%s-%d.tmp", path.Base(name), os.Getpid()))
+	if err := mkdirAll(root, path.Dir(name)); err != nil {
+		return err
+	}
 	f, err := root.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err

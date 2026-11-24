@@ -149,3 +149,24 @@ func TestPreviousCache(t *testing.T) {
 		t.Fatalf("darwin: %q", got)
 	}
 }
+
+func TestBackupExclusionOnlyForManagedCache(t *testing.T) {
+	var excluded []string
+	old := backupExclude
+	backupExclude = func(dir string) { excluded = append(excluded, dir) }
+	defer func() { backupExclude = old }()
+	seedDir := writeSeed(t)
+
+	data := t.TempDir()
+	got := setupTeXSeed(envOf(map[string]string{"REFRACT_TEX_SEED": seedDir}), data, "")
+	if len(excluded) != 1 || excluded[0] != got.cache {
+		t.Fatalf("the managed cache %q should be excluded: %v", got.cache, excluded)
+	}
+
+	excluded = nil
+	mine := filepath.Join(t.TempDir(), "mine")
+	setupTeXSeed(envOf(map[string]string{"REFRACT_TEX_SEED": seedDir, "TECTONIC_CACHE_DIR": mine}), t.TempDir(), "")
+	if len(excluded) != 0 {
+		t.Errorf("TECTONIC_CACHE_DIR was excluded from backups: %v", excluded)
+	}
+}
