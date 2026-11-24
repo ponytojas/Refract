@@ -257,7 +257,7 @@ jobs:
         run: |
           printf '%s\n' "ghcr.io/ponytojas/refract@${{ steps.push.outputs.digest }}" > "$RUNNER_TEMP/scan/image.txt"
           tar -czf "$RUNNER_TEMP/refract-image-${GITHUB_REF_NAME}-${{ matrix.arch }}-scan.tar.gz" -C "$RUNNER_TEMP/scan" .
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() && steps.push.outputs.digest != '' }}
         with:
           name: image-scan-${{ matrix.arch }}

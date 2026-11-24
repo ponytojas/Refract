@@ -8,7 +8,7 @@ require (
 	github.com/zalando/go-keyring v0.2.8
 	github.com/zendev-sh/goai v0.11.0
 	golang.org/x/oauth2 v0.38.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	modernc.org/sqlite v1.62.0
 )
 

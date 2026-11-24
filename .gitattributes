@@ -4,3 +4,6 @@
 packaging/tools.lock text eol=lf
 # The TeX seed inputs are hashed into packaging/tex-seed/files.txt and licenses.txt: same bytes everywhere.
 packaging/tex-seed/** text eol=lf
+# The licence texts are copied byte for byte (upstream's line endings: the GUST Font License
+# has CRLF): never convert them, or their checksums in licenses.txt stop matching.
+packaging/tex-seed/licenses/** -text

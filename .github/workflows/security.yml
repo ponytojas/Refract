@@ -52,7 +52,7 @@ jobs:
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: Publication gate
         run: scripts/scan-image.sh refract:scan "$RUNNER_TEMP/scan"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: image-scan
