@@ -1,5 +1,5 @@
-# Builds Refract.app for macOS, one per architecture, and signs, notarizes and staples it
-# when the signing secrets are there. Called by the release workflow (#71); also runs on pull
+# Builds Refract.app and the Refract.dmg that holds it for macOS, one per architecture, and
+# signs, notarizes and staples both when the signing secrets are there. Called by the release workflow (#71); also runs on pull
 # requests that touch macos/ (always ad hoc: the signing step is skipped on pull requests) and by hand.
 #
 # Secrets (names only; how to create them: macos/README.md, "Signing and notarization"):
@@ -48,6 +48,8 @@ on:
       - ".github/workflows/macos-app.yml"
       - "scripts/build-*.sh"
       - "scripts/tools-common.sh"
+      - "scripts/make-dmg*.py"
+      - "scripts/requirements-dmg.txt"
       - "packaging/tools.lock"
 
 permissions:
@@ -206,6 +208,49 @@ jobs:
           "$L/rg" --version
           "$L/synctex" help 2>&1 | grep -q SyncTeX   # exits non-zero on some builds, so check its banner
           check/Refract.app/Contents/Resources/Server/bin/refract version
+
+      # The disk image people download (#128): the app, a link to Applications, a designed window.
+      # dmgbuild writes the window's layout itself, so no Finder session is needed. Signed
+      # builds sign and notarize the image too (macos/build-dmg.sh), with the same secrets.
+      - name: Install dmgbuild
+        run: |
+          python3 -m venv "$RUNNER_TEMP/dmg-venv"
+          "$RUNNER_TEMP/dmg-venv/bin/pip" install --quiet --require-hashes -r scripts/requirements-dmg.txt
+
+      - name: Build the disk image
+        env:
+          REFRACT_PYTHON: ${{ runner.temp }}/dmg-venv/bin/python
+          REFRACT_SIGN_IDENTITY: ${{ steps.secrets.outputs.sign == 'true' && secrets.MACOS_SIGN_IDENTITY || '-' }}
+          REFRACT_NOTARY_TIMEOUT: 45m
+          REFRACT_NOTARY_KEY_ID: ${{ steps.secrets.outputs.sign == 'true' && secrets.NOTARY_KEY_ID || '' }}
+          REFRACT_NOTARY_ISSUER: ${{ steps.secrets.outputs.sign == 'true' && secrets.NOTARY_ISSUER_ID || '' }}
+        run: macos/build-dmg.sh "build/mac/$ARCH/Refract.app" "build/mac/$ARCH/Refract-$ARCH.dmg"
+
+      # The image, mounted the way people will: the app in it must verify, and a signed one
+      # must pass Gatekeeper as a download would.
+      - name: Check the disk image
+        shell: bash
+        env:
+          SIGNED: ${{ steps.secrets.outputs.sign }}
+        run: |
+          dmg="build/mac/$ARCH/Refract-$ARCH.dmg"
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg" > /dev/null
+          trap 'hdiutil detach "$mnt" > /dev/null || true' EXIT
+          test -L "$mnt/Applications"
+          test -f "$mnt/.DS_Store" && test -f "$mnt/.background.tiff"
+          if [ "$SIGNED" = true ]; then
+            macos/verify-app.sh --release "$mnt/Refract.app"
+            xcrun stapler validate "$dmg"
+          else
+            macos/verify-app.sh "$mnt/Refract.app"
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.secrets.outputs.sign == 'true' && 'Refract-dmg' || 'Refract-dmg-adhoc' }}-${{ matrix.arch }}
+          path: build/mac/${{ matrix.arch }}/Refract-${{ matrix.arch }}.dmg
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

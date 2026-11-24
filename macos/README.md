@@ -8,12 +8,14 @@ macos/
   Package.swift            SwiftPM package: RefractCore (library), Refract (app), tests
   Sources/RefractCore/     the server's lifecycle, no UI: status line, supervisor, logs, bundle layout
   Sources/Refract/         AppKit: window, loading/error views, WKWebView, quit sequence, minimal menu
-  Resources/               Info.plist and the English/Spanish strings
+  Resources/               Info.plist, the English/Spanish strings and AppIcon.icns
+  dmg/                     the disk image's window: settings.py, background.svg and its PNGs
   Tests/RefractCoreTests/  lifecycle tests against a fake server script
   build-app.sh             assembles Refract.app, then signs and verifies it (run by `make mac`)
   sign-app.sh              signs every Mach-O inside out, then the app (REFRACT_SIGN_IDENTITY)
   verify-app.sh            the check that fails on any unsigned or ad hoc Mach-O (--release)
   notarize.sh              notarizes, staples and assesses a signed app (`make mac-release`)
+  build-dmg.sh             builds the disk image, and signs, notarizes and staples it with an identity
 ```
 
 ## Decisions
@@ -177,6 +179,45 @@ owner-only permissions and removed at the end, and the temporary keychain is del
 password and the key and issuer ids are passed as arguments to `security` and `notarytool` on the
 runner, which is used by this job only and discarded.
 
+## Icon and disk image
+
+**The icon** is generated, not drawn by hand: `python3 scripts/make-app-icon.py` renders
+`assets/logo.svg` onto the macOS icon shape (a 1024 px canvas, an 824 px rounded square, a soft shadow,
+a faint cyan/violet halo behind the logo and a cyan-to-coral beam leaving it to the right, like the
+landing page) at 16 to 512 px, 1x and 2x, and writes
+`macos/Resources/AppIcon.icns` with `iconutil`. `--variant paper` (the default, the one checked in: a near white squircle with a
+cool gradient and a hairline) or `--variant night` (`#111c23`, same light) picks the colours; every
+colour and measure is in `PARAMS` and `VARIANTS` at the top of that script. It renders with AppKit (`scripts/render-icon.swift`, run by `swift`): AppKit reads
+SVG, is on every Mac with Xcode's tools, and composes the shadow and gradient, where `sips` and
+`qlmanage` can't. Commit the regenerated `.icns`; `build-app.sh` copies it into the app and
+`Info.plist` names it (`CFBundleIconFile`). After a logo change, regenerate and look at it in
+the Dock and in a Finder list view.
+
+**The disk image's window** is made by `scripts/make-dmg.py` with
+[dmgbuild](https://github.com/dmgbuild/dmgbuild) (MIT), which writes the window's `.DS_Store`
+without Finder or AppleScript, so it runs on a headless CI runner. The layout (660 x 420 of content, 128 pt
+icons, the app at (180, 200), the Applications link at (480, 200), no toolbar, sidebar, path bar or
+status bar, UDZO) is `macos/dmg/settings.py`. The background is `macos/dmg/background.svg`
+rendered to `background.png` and `background@2x.png` by `python3 scripts/make-dmg-background.py`
+(colours and the two lines of text are `PARAMS` there; English only). It is the landing page's
+language on its paper colours: a pale red "−" band and a pale cyan "+" band for the instruction, and a
+cyan, violet and coral beam with an arrowhead between the two icons. The text is Helvetica Neue,
+the system font, not Switzer: the Switzer files on the landing page are woff2, which AppKit can't load,
+and converting them would make a derivative of the font. To build one by hand:
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install --require-hashes -r scripts/requirements-dmg.txt
+make mac
+REFRACT_PYTHON=.venv/bin/python macos/build-dmg.sh build/mac/arm64/Refract.app build/mac/arm64/Refract-arm64.dmg
+```
+
+With `REFRACT_SIGN_IDENTITY` set to a Developer ID Application identity and the notarization
+credentials of `notarize.sh`, `build-dmg.sh` also signs the image, notarizes it, staples the ticket
+and runs `spctl --assess --type open`. Finder draws a title bar on a disk image window that can't be
+removed, and with a background picture Finder draws the icon names in black in light and dark mode
+alike, so the background is light (the landing page's paper) and needs no chip behind each name. The window is 32 pt taller than the
+660 x 420 content (the title bar), and the background 20 pt taller than the content.
+
 ## Testing without touching real state
 
 Environment variables of the app (not passed to the server) redirect what it writes outside the
@@ -189,5 +230,4 @@ Launch the app with them via `open --env` or `env ... Refract.app/Contents/MacOS
 ## Left for later
 
 Links, downloads and file pickers (#67, `TODO(#67)` in `WebViewController`), the real menu (#68, the
-current one is the minimum for Quit, Close and editing), updates (#70),
-the icon.
+current one is the minimum for Quit, Close and editing), updates (#70).

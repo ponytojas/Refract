@@ -17,6 +17,7 @@
 # as nested code, and the tools' tree also holds Git's scripts, templates and licences.
 # See macos/README.md.
 #   Refract.app/Contents/Resources/{en,es}.lproj/Localizable.strings
+#   Refract.app/Contents/Resources/AppIcon.icns
 #   Refract.app/Contents/Info.plist
 set -eu
 [ -z "${CODESIGN_IDENTITY:-}" ] || { echo "error: CODESIGN_IDENTITY is no longer used: set REFRACT_SIGN_IDENTITY instead" >&2; exit 2; }
@@ -73,6 +74,7 @@ cp "$BIN/Refract" "$APP/Contents/MacOS/Refract"
 cp "$BUILD/go-$ARCH/refract" "$APP/Contents/Resources/Server/bin/refract"
 tar -xzf "$TOOLS" -o -C "$APP/Contents/Resources/Server/libexec/refract"
 sed "s/@VERSION@/$NUM/g" "$ROOT/macos/Resources/Info.plist" > "$APP/Contents/Info.plist"
+cp "$ROOT/macos/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp -R "$ROOT/macos/Resources/en.lproj" "$ROOT/macos/Resources/es.lproj" "$APP/Contents/Resources/"
 # The server refuses bundled tools that group or others could replace (internal/tools).
 chmod -R go-w "$APP"

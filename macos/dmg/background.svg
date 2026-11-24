@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="440" viewBox="0 0 660 440">
+  <!-- The DMG window's background, in the landing page's language (660 x 440 points: the window shows about 420 below its title bar, the rest is room for taller title bars).
+       Edit this file for the layout; the colours and the lines of text are the double-brace names, filled in from PARAMS in scripts/make-dmg-background.py.
+       The app icon sits at (180, 200) and the Applications link at (480, 200), 128 pt icons; Finder draws their names in black, which the light paper reads well. -->
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="{{paper_top}}"/>
+      <stop offset="1" stop-color="{{paper_bottom}}"/>
+    </linearGradient>
+    <linearGradient id="bandMinus" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="{{coral}}" stop-opacity="0.14"/>
+      <stop offset="0.7" stop-color="{{coral}}" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="{{coral}}" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="bandPlus" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="{{cyan}}" stop-opacity="0.24"/>
+      <stop offset="0.7" stop-color="{{violet}}" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="{{violet}}" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="gCyan"><stop offset="0" stop-color="{{cyan}}" stop-opacity="0.4"/><stop offset="0.5" stop-color="{{cyan}}" stop-opacity="0.15"/><stop offset="1" stop-color="{{cyan}}" stop-opacity="0"/></radialGradient>
+    <radialGradient id="gViolet"><stop offset="0" stop-color="{{violet}}" stop-opacity="0.5"/><stop offset="0.5" stop-color="{{violet}}" stop-opacity="0.18"/><stop offset="1" stop-color="{{violet}}" stop-opacity="0"/></radialGradient>
+    <radialGradient id="gCoral"><stop offset="0" stop-color="{{coral}}" stop-opacity="0.4"/><stop offset="0.5" stop-color="{{coral}}" stop-opacity="0.15"/><stop offset="1" stop-color="{{coral}}" stop-opacity="0"/></radialGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="{{cyan}}" stop-opacity="0.9"/>
+      <stop offset="0.45" stop-color="{{violet}}"/>
+      <stop offset="0.8" stop-color="{{coral}}" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="{{coral}}" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="chevron" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="{{blue}}"/>
+      <stop offset="1" stop-color="{{violet}}"/>
+    </linearGradient>
+  </defs>
+  <rect width="660" height="440" fill="url(#paper)"/>
+
+  <!-- The diff: a pale red band for what goes, a pale cyan one for what to do. -->
+  <rect x="0" y="34" width="660" height="38" fill="url(#bandMinus)"/>
+  <rect x="0" y="72" width="660" height="38" fill="url(#bandPlus)"/>
+  <rect x="38" y="52.5" width="14" height="3" rx="1.5" fill="{{minus}}"/>
+  <path d="M 45 83 L 45 99 M 37 91 L 53 91" stroke="{{blue}}" stroke-width="3" stroke-linecap="round"/>
+  <text x="68" y="61" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="20" font-weight="600" letter-spacing="-0.3" fill="{{muted}}">{{line_minus}}</text>
+  <text x="68" y="99" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="20" font-weight="600" letter-spacing="-0.3" fill="{{ink}}">{{line_plus}}</text>
+
+  <!-- Depth without touching the path between the icons: soft light in the logo's colours low in the corners, and two faint orbit rings like the landing page's hero. -->
+  <ellipse cx="70" cy="400" rx="260" ry="120" fill="url(#gCyan)" opacity="0.5"/>
+  <ellipse cx="610" cy="410" rx="260" ry="120" fill="url(#gCoral)" opacity="0.4"/>
+  <ellipse cx="330" cy="240" rx="300" ry="120" transform="rotate(-6 330 240)" fill="none" stroke="{{ring}}" stroke-width="1" opacity="0.55"/>
+  <ellipse cx="330" cy="250" rx="236" ry="86" transform="rotate(5 330 250)" fill="none" stroke="{{ring}}" stroke-width="1" opacity="0.4"/>
+
+  <!-- The way: three chevrons that get stronger towards Applications. Nothing here is a halo or a beam, so nothing has to start exactly at the icon. -->
+  <g fill="none" stroke="url(#chevron)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 286 188 L 300 200 L 286 212" opacity="0.28"/>
+    <path d="M 322 188 L 336 200 L 322 212" opacity="0.55"/>
+    <path d="M 358 188 L 372 200 L 358 212"/>
+  </g>
+</svg>
