@@ -240,6 +240,10 @@ export default {
   'Enter this code on GitHub': 'Introduce este código en GitHub',
   'Waiting for you to approve Refract on github.com…': 'Esperando a que apruebes Refract en github.com…',
   'Copy code': 'Copiar código',
+  'Code copied': 'Código copiado',
+  'Could not copy the code': 'No se pudo copiar el código',
+  'The code is copied: paste it on GitHub and approve Refract.':
+    'El código está copiado: pégalo en GitHub y autoriza Refract.',
   'Connect to push projects to your repositories, or create new ones.':
     'Conéctala para enviar proyectos a tus repositorios o crear otros nuevos.',
   'Connect GitHub': 'Conectar GitHub',

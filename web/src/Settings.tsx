@@ -47,6 +47,7 @@ import {
 import { getPrefs, openSettings, setPref, usePrefs, useSettingsSection, type Prefs } from '@/lib/prefs'
 import { lang, languageNames, t, tn } from '@/lib/i18n'
 import { reloadTo } from '@/lib/router'
+import { copyWhenReady } from '@/lib/clipboard'
 import { compact, modelLabel, ownUsage, totalTokens } from '@/lib/usage'
 import { useMonthUsage } from '@/components/useMonthUsage'
 import { shortcutGroups } from '@/lib/shortcuts'
@@ -1011,6 +1012,7 @@ type Device = { user_code: string; verification_uri: string; interval: number; e
 function Integrations() {
   const [gh, setGh] = useState<GitHubState | null>(null)
   const [device, setDevice] = useState<Device | null>(null)
+  const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const load = () => api<GitHubState>('/api/github').then(setGh, (e) => toast.error(errorText(e)))
@@ -1053,9 +1055,14 @@ function Integrations() {
 
   async function connect() {
     setBusy(true)
+    const start = api<Device>('/api/github/device', { method: 'POST' })
+    // Copied while the click still counts, so the code is ready to paste on GitHub.
+    const copying = copyWhenReady(start.then((d) => d.user_code))
     try {
-      const d = await api<Device>('/api/github/device', { method: 'POST' })
+      const d = await start
       setDevice(d)
+      setCopied(false)
+      copying.then(setCopied)
       // The server opens GitHub's page itself when it runs on this computer.
       if (!d.opened) window.open(d.verification_uri, '_blank', 'noopener')
     } catch (e) {
@@ -1106,7 +1113,11 @@ function Integrations() {
           <SettingsRow
             stacked
             label={t('Enter this code on GitHub')}
-            description={t('Waiting for you to approve Refract on github.com…')}
+            description={
+              copied
+                ? t('The code is copied: paste it on GitHub and approve Refract.')
+                : t('Waiting for you to approve Refract on github.com…')
+            }
           >
             <span className="flex items-center gap-2">
               <code className="rounded-md border bg-muted px-3 py-1.5 font-mono text-lg tracking-widest">
@@ -1116,7 +1127,12 @@ function Integrations() {
                 size="icon-sm"
                 variant="ghost"
                 aria-label={t('Copy code')}
-                onClick={() => navigator.clipboard.writeText(device.user_code)}
+                onClick={() =>
+                  navigator.clipboard.writeText(device.user_code).then(
+                    () => toast.success(t('Code copied')),
+                    () => toast.error(t('Could not copy the code')),
+                  )
+                }
               >
                 <Copy />
               </Button>
