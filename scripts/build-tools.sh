@@ -143,7 +143,9 @@ if [ "$OS" = windows ]; then
   (cd "$STAGE" && zip -qr -X "$DEST/$name.zip" .)
   out="$DEST/$name.zip"
 else
-  tar -czf "$DEST/$name.tar.gz" -C "$STAGE" .
+  # macOS tar stores extended attributes (com.apple.provenance, quarantine) as ._ entries, which
+  # aren't in the manifest and fail the check; COPYFILE_DISABLE keeps them out (other tars ignore it).
+  COPYFILE_DISABLE=1 tar -czf "$DEST/$name.tar.gz" -C "$STAGE" .
   out="$DEST/$name.tar.gz"
 fi
 python3 -I "$TOOLS_ROOT/scripts/tools-archive.py" check "$out" "$OS" "$ARCH"

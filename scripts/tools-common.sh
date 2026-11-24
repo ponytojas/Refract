@@ -22,10 +22,11 @@ sha256_of() {
   else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
-# fetch URL SHA256 FILE: download and refuse anything that does not match the pin.
+# fetch URL SHA256 FILE: download and refuse anything that does not match the pin. Retries any
+# failure (a reset connection isn't retried by --retry alone; the checksum still guards the result).
 fetch() {
   [ -n "$2" ] || die "no checksum pinned for $1"
-  curl -fsSL --retry 3 -o "$3" "$1" || die "download failed: $1"
+  curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$3" "$1" || die "download failed: $1"
   got=$(sha256_of "$3")
   [ "$got" = "$2" ] || die "checksum mismatch for $1 (expected $2, got $got)"
 }
