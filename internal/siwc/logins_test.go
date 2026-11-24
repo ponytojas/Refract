@@ -61,7 +61,8 @@ func TestLoginsStoresTheCredential(t *testing.T) {
 	if st := l.Status("ana"); st.State != LoginIdle {
 		t.Fatalf("before = %+v", st)
 	}
-	u, err := l.Start(context.Background(), s, false)
+	started, err := l.Start(context.Background(), s, false)
+	u := started.URL
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +85,8 @@ func TestLoginsStoresTheCredential(t *testing.T) {
 	}
 
 	// Signing in again reuses the stored registration.
-	u, err = l.Start(context.Background(), s, false)
+	started, err = l.Start(context.Background(), s, false)
+	u = started.URL
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +94,26 @@ func TestLoginsStoresTheCredential(t *testing.T) {
 		t.Fatalf("second url = %s", u)
 	}
 	l.Cancel("ana")
+}
+
+func TestLoginsOpensTheBrowser(t *testing.T) {
+	f := newFakeAuth(t)
+	s := newSession(t, f)
+	var opened string
+	l := &Logins{Port: -1, AuthorizeURL: "https://auth.invalid/a", OpenBrowser: func(u string) error { opened = u; return nil }}
+	started, err := l.Start(context.Background(), s, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !started.Opened || opened != started.URL {
+		t.Fatalf("started = %+v, opened %q", started, opened)
+	}
+	l.Cancel("")
+	l.OpenBrowser = func(string) error { return errors.New("no browser") }
+	if started, err = l.Start(context.Background(), s, false); err != nil || started.Opened {
+		t.Fatalf("a failed open must leave it to the page: %+v %v", started, err)
+	}
+	l.Cancel("")
 }
 
 func TestLoginsOneAtATime(t *testing.T) {
@@ -109,7 +131,7 @@ func TestLoginsOneAtATime(t *testing.T) {
 	}
 	// The same account starting again replaces its stale attempt.
 	second, err := l.Start(context.Background(), ana, false)
-	if err != nil || second == first {
+	if err != nil || second.URL == first.URL {
 		t.Fatalf("restart: %v", err)
 	}
 	if st := l.Status("ana"); st.State != LoginPending {
@@ -146,7 +168,8 @@ func TestLoginsFailures(t *testing.T) {
 		f := newFakeAuth(t)
 		s := newSession(t, f)
 		l := &Logins{Port: -1, AuthorizeURL: "https://auth.invalid/a"}
-		u, err := l.Start(context.Background(), s, false)
+		started, err := l.Start(context.Background(), s, false)
+		u := started.URL
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +202,8 @@ func TestLoginsFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		l := &Logins{Port: -1, AuthorizeURL: "https://auth.invalid/a"}
-		u, err := l.Start(context.Background(), s, false)
+		started, err := l.Start(context.Background(), s, false)
+		u := started.URL
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -188,10 +212,10 @@ func TestLoginsFailures(t *testing.T) {
 			t.Fatalf("state = %+v", st)
 		}
 		// fresh registers the account that signed in.
-		if u, err = l.Start(context.Background(), s, true); err != nil {
+		if started, err = l.Start(context.Background(), s, true); err != nil {
 			t.Fatal(err)
 		}
-		finish(t, f, u, nil)
+		finish(t, f, started.URL, nil)
 		waitState(t, l, "", LoginDone)
 		if c, _ := s.Credentials(context.Background()); c.Subject != "user-1" {
 			t.Fatalf("stored subject = %q", c.Subject)
@@ -202,7 +226,8 @@ func TestLoginsFailures(t *testing.T) {
 		s := newSession(t, f)
 		s.AllowedSubject = "someone-else"
 		l := &Logins{Port: -1, AuthorizeURL: "https://auth.invalid/a"}
-		u, err := l.Start(context.Background(), s, false)
+		started, err := l.Start(context.Background(), s, false)
+		u := started.URL
 		if err != nil {
 			t.Fatal(err)
 		}

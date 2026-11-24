@@ -209,7 +209,9 @@ func newServer(mux http.Handler, hosts hostPolicy) *http.Server {
 // 127.0.0.1 can't reach it.
 func loginsFor(addr net.Addr) *siwc.Logins {
 	if tcp, ok := addr.(*net.TCPAddr); ok && tcp.IP.IsLoopback() {
-		return &siwc.Logins{}
+		// The server opens the browser itself: a page's window.open after a
+		// request is a popup that browsers and the desktop app's web view may drop.
+		return &siwc.Logins{OpenBrowser: openBrowser}
 	}
 	return nil
 }

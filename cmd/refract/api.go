@@ -169,8 +169,9 @@ func (a *api) status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// startLogin begins the in-server ChatGPT sign-in and returns the authorize
-// URL for the browser to open. {"new": true} registers another account.
+// startLogin begins the in-server ChatGPT sign-in. The server opens the
+// browser itself (it is on this computer); the answer carries the authorize
+// URL and whether that worked, so the page opens it otherwise. {"new": true} registers another account.
 func (a *api) startLogin(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		New bool `json:"new"`
@@ -179,14 +180,14 @@ func (a *api) startLogin(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	u, err := a.logins.Start(r.Context(), a.forUser(r.Context()).session, in.New)
+	started, err := a.logins.Start(r.Context(), a.forUser(r.Context()).session, in.New)
 	switch {
 	case errors.Is(err, siwc.ErrLoginBusy):
 		httpError(w, err, http.StatusConflict)
 	case err != nil:
 		writeLoginFailure(w, a.logins.Status(requestUser(r.Context())))
 	default:
-		writeJSON(w, map[string]string{"url": u})
+		writeJSON(w, started)
 	}
 }
 

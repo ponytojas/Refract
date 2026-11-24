@@ -62,15 +62,15 @@ export default function ChatGPTSignIn({ again, onChange }: Props) {
   async function start(fresh = false) {
     setBusy(true)
     try {
-      const r = await api<{ url: string }>('/api/chatgpt/login', {
+      const r = await api<{ url: string; opened: boolean }>('/api/chatgpt/login', {
         method: 'POST',
         body: { new: fresh },
       })
       setUrl(r.url)
       setLogin({ state: 'pending' })
-      // The desktop app sends this to the default browser; elsewhere a blocked
-      // window leaves the link below.
-      window.open(r.url, '_blank', 'noopener')
+      // The server opens the browser itself (it runs on this computer). If it
+      // couldn't, try from the page; a blocked window leaves the link below.
+      if (!r.opened) window.open(r.url, '_blank', 'noopener')
     } catch (e) {
       // 503: the sign-in failed before it could start (the callback port is taken).
       if (e instanceof RequestError && e.status === 503)

@@ -40,9 +40,12 @@ type LoginState struct {
 // same computer as the browser: the OpenAI redirect to 127.0.0.1 reaches it.
 // The credential goes straight to the account's Session; no file is written.
 type Logins struct {
-	Timeout      time.Duration // 0 = 10 minutes
-	Port         int           // as LoginOptions.Port
-	AuthorizeURL string        // "" = real endpoint
+	Timeout time.Duration // 0 = 10 minutes
+	// OpenBrowser opens the sign-in in this computer's default browser, as
+	// refract login does. nil, or an error, leaves it to the page.
+	OpenBrowser  func(authURL string) error
+	Port         int    // as LoginOptions.Port
+	AuthorizeURL string // "" = real endpoint
 
 	mu     sync.Mutex
 	cur    *runningLogin
@@ -55,16 +58,23 @@ type runningLogin struct {
 	done   chan struct{}
 }
 
+// Started is a sign-in waiting for the person: the authorize URL, and
+// whether the server already opened it in the browser.
+type Started struct {
+	URL    string `json:"url"`
+	Opened bool   `json:"opened"`
+}
+
 // Start begins a sign-in for s's account and returns the authorize URL for
 // the browser to open. A sign-in already running for the same account is
 // replaced (a stale tab); one for another account answers ErrLoginBusy.
 // fresh registers a new ChatGPT account instead of reusing the saved one.
-func (l *Logins) Start(ctx context.Context, s *Session, fresh bool) (string, error) {
+func (l *Logins) Start(ctx context.Context, s *Session, fresh bool) (Started, error) {
 	l.mu.Lock()
 	if cur := l.cur; cur != nil {
 		if cur.owner != s.Owner {
 			l.mu.Unlock()
-			return "", ErrLoginBusy
+			return Started{}, ErrLoginBusy
 		}
 		cur.cancel()
 		l.mu.Unlock()
@@ -72,19 +82,19 @@ func (l *Logins) Start(ctx context.Context, s *Session, fresh bool) (string, err
 		l.mu.Lock()
 		if l.cur != nil { // another start won the race
 			l.mu.Unlock()
-			return "", ErrLoginBusy
+			return Started{}, ErrLoginBusy
 		}
 	}
 	hostID, err := s.HostID(ctx)
 	if err != nil {
 		l.mu.Unlock()
-		return "", err
+		return Started{}, err
 	}
 	var saved *Credentials
 	if !fresh {
 		if saved, err = s.Credentials(ctx); err != nil {
 			l.mu.Unlock()
-			return "", err
+			return Started{}, err
 		}
 		if saved != nil && saved.ClientID == "" {
 			saved = nil
@@ -96,7 +106,7 @@ func (l *Logins) Start(ctx context.Context, s *Session, fresh bool) (string, err
 	l.setState(s.Owner, LoginState{State: LoginPending})
 	l.mu.Unlock()
 
-	urls := make(chan string, 1)
+	urls := make(chan Started, 1)
 	failed := make(chan error, 1)
 	go func() {
 		gotURL := false
@@ -104,7 +114,11 @@ func (l *Logins) Start(ctx context.Context, s *Session, fresh bool) (string, err
 		defer cancel()
 		c, err := Login(run, LoginOptions{
 			HostID: hostID, Saved: saved, Port: l.Port, OAuth: s.OAuth, AuthorizeURL: l.AuthorizeURL,
-			OnURL:          func(u string, _ error) { gotURL = true; urls <- u },
+			OpenBrowser: l.OpenBrowser,
+			OnURL: func(u string, openErr error) {
+				gotURL = true
+				urls <- Started{URL: u, Opened: openErr == nil}
+			},
 			OnRegistration: func(clientID string) error { return s.SaveRegistration(run, clientID) },
 		})
 		if err == nil {
@@ -128,10 +142,10 @@ func (l *Logins) Start(ctx context.Context, s *Session, fresh bool) (string, err
 		l.mu.Unlock()
 	}()
 	select {
-	case u := <-urls:
-		return u, nil
+	case st := <-urls:
+		return st, nil
 	case err := <-failed: // before the URL: the port is taken
-		return "", err
+		return Started{}, err
 	}
 }
 

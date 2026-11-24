@@ -449,8 +449,9 @@ What the web view does with things the page asks for (`WebViewController`; the p
   (`readText`, the editor's Paste menu entry) shows WebKit's own "Paste" prompt.
 
 Signing in to ChatGPT needs no native code: **Settings → Assistant → Sign in with ChatGPT** asks the
-embedded server (which listens on loopback) to start the sign-in, and the page's `window.open` of OpenAI's
-address goes to the default browser by the rule above. ChatGPT redirects to `127.0.0.1:1455`, which the
+embedded server (which listens on loopback) to start the sign-in, and the server opens OpenAI's address in
+the default browser itself, as `refract login` does: a `window.open` after the request is a popup that
+WKWebView drops. The page shows the address as a link if the server couldn't open it. ChatGPT redirects to `127.0.0.1:1455`, which the
 server answers itself; the page polls until it's done. Uploading a credentials file still works.
 
 ## Left for later
