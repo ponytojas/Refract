@@ -152,7 +152,7 @@ Try Refract on your own computer in a few minutes: with the Mac app, the `refrac
 Download the disk image for your Mac from the [latest release](https://github.com/ponytojas/Refract/releases/latest): [Apple silicon](https://github.com/ponytojas/Refract/releases/latest/download/Refract-arm64.dmg) or [Intel](https://github.com/ponytojas/Refract/releases/latest/download/Refract-amd64.dmg) (**Apple menu → About This Mac** says which). Open it and drag **Refract** to **Applications**. Or with Homebrew:
 
 ```sh
-brew install --cask ponytojas/tap/refract-app
+brew install --cask use-refract/tap/refract-app
 ```
 
 It needs macOS 13 or later and nothing else: Git, Tectonic, SyncTeX and ripgrep come inside the app, and the first PDF compiles offline. The app is signed and notarized, and updates itself (**Refract → Check for Updates…**). Your projects live in `~/Library/Application Support/Refract` and the key that protects stored passwords in the Keychain, outside the app: updating, or removing the app (even `brew uninstall --zap`), leaves them. Signing in to ChatGPT or adding an API key in **Settings → Assistant** is optional. The Homebrew formula `refract` is still the command line; the app is the cask `refract-app`.
@@ -485,11 +485,11 @@ The CLI lets you run `refract login` on your computer and upload the resulting c
 **macOS (Apple Silicon or Intel):**
 
 ```sh
-brew install ponytojas/tap/refract
+brew install use-refract/tap/refract
 refract login
 ```
 
-Update with `brew update` followed by `brew upgrade ponytojas/tap/refract`.
+Update with `brew update` followed by `brew upgrade use-refract/tap/refract`.
 
 **Debian / Ubuntu:** download the `.deb` for your architecture (`amd64` or `arm64`) from [Releases](https://github.com/ponytojas/Refract/releases). Packages are available starting with v0.1.2. For example, from the download directory:
 

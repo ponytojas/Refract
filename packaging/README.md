@@ -254,7 +254,7 @@ ad hoc build. The release attaches `Refract-<arch>.dmg`, `Refract-<arch>.zip` an
 `appcast-<arch>.xml` for arm64 and amd64, and refuses to publish without them (a prerelease has no
 appcasts). `scripts/package-metadata.py` writes the cask `refract-app.rb` from the two disk images
 (one per architecture, `arch arm:/intel:`, macOS 13 or later), next to the formula `refract.rb`,
-and the `homebrew` job copies it to `Casks/refract-app.rb` in `ponytojas/homebrew-tap`. The cask's
+and the `homebrew` job copies it to `Casks/refract-app.rb` in `Use-Refract/homebrew-tap`. The cask's
 `zap` removes only what the app can rebuild (caches, WebKit data, preferences, logs): never the
 data folder or the Keychain item, and its caveat says so.
 
@@ -291,7 +291,7 @@ OAuth sign-in itself remains an interactive user step and is not exercised by CI
 
 ## Homebrew
 
-The tap is [ponytojas/homebrew-tap](https://github.com/ponytojas/homebrew-tap).
+The tap is [Use-Refract/homebrew-tap](https://github.com/Use-Refract/homebrew-tap).
 Copy the generated `homebrew/refract.rb` to `Formula/refract.rb` and `homebrew/refract-app.rb`
 to `Casks/refract-app.rb` in that repository. The formula uses the existing macOS binaries; neither
 Go nor Node is needed to install. The cask installs the signed disk image of the Mac's architecture.
@@ -300,16 +300,16 @@ Validate on macOS before pushing the tap update:
 ```sh
 ruby -c Formula/refract.rb && ruby -c Casks/refract-app.rb
 brew style Casks/refract-app.rb
-brew install ponytojas/tap/refract
-brew test ponytojas/tap/refract
-brew install --cask ponytojas/tap/refract-app
+brew install use-refract/tap/refract
+brew test use-refract/tap/refract
+brew install --cask use-refract/tap/refract-app
 ```
 
 For automatic updates after stable releases, configure these in the **Refract**
 repository's GitHub Actions settings:
 
 - Secret `HOMEBREW_TAP_TOKEN`: a fine-grained token restricted to
-  `ponytojas/homebrew-tap`, with **Contents: read and write**. Enter it directly
+  `Use-Refract/homebrew-tap`, with **Contents: read and write**. Enter it directly
   in GitHub's settings, not in a shell command or a committed file.
 - Variable `HOMEBREW_TAP_ENABLED`: `true`, after adding the secret.
 
