@@ -1,12 +1,15 @@
 import { invertedEffects } from '@codemirror/commands'
 import { Facet, StateEffect, StateField, type EditorState } from '@codemirror/state'
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
-import { defaultRules, findSections, latexWords, selectedWords, type CountRules } from './wordcount.ts'
+import { defaultRules, findSections, latexWords, selectedWords, type CountRules, type Section } from './wordcount.ts'
 
 export type WordLimit = { id: string; name: string; max: number; from: number; to: number; section?: string }
 export type Limits = { rules: CountRules; ranges: WordLimit[] }
 export const setLimits = StateEffect.define<Limits>()
 type SavedLimit = { range: WordLimit; headingFrom?: number }
+
+// Section IDs end in an occurrence number, which can change when titles repeat.
+const headingKey = (section: Section) => section.id.slice(0, section.id.lastIndexOf(':'))
 
 // History maps these positions when several edits are grouped into one undo.
 const restoreLimits = StateEffect.define<SavedLimit[]>({
@@ -29,10 +32,26 @@ export const wordLimits = StateField.define<Limits>({
     const oldSections = value.ranges.some((r) => r.section) ? findSections(tr.startState.doc.toString()) : []
     const sections =
       oldSections.length || restored.some(({ range }) => range.section) ? findSections(tr.newDoc.toString()) : []
-    function attach(range: WordLimit, headingFrom: number | undefined): WordLimit[] {
+    function rewrittenHeading(heading: Section): Section | undefined {
+      let match: Section | undefined
+      const key = headingKey(heading)
+      tr.changes.iterChangedRanges((oldFrom, oldTo, newFrom, newTo) => {
+        if (heading.headingFrom < oldFrom || heading.from > oldTo || newFrom === newTo) return
+        // Match only a one-to-one rewrite within this replacement.
+        const ambiguous = oldSections.some(
+          (s) => s !== heading && s.headingFrom >= oldFrom && s.from <= oldTo && headingKey(s) === key,
+        )
+        if (ambiguous) return
+        const candidates = sections.filter((s) => s.headingFrom >= newFrom && s.from <= newTo && headingKey(s) === key)
+        if (candidates.length === 1) match = candidates[0]
+      }, true)
+      return match
+    }
+    function attach(range: WordLimit, headingFrom: number | undefined, oldHeading?: Section): WordLimit[] {
       if (!range.section) return [range]
-      // Occurrence IDs change when a same-title heading is inserted or removed.
-      const section = sections.find((s) => s.headingFrom === headingFrom && s.from === range.from)
+      const section =
+        sections.find((s) => s.headingFrom === headingFrom && s.from === range.from) ??
+        (oldHeading && rewrittenHeading(oldHeading))
       return section ? [{ ...range, name: section.name, section: section.id, from: section.from, to: section.to }] : []
     }
     const ranges = value.ranges.flatMap((range) => {
@@ -40,6 +59,7 @@ export const wordLimits = StateField.define<Limits>({
       return attach(
         { ...range, from: tr.changes.mapPos(range.from, -1), to: tr.changes.mapPos(range.to, 1) },
         heading && tr.changes.mapPos(heading.headingFrom, 1),
+        heading,
       )
     })
     for (const { range, headingFrom } of restored)

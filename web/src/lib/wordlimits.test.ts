@@ -47,6 +47,42 @@ test('automatic limits follow the section body and retain the limit when its tit
   assert.equal(range.name, 'Introduction')
 })
 
+test('a quick action rewriting the heading and body keeps the limit on the rewritten section', () => {
+  const heading = String.raw`\section{Intro}`
+  for (const preamble of ['', 'Preamble\n']) {
+    const source = `${preamble}${heading}one two\n${heading}three four`
+    let state = create(source)
+    const [first] = findSections(source)
+    const saved = { id: 'a', name: first.name, from: first.from, to: first.to, section: first.id, max: 1 }
+    state = state.update({ effects: setLimits.of({ rules: defaultRules, ranges: [saved] }) }).state
+    state = state.update({
+      changes: { from: 0, to: first.to - 1, insert: `${preamble}${heading}better words` },
+      userEvent: 'input.quick',
+    }).state
+    const [rewritten] = findSections(state.doc.toString())
+    assert.deepEqual(limits(state).ranges, [{ ...saved, from: rewritten.from, to: rewritten.to }])
+    assert.equal(state.sliceDoc(rewritten.from, rewritten.to), 'better words\n')
+    assert.equal(state.field(excessWords).size, 1)
+  }
+})
+
+test('rewriting a span with ambiguous repeated headings does not transfer the limit', () => {
+  const heading = String.raw`\section{Same}`
+  const single = `${heading}one two`
+  const repeated = `${single}\n${heading}three four`
+  for (const [source, insert] of [
+    [single, repeated],
+    [repeated, single],
+  ]) {
+    let state = create(source)
+    const [first] = findSections(source)
+    const saved = { id: 'a', name: first.name, from: first.from, to: first.to, section: first.id, max: 1 }
+    state = state.update({ effects: setLimits.of({ rules: defaultRules, ranges: [saved] }) }).state
+    state = state.update({ changes: { from: 0, to: source.length, insert } }).state
+    assert.deepEqual(limits(state).ranges, [])
+  }
+})
+
 test('rule changes update red decorations, overlapping limits do not duplicate marks', () => {
   let state = create(String.raw`one \footnote{two three}`)
   const range = { id: 'a', name: 'A', from: 0, to: state.doc.length, max: 1 }
