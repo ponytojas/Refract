@@ -54,6 +54,61 @@ function wordsFrom(chars: Char[]): Word[] {
   }))
 }
 
+function groupEnd(source: string, start: number, open = '{', close = '}'): number {
+  let depth = 1
+  let i = start + 1
+  for (; i < source.length && depth; i++) {
+    const c = source[i]
+    if (c === '\\' && i + 1 < source.length) i++
+    else if (c === '%') {
+      while (i + 1 < source.length && source[i + 1] !== '\n') i++
+    } else if (open === '[' && c === '{') {
+      // Braces protect closing brackets in optional argument defaults.
+      i = groupEnd(source, i) - 1
+    } else if (c === open) depth++
+    else if (c === close) depth--
+  }
+  return i
+}
+
+// Definition bodies store tokens for later use. Both section discovery and
+// word counting skip the same arguments at the declaration site.
+function definitionEnd(source: string, start: number, command: string): number | undefined {
+  const documentDefinition = /^(?:New|Renew|Provide|Declare)Document(?:Command|Environment)$/.test(command)
+  if (
+    !documentDefinition &&
+    !/^(?:newcommand|renewcommand|providecommand|DeclareRobustCommand|newenvironment|renewenvironment)$/.test(command)
+  ) {
+    return
+  }
+
+  let i = start
+  const environment = /environment$/i.test(command)
+  const trivia = /(?:\s+|%[^\n]*)*/y
+  const skipGroup = (open = '{', close = '}'): boolean => {
+    trivia.lastIndex = i
+    trivia.exec(source)
+    i = trivia.lastIndex
+    if (source[i] !== open) return false
+    i = groupEnd(source, i, open, close)
+    return true
+  }
+
+  // Command names can also be a single unbraced control sequence.
+  if (!skipGroup()) {
+    const name = environment ? null : source.slice(i).match(/^\\(?:[a-zA-Z@]+|[^\n])/)
+    if (!name) return i
+    i += name[0].length
+  }
+  if (documentDefinition) {
+    if (!skipGroup()) return i // argument specification
+  } else if (skipGroup('[', ']')) {
+    skipGroup('[', ']') // optional argument default
+  }
+  if (skipGroup() && environment) skipGroup()
+  return i
+}
+
 export function latexWords(source: string, rules: CountRules = defaultRules): Word[] {
   const out: Char[] = []
   let i = 0
@@ -189,13 +244,9 @@ export function latexWords(source: string, rules: CountRules = defaultRules): Wo
       space()
       continue
     }
-    if (/^(?:newcommand|renewcommand|providecommand|DeclareRobustCommand)$/.test(command)) {
-      options()
-      const name = source.slice(i).match(/^\\[a-zA-Z@]+/)
-      if (name) i += name[0].length
-      else skipGroup()
-      options()
-      skipGroup()
+    const definition = definitionEnd(source, i, command)
+    if (definition !== undefined) {
+      i = definition
       space()
       continue
     }
@@ -293,24 +344,10 @@ export function selectedWords(words: Word[], from: number, to: number) {
 function sectionSource(source: string, keepLiteralBoundaries = false): string {
   const chars = source.split('')
   const tokens = /%[^\n]*|\\(?:[a-zA-Z@]+\*?|[^])/g
-  const skipGroup = (start: number, open = '{', close = '}') => {
-    let i = start
-    while (/\s/.test(source[i] ?? '') && i < source.length) i++
-    if (source[i] !== open) return i
-    let depth = 1
-    for (i++; i < source.length && depth; i++) {
-      if (source[i] === '\\') i++
-      else if (source[i] === '%') {
-        while (i < source.length && source[i] !== '\n') i++
-      } else if (source[i] === open) depth++
-      else if (source[i] === close) depth--
-    }
-    return i
-  }
   for (let m; (m = tokens.exec(source));) {
     let end = tokens.lastIndex
-    const command = m[0].replace(/\*$/, '')
-    if (command === '\\begin') {
+    const command = m[0].slice(1).replace(/\*$/, '')
+    if (command === 'begin') {
       const env = source.slice(end).match(/^\s*\{(verbatim\*?|Verbatim\*?|lstlisting|minted|comment)\}/)
       if (!env) continue
       const close = `\\end{${env[1]}}`
@@ -321,21 +358,17 @@ function sectionSource(source: string, keepLiteralBoundaries = false): string {
         continue
       }
       end = at < 0 ? source.length : at + close.length
-    } else if (command === '\\verb') {
+    } else if (command === 'verb') {
       const at = source.indexOf(source[end], end + 1)
       end = at < 0 ? source.length : at + 1
-    } else if (/^\\(?:newcommand|renewcommand|providecommand|DeclareRobustCommand)$/.test(command)) {
-      end = skipGroup(end)
-      // Also accept the unbraced form: \newcommand\example[1]{...}.
-      const name = source.slice(end).match(/^\\[a-zA-Z@]+/)
-      if (name) end += name[0].length
-      end = skipGroup(end, '[', ']')
-      end = skipGroup(end, '[', ']')
-      end = skipGroup(end)
-    } else if (/^\\(?:def|gdef|edef|xdef)$/.test(command)) {
+    } else if (/^(?:def|gdef|edef|xdef)$/.test(command)) {
       const at = source.indexOf('{', end)
-      end = at < 0 ? source.length : skipGroup(at)
-    } else if (!command.startsWith('%')) continue
+      end = at < 0 ? source.length : groupEnd(source, at)
+    } else if (m[0][0] !== '%') {
+      const definition = definitionEnd(source, end, command)
+      if (definition === undefined) continue
+      end = definition
+    }
     chars.fill(' ', m.index, end)
     tokens.lastIndex = end
   }

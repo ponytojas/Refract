@@ -41,6 +41,15 @@ test('ignores commented-out, verbatim and macro-definition headings', () => {
   assert.deepEqual(titles({ headings: headingsIn(src, 'main.tex') }), ['Real'])
 })
 
+test('ignores headings, includes and document endings inside definitions', async () => {
+  const source = String.raw`\NewDocumentCommand{\example}{}{\section{Fake}\input{missing}}
+\newenvironment{example}{\section{Begin}}{\section{End}\end{document}}
+\section{Real}Text.`
+  const out = await buildOutline('main.tex', reader({ 'main.tex': source }), defaultRules)
+  assert.deepEqual(out.headings, [{ title: 'Real', level: 2, path: 'main.tex', line: 3 }])
+  assert.deepEqual(out.counts, { total: 2, sections: [2], incomplete: false })
+})
+
 test('resolves includes from the main file folder, adding .tex', () => {
   assert.equal(resolveInclude('main.tex', 'intro'), 'intro.tex')
   assert.equal(resolveInclude('paper/main.tex', 'chapters/intro'), 'paper/chapters/intro.tex')
