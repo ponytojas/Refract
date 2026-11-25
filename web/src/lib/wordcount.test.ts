@@ -132,3 +132,49 @@ test('literal examples and command definitions do not split section budgets or c
     assert.equal(source.slice(sections[1].from, sections[1].to), 'Last')
   }
 })
+
+test('document commands keep stored headings out of sections and word counts', () => {
+  for (const verb of ['New', 'Renew', 'Provide', 'Declare']) {
+    const command = `\\${verb}DocumentCommand`
+    const source = String.raw`\section{Real}
+Before ${command}\example% before the signature
+{O{\section{Default}} m}% before the replacement
+{\section{Fake} \textbf{#1} \{literal\}}
+After \section{Next}Tail`
+    const next = source.indexOf(String.raw`\section{Next}`)
+    const sections = findSections(source)
+    assert.deepEqual(
+      sections.map((s) => s.name),
+      ['Real', 'Next'],
+      verb,
+    )
+    assert.equal(sections[0].from, String.raw`\section{Real}`.length)
+    assert.equal(sections[0].to, next)
+    assert.equal(sections[1].headingFrom, next)
+    assert.equal(sectionAt(source, source.indexOf('After'))?.name, 'Real')
+    assert.deepEqual(text(source), ['Real', 'Before', 'After', 'Next', 'Tail'])
+  }
+})
+
+test('environment definitions skip both bodies and preserve later sections', () => {
+  const declarations = [
+    String.raw`\newenvironment*{example}[1][{] \section{Default}}]`,
+    String.raw`\renewenvironment{example}`,
+    ...['New', 'Renew', 'Provide', 'Declare'].map((verb) => `\\${verb}DocumentEnvironment{example}{}`),
+  ]
+  for (const declaration of declarations) {
+    const source = String.raw`\section{Real}Before
+${declaration}{\section{Begin} {nested}}% before the closing body
+{\section{End} \begin{abstract}Stored summary\end{abstract}} After
+\section{Next}Tail`
+    const sections = findSections(source)
+    assert.deepEqual(
+      sections.map((s) => s.name),
+      ['Real', 'Next'],
+      declaration,
+    )
+    assert.equal(sections[0].to, source.indexOf(String.raw`\section{Next}`))
+    assert.equal(sectionAt(source, source.indexOf('After'))?.name, 'Real')
+    assert.deepEqual(text(source), ['Real', 'Before', 'After', 'Next', 'Tail'])
+  }
+})
