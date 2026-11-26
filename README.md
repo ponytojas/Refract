@@ -320,6 +320,10 @@ docker exec refract refract users list
 
 Accounts you add this way count as confirmed: you vouch for the address. People can see and end their own sessions in Settings → Account. To end all of someone's sessions for them (a lost laptop, say), run `refract users signout <email>`. After too many failed sign-ins an account waits 15 minutes; `refract users unlock <email>` lets it in at once. To delete an account with its projects (those in the trash too), chats and connections, run `refract users remove <email>`: it lists what would go, and deletes only when run again with `--yes`. With Cloudflare Access, also remove the person from your Access policy, or they get a new, empty account on their next visit.
 
+**Export my data** in **Settings → Account** prepares a ZIP in the background and downloads it when ready. It contains current project files, including edits saved since the last commit, and a `history.bundle` for each project. Use `git clone history.bundle <directory>` to open a project's history. `projects.json` identifies projects in the trash by their `deleted_at` date and marks saved templates. Each project's `chats.json` contains its conversations and turns. The ZIP includes account settings and token totals. Refract excludes passwords, sessions, connection credentials, provider endpoints and raw provider errors. Files, commits and messages are exported as written.
+
+An administrator can create the same ZIP with `refract users export <email> <file>` using the server's data folder and encryption key. The command requires a new destination file.
+
 ### Sign in with OpenID Connect
 
 With `REFRACT_AUTH=builtin`, an OpenID Connect provider (Google, Microsoft Entra, Keycloak, Authentik, Authelia…) can add a **Continue with …** button next to the password form.
@@ -614,6 +618,7 @@ refract users rename <a> <b>    change an account's email, keeping its data
 refract users signout <email>   end all of an account's sessions
 refract users unlock <email>    clear an account's failed sign-ins and email limit (--all: every account and address)
 refract users remove <email>    delete an account and everything it owns, trash included (asks for --yes)
+refract users export <email> <file>    write a ZIP of an account's projects, history, chats and settings
 refract users list              list accounts
 refract version                 print the version
 ```

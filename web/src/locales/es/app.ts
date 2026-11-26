@@ -139,6 +139,13 @@ export default {
   Account: 'Cuenta',
   'Signed in as {email}.': 'Sesión iniciada como {email}.',
   'Current password': 'Contraseña actual',
+  'Export my data': 'Exportar mis datos',
+  'Download your projects, history, chats and account settings as a ZIP file.':
+    'Descarga tus proyectos, historial, conversaciones y ajustes de la cuenta en un archivo ZIP.',
+  'Preparing download…': 'Preparando la descarga…',
+  'Could not save your edits before exporting. Try again.':
+    'No se pudieron guardar tus cambios antes de exportar. Inténtalo de nuevo.',
+  'Could not export your data. Try again.': 'No se pudieron exportar tus datos. Inténtalo de nuevo.',
   'New password (8+ characters)': 'Contraseña nueva (8 caracteres o más)',
   'New password': 'Contraseña nueva',
   Change: 'Cambiar',

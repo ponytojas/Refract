@@ -63,6 +63,8 @@ Usage:
                      let an account (or everyone) sign in again after too many failed attempts
   refract users remove <email> [--yes]
                      delete an account with its projects, chats and connections
+  refract users export <email> <file>
+                     write an account archive with projects, history and chats
   refract users list list accounts
   refract version    print the version
 `
@@ -289,6 +291,9 @@ func run(ctx context.Context, opts runOptions) error {
 		svc: &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Limits: projects.DefaultLimits, Key: key, PublicRemotes: publicOnly},
 		tmp: filepath.Join(dataDir, "tmp"),
 	}
+	exports := &accountExports{ctx: ctx, projects: pa.svc}
+	defer exports.close()
+	a.exports = exports
 
 	fontResolver := fonts.NewResolver(filepath.Join(dataDir, "font-cache"))
 	fontResolver.Offline = os.Getenv("REFRACT_FONT_DOWNLOADS") == "0"
@@ -362,6 +367,7 @@ func run(ctx context.Context, opts runOptions) error {
 		login.mode, login.public = deployment, base
 		login.signup = signup && mailReady
 		login.destroy = destroyer(pa.svc)
+		login.exports = exports
 		if mailReady {
 			outbox = mail.NewOutbox(smtp)
 			login.mail = outbox

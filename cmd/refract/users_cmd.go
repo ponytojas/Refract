@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/ponytojas/Refract/internal/accountexport"
 	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/store"
 	"github.com/ponytojas/Refract/internal/users"
@@ -23,12 +24,13 @@ const usersUsage = `usage:
   refract users signout <email>           end all of an account's sessions
   refract users unlock <email> | --all    let an account (or everyone) sign in again after too many failed attempts
   refract users remove <email> [--yes]    delete an account and everything it owns
+  refract users export <email> <file>    write an account archive with projects, history and chats
   refract users list                      list accounts`
 
 // runUsers manages accounts on the server's own database (same
 // REFRACT_DATA_DIR and encryption key as the server).
 func runUsers(args []string, out io.Writer) error {
-	arity := map[string][]int{"list": {1}, "add": {2}, "rename": {3}, "signout": {2}, "unlock": {2}, "remove": {2, 3}}
+	arity := map[string][]int{"list": {1}, "add": {2}, "rename": {3}, "signout": {2}, "unlock": {2}, "remove": {2, 3}, "export": {3}}
 	if len(args) == 0 || !slices.Contains(arity[args[0]], len(args)) || args[0] == "remove" && len(args) == 3 && args[2] != "--yes" {
 		return errors.New(usersUsage)
 	}
@@ -95,6 +97,19 @@ func runUsers(args []string, out io.Writer) error {
 		fmt.Fprintf(out, "%s can sign in again.\n", args[1])
 	case "remove":
 		return removeUser(ctx, svc, filepath.Join(dataDir, "projects"), args[1], len(args) == 3, out)
+	case "export":
+		acct, err := svc.Lookup(ctx, args[1])
+		if errors.Is(err, users.ErrNoAccount) {
+			return fmt.Errorf("there is no account %q", args[1])
+		}
+		if err != nil {
+			return err
+		}
+		ps := &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Key: key}
+		if err := accountexport.WriteFile(ctx, args[2], ps, acct.ID); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Exported %s to %s.\n", acct.Email, args[2])
 	case "add":
 		// A generated password: nothing to type into a shell history or a
 		// terminal without echo control (docker exec without -t).

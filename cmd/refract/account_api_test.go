@@ -69,9 +69,11 @@ func newAccountEnv(t *testing.T, o envOpts) *accountEnv {
 	}
 	t.Cleanup(func() { db.Close() })
 	people := &users.Service{DB: db, Key: make([]byte, 32)}
-	ps := &projects.Service{DB: db, Dir: filepath.Join(dir, "projects"), Limits: projects.DefaultLimits}
+	ps := &projects.Service{DB: db, Dir: filepath.Join(dir, "projects"), Limits: projects.DefaultLimits, Key: people.Key}
 	e := &accountEnv{t: t, people: people, ps: ps, fake: &mail.Fake{}}
-	e.login = &loginAPI{users: people, mode: mode.SelfHost, signup: o.signup, destroy: destroyer(ps)}
+	exports := &accountExports{ctx: context.Background(), projects: ps}
+	t.Cleanup(exports.close)
+	e.login = &loginAPI{users: people, mode: mode.SelfHost, signup: o.signup, destroy: destroyer(ps), exports: exports}
 	if !o.noMail {
 		e.login.public = "https://r.test"
 		e.outbox = mail.NewOutbox(e.fake)
@@ -81,6 +83,7 @@ func newAccountEnv(t *testing.T, o envOpts) *accountEnv {
 	app := http.NewServeMux()
 	rt := &router{mux: app, acc: &access.Checker{DB: db}}
 	(&projectsAPI{svc: ps}).routes(rt)
+	exports.routes(rt)
 	e.login.accountRoutes(rt)
 	mux := http.NewServeMux()
 	mux.Handle("/api/auth/", e.login.handler())

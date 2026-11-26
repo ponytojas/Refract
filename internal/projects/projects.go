@@ -266,26 +266,43 @@ func (s *Service) Export(ctx context.Context, id string, w io.Writer) error {
 	if _, err := s.Get(ctx, id); err != nil {
 		return err
 	}
-	dir := s.Path(id)
+	zw := zip.NewWriter(w)
+	if err := writeFilesToZip(ctx, zw, s.Path(id), ""); err != nil {
+		return err
+	}
+	return zw.Close()
+}
+
+func writeFilesToZip(ctx context.Context, zw *zip.Writer, dir, prefix string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	var files []string
 	if err := walkFiles(dir, func(rel string, _ fs.FileInfo) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		files = append(files, rel)
 		return nil
 	}); err != nil {
 		return err
 	}
 	slices.Sort(files) // deterministic archive
-	zw := zip.NewWriter(w)
 	for _, rel := range files {
-		if err := addToZip(zw, dir, rel); err != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := addToZip(zw, root, rel, prefix+rel); err != nil {
 			return err
 		}
 	}
-	return zw.Close()
+	return nil
 }
 
-func addToZip(zw *zip.Writer, dir, rel string) error {
-	f, err := os.Open(filepath.Join(dir, filepath.FromSlash(rel)))
+func addToZip(zw *zip.Writer, root *os.Root, rel, name string) error {
+	f, err := root.Open(filepath.FromSlash(rel))
 	if err != nil {
 		return err
 	}
@@ -298,7 +315,7 @@ func addToZip(zw *zip.Writer, dir, rel string) error {
 	if err != nil {
 		return err
 	}
-	hdr.Name, hdr.Method = rel, zip.Deflate
+	hdr.Name, hdr.Method = name, zip.Deflate
 	dst, err := zw.CreateHeader(hdr)
 	if err != nil {
 		return err
