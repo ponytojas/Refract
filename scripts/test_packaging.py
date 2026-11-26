@@ -82,7 +82,7 @@ class PackagingTests(unittest.TestCase):
         self.assertIn('version "1.2.3"', cask)
         self.assertIn("/releases/download/v#{version}/Refract-#{arch}.dmg", cask)
         self.assertIn('app "Refract.app"', cask)
-        self.assertIn('depends_on macos: :ventura', cask)  # LSMinimumSystemVersion 13.0
+        self.assertIn('depends_on macos: ">= :ventura"', cask)  # LSMinimumSystemVersion 13.0
         self.assertIn("<string>13.0</string>", (ROOT / "macos/Resources/Info.plist").read_text())
         for arch, key in (("arm64", "arm"), ("amd64", "intel")):
             checksum = hashlib.sha256((self.archives / f"Refract-{arch}.dmg").read_bytes()).hexdigest()

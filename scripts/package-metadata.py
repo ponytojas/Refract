@@ -107,7 +107,7 @@ end
   homepage "{REPO}"
 
   auto_updates true
-  depends_on macos: :ventura
+  depends_on macos: ">= :ventura"
 
   app "Refract.app"
 

@@ -185,7 +185,7 @@ jobs:
             case "$GITHUB_REF_NAME" in
               *-*) echo "no appcasts in this prerelease"; exit 0 ;;
             esac
-            echo "::error::this release attaches the macOS app but no appcast-<arch>.xml: as the latest release it would break every installed app's update feed"; exit 1
+            echo "::error::a full release must carry appcast-<arch>.xml: as the latest release it would break every installed app's update feed"; exit 1
           fi
           for arch in arm64 amd64; do
             [ -f "dist/appcast-$arch.xml" ] || { echo "::error::appcast-$arch.xml is missing: an app of that architecture could never update"; exit 1; }

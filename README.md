@@ -149,7 +149,7 @@ Try Refract on your own computer in a few minutes: with the Mac app, the `refrac
 
 ### The Mac app
 
-Download the disk image for your Mac from the [latest release](https://github.com/ponytojas/Refract/releases/latest): [Apple silicon](https://github.com/ponytojas/Refract/releases/latest/download/Refract-arm64.dmg) or [Intel](https://github.com/ponytojas/Refract/releases/latest/download/Refract-amd64.dmg) (**Apple menu → About This Mac** says which). Open it and drag **Refract** to **Applications**. Or with Homebrew:
+Download the disk image for your Mac from the [latest release](https://github.com/Use-Refract/Refract/releases/latest): [Apple silicon](https://github.com/Use-Refract/Refract/releases/latest/download/Refract-arm64.dmg) or [Intel](https://github.com/Use-Refract/Refract/releases/latest/download/Refract-amd64.dmg) (**Apple menu → About This Mac** says which). Open it and drag **Refract** to **Applications**. Or with Homebrew:
 
 ```sh
 brew install --cask use-refract/tap/refract-app
