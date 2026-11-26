@@ -62,7 +62,7 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
         alert.addButton(withTitle: L("update.disabled.ok", "OK"))
         alert.addButton(withTitle: L("update.disabled.releases", "Open Releases Page"))
         if alert.runModal() == .alertSecondButtonReturn {
-            NSWorkspace.shared.open(URL(string: "https://github.com/ponytojas/Refract/releases/latest")!)
+            NSWorkspace.shared.open(URL(string: "https://github.com/Use-Refract/Refract/releases/latest")!)
         }
     }
 

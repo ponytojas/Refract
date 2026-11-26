@@ -173,7 +173,7 @@ class Appcast(unittest.TestCase):
         self.assertEqual(item.find("s:version", ns).text, "0.3.0")
         self.assertEqual(item.find("s:minimumSystemVersion", ns).text, "13.0")
         enc = item.find("enclosure")
-        self.assertEqual(enc.get("url"), "https://github.com/ponytojas/Refract/releases/download/v0.3.0/Refract-arm64.zip")
+        self.assertEqual(enc.get("url"), "https://github.com/Use-Refract/Refract/releases/download/v0.3.0/Refract-arm64.zip")
         self.assertEqual(int(enc.get("length")), os.path.getsize(os.path.join(self.dir.name, "Refract-arm64.zip")))
         self.assertTrue(mk.ed25519_verify(self.pub, base64.b64decode(enc.get("{%s}edSignature" % mk.NAMESPACE)),
                                           os.path.join(self.dir.name, "Refract-arm64.zip")))

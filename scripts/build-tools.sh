@@ -97,7 +97,7 @@ Git ${GIT_VERSION} is free software under the GNU General Public License version
 source of the bundled git executable is in this folder: source/git-${GIT_VERSION}.tar.xz
 (the unmodified official tarball, SHA-256 ${GIT_SOURCE_SHA256}).
 It was built by source/build-git-macos.sh (with source/tools-common.sh), the same
-scripts as in the Refract repository (https://github.com/ponytojas/Refract) at
+scripts as in the Refract repository (https://github.com/Use-Refract/Refract) at
 release ${TAG}, against libraries that are part of macOS.
 OFFER
     ;;
@@ -118,7 +118,7 @@ MSYS2 packages listed in package-versions.txt are at
 https://github.com/git-for-windows/MSYS2-packages and
 https://github.com/git-for-windows/MINGW-packages. For three years from the
 release ${TAG} of Refract, the Refract maintainers will also send a copy of any of
-these sources on request (https://github.com/ponytojas/Refract/issues).
+these sources on request (https://github.com/Use-Refract/Refract/issues).
 OFFER
     ;;
 esac
@@ -143,7 +143,9 @@ if [ "$OS" = windows ]; then
   (cd "$STAGE" && zip -qr -X "$DEST/$name.zip" .)
   out="$DEST/$name.zip"
 else
-  tar -czf "$DEST/$name.tar.gz" -C "$STAGE" .
+  # macOS tar stores extended attributes (com.apple.provenance, quarantine) as ._ entries, which
+  # aren't in the manifest and fail the check; COPYFILE_DISABLE keeps them out (other tars ignore it).
+  COPYFILE_DISABLE=1 tar -czf "$DEST/$name.tar.gz" -C "$STAGE" .
   out="$DEST/$name.tar.gz"
 fi
 python3 -I "$TOOLS_ROOT/scripts/tools-archive.py" check "$out" "$OS" "$ARCH"

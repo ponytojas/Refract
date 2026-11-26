@@ -16,7 +16,7 @@ import tarfile
 import zipfile
 
 
-REPO = "https://github.com/ponytojas/Refract"
+REPO = "https://github.com/Use-Refract/Refract"
 IDENTIFIER = "ponytojas.Refract"
 SCHEMA = "1.12.0"
 
