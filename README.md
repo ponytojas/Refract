@@ -143,9 +143,19 @@ The paper in these screenshots is a made-up example, and the AI responses come f
 
 ## Quick start
 
-Try Refract on your own computer in a few minutes, either with the `refract` program or with Docker.
+Try Refract on your own computer in a few minutes: with the Mac app, the `refract` program or Docker.
 
 > **Using an AI coding agent?** Ask it to follow [AGENTS.md](AGENTS.md): a step-by-step guide for agents to get Refract running for you, whether you want to try it, work on the code or put it on a server.
+
+### The Mac app
+
+Download the disk image for your Mac from the [latest release](https://github.com/Use-Refract/Refract/releases/latest): [Apple silicon](https://github.com/Use-Refract/Refract/releases/latest/download/Refract-arm64.dmg) or [Intel](https://github.com/Use-Refract/Refract/releases/latest/download/Refract-amd64.dmg) (**Apple menu → About This Mac** says which). Open it and drag **Refract** to **Applications**. Or with Homebrew:
+
+```sh
+brew install --cask use-refract/tap/refract-app
+```
+
+It needs macOS 13 or later and nothing else: Git, Tectonic, SyncTeX and ripgrep come inside the app, and the first PDF compiles offline. The app is signed and notarized, and updates itself (**Refract → Check for Updates…**). Your projects live in `~/Library/Application Support/Refract` and the key that protects stored passwords in the Keychain, outside the app: updating, or removing the app (even `brew uninstall --zap`), leaves them. Signing in to ChatGPT or adding an API key in **Settings → Assistant** is optional. The Homebrew formula `refract` is still the command line; the app is the cask `refract-app`.
 
 ### Run it on your computer
 
@@ -723,7 +733,9 @@ Each architecture's image is pushed by digest only, with no public tag, and then
 - **Recording an exception.** Add an entry with the vulnerability's id (as Grype reports it), the package, the reason it can't be exploited in Refract (or why waiting for a fix is acceptable), your GitHub login and the dates of the review and of expiry (at most 90 days apart). Merge it through a pull request like any other change. An expired or incomplete entry blocks the gate until someone reviews it again.
 - **The report.** It stays with the build: each architecture's `refract-image-<version>-<arch>-scan.tar.gz` has `report.md` (the decision, the findings and the native tools), both SBOMs, Grype's full results and `image.txt` with the digest it covers. It is attached to the GitHub release and kept for 90 days as a workflow artifact, also when the scan blocks. Run it locally with `scripts/scan-image.sh <image> <folder>`.
 
-Releases also include Debian packages for amd64 and arm64, a Homebrew formula (`refract.rb`) and WinGet manifests (`refract-winget-manifests.tar.gz`). CLI smoke tests run on macOS, Linux and Windows before the release is published. Stable releases can update the Homebrew tap automatically once its repository token is configured. [Packaging maintenance](packaging/README.md) describes the setup and manual publication steps.
+Every release also carries the macOS app for both architectures (`.github/workflows/macos-app.yml`, called by the release): the signed, notarized and stapled `Refract-<arch>.dmg` people download, the `Refract-<arch>.zip` and `appcast-<arch>.xml` the app updates from. The release fails rather than publish an app signed ad hoc, so the signing, notarization and update secrets must be set ([macos/README.md](macos/README.md#signing-and-notarization)).
+
+Releases also include Debian packages for amd64 and arm64, a Homebrew formula (`refract.rb`), the app's cask (`refract-app.rb`) and WinGet manifests (`refract-winget-manifests.tar.gz`). CLI smoke tests run on macOS, Linux and Windows before the release is published. Stable releases can update the Homebrew tap (the formula and the cask) automatically once its repository token is configured. [Packaging maintenance](packaging/README.md) describes the setup and manual publication steps.
 
 ## License
 

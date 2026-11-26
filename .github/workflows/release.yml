@@ -61,7 +61,7 @@ jobs:
             dist/*.deb
 
   metadata:
-    needs: build
+    needs: [build, macos-app]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -70,16 +70,19 @@ jobs:
           path: dist
           pattern: '!*.dockerbuild'
           merge-multiple: true
+      # The cask (refract-app) is generated from the signed disk images macos-app built in this run.
       - name: Homebrew and WinGet
         run: |
           python3 scripts/package-metadata.py "$GITHUB_REF_NAME" dist "$RUNNER_TEMP/packages"
           cp "$RUNNER_TEMP/packages/homebrew/refract.rb" dist/refract.rb
+          cp "$RUNNER_TEMP/packages/homebrew/refract-app.rb" dist/refract-app.rb
           tar -czf dist/refract-winget-manifests.tar.gz -C "$RUNNER_TEMP/packages/winget" manifests
       - uses: actions/upload-artifact@v7
         with:
           name: package-metadata
           path: |
             dist/refract.rb
+            dist/refract-app.rb
             dist/refract-winget-manifests.tar.gz
 
   # Tool archives (Tectonic, SyncTeX, ripgrep, private Git) for every target, built
@@ -88,6 +91,26 @@ jobs:
     uses: ./.github/workflows/tools.yml
     with:
       tag: ${{ github.ref_name }}
+
+  # The macOS app (#71): Refract.app with the tool archives above, signed, notarized and stapled,
+  # its disk image (Refract-<arch>.dmg, the download people use) and the update archive and feed
+  # (Refract-<arch>.zip, appcast-<arch>.xml). A release never ships an app signed ad hoc: without
+  # the signing secrets, or if signing or notarization fails, this job fails and nothing is published.
+  macos-app:
+    needs: tools
+    uses: ./.github/workflows/macos-app.yml
+    with:
+      version: ${{ github.ref_name }}
+      require-signed: true
+      tools-artifact: true
+    secrets:
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+      SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
 
   # Exercise the CLI without any server configuration or LaTeX tools. OAuth
   # itself is interactive; --help checks the login entry point without signing in.
@@ -132,7 +155,7 @@ jobs:
   # Waits for the image's scan, so a blocked image stops the whole release,
   # and attaches each architecture's scan report.
   release:
-    needs: [build, metadata, cli-smoke, tools, image]
+    needs: [build, metadata, cli-smoke, tools, macos-app, image]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7 # for CHANGELOG.md
@@ -151,22 +174,18 @@ jobs:
       # architecture, each pointing at an archive this release attaches. A feed that points anywhere
       # else would send people's apps to the wrong file, so it stops here. Feeds are looked up at
       # releases/latest/download/appcast-<arch>.xml: publish them as assets of a full (not pre-)release.
-      # A full release that attaches the app must carry both feeds (checked below); until the app is
-      # part of every release (#71), one without the app has none and is allowed.
+      # A full release must carry both feeds (checked below); a prerelease has none.
       - name: Check the appcasts
         run: |
           set -- dist/appcast-*.xml
           if [ ! -e "$1" ]; then
-            # Installed apps read releases/latest/download/appcast-<arch>.xml: a full release that
-            # carries the app (Refract-<arch>.zip) but no appcast would become "latest" and break
-            # every installed app's feed (404). Only a prerelease (a '-' in the tag) may go without.
+            # Installed apps read releases/latest/download/appcast-<arch>.xml: a full release without
+            # them would become "latest" and break every installed app's feed (404). Only a
+            # prerelease (a '-' in the tag) goes without.
             case "$GITHUB_REF_NAME" in
               *-*) echo "no appcasts in this prerelease"; exit 0 ;;
             esac
-            if ls dist/Refract-arm64.zip dist/Refract-amd64.zip >/dev/null 2>&1; then
-              echo "::error::this release attaches the macOS app but no appcast-<arch>.xml: as the latest release it would break every installed app's update feed"; exit 1
-            fi
-            echo "no appcasts in this release (it has no macOS app)"; exit 0
+            echo "::error::a full release must carry appcast-<arch>.xml: as the latest release it would break every installed app's update feed"; exit 1
           fi
           for arch in arm64 amd64; do
             [ -f "dist/appcast-$arch.xml" ] || { echo "::error::appcast-$arch.xml is missing: an app of that architecture could never update"; exit 1; }
@@ -183,6 +202,15 @@ jobs:
               *"-$arch.zip") ;;
               *) echo "::error::$f points at ${url##*/}, an archive of another architecture"; exit 1 ;;
             esac
+          done
+      # Every release carries the macOS app: its disk image (what people download), and the zip
+      # the update feeds point at, for both architectures.
+      - name: Check the macOS app
+        run: |
+          for arch in arm64 amd64; do
+            for f in "Refract-$arch.dmg" "Refract-$arch.zip"; do
+              [ -f "dist/$f" ] || { echo "::error::$f is missing from this release"; exit 1; }
+            done
           done
       # The notes are the version's section of CHANGELOG.md ("## [0.1.0] - …"),
       # minus the link definitions at the end of the file. Without that
@@ -221,12 +249,13 @@ jobs:
       - name: Update tap
         working-directory: tap
         run: |
-          mkdir -p Formula
+          mkdir -p Formula Casks
           cp ../metadata/refract.rb Formula/refract.rb
-          if git diff --quiet -- Formula/refract.rb && [ -z "$(git ls-files --others --exclude-standard Formula/refract.rb)" ]; then exit 0; fi
+          cp ../metadata/refract-app.rb Casks/refract-app.rb
+          if git diff --quiet -- Formula Casks && [ -z "$(git ls-files --others --exclude-standard Formula Casks)" ]; then exit 0; fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Formula/refract.rb
+          git add Formula/refract.rb Casks/refract-app.rb
           git commit -m "Refract $GITHUB_REF_NAME"
           git push
 
