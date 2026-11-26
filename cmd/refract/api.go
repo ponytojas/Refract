@@ -101,9 +101,9 @@ func (a *api) routes(rt *router) {
 		rt.user("POST /api/chatgpt/credentials", a.importCredentials)
 		rt.user("POST /api/chatgpt/signout", a.signOut)
 		if a.logins != nil {
-			rt.user("POST /api/chatgpt/login", a.startLogin)
-			rt.user("GET /api/chatgpt/login", a.loginStatus)
-			rt.user("DELETE /api/chatgpt/login", a.cancelLogin)
+			rt.user("POST /api/chatgpt/login", a.hereOnly(a.startLogin))
+			rt.user("GET /api/chatgpt/login", a.hereOnly(a.loginStatus))
+			rt.user("DELETE /api/chatgpt/login", a.hereOnly(a.cancelLogin))
 		}
 	}
 	rt.user("POST /api/chatgpt/welcome-seen", a.welcomeSeen)
@@ -165,8 +165,21 @@ func (a *api) status(w http.ResponseWriter, r *http.Request) {
 		"welcome_seen":  seen,
 		"manage_usage":  siwc.ManageUsage,
 		"default_model": a.model,
-		"sign_in_here":  a.mode.ChatGPT() && a.logins != nil,
+		"sign_in_here":  a.mode.ChatGPT() && a.logins != nil && fromThisComputer(r),
 	})
+}
+
+// hereOnly refuses the in-server sign-in to browsers on other computers
+// (behind a reverse proxy): OpenAI's redirect goes to this computer's
+// 127.0.0.1, so they upload a credentials file instead.
+func (a *api) hereOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !fromThisComputer(r) {
+			httpError(w, errors.New("signing in to ChatGPT from Settings works only on the computer Refract runs on; upload a credentials file instead"), http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // startLogin begins the in-server ChatGPT sign-in. The server opens the
@@ -223,6 +236,10 @@ func (a *api) importCredentials(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) signOut(w http.ResponseWriter, r *http.Request) {
+	// A sign-in still waiting would store new credentials after this.
+	if a.logins != nil {
+		a.logins.Cancel(requestUser(r.Context()))
+	}
 	if err := a.forUser(r.Context()).session.SignOut(r.Context()); err != nil {
 		httpError(w, err, http.StatusBadGateway)
 		return

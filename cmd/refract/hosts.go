@@ -215,3 +215,27 @@ func loginsFor(addr net.Addr) *siwc.Logins {
 	}
 	return nil
 }
+
+// fromThisComputer reports whether a request comes straight from a browser on
+// the computer Refract runs on: a loopback peer, a loopback host name and no
+// proxy headers. A loopback listener can also sit behind a reverse proxy for
+// people elsewhere, and their browser can't reach this computer's callback.
+func fromThisComputer(r *http.Request) bool {
+	for _, h := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Real-Ip"} {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
+	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(peer); err != nil || ip == nil || !ip.IsLoopback() {
+		return false
+	}
+	host, ok := parseAuthority(r.Host)
+	if !ok {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost" || strings.HasSuffix(host, ".localhost")
+}

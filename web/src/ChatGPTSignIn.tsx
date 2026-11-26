@@ -21,13 +21,24 @@ export default function ChatGPTSignIn({ again, onChange }: Props) {
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // A sign-in started before Settings was closed is still running on the server.
+  // A sign-in started before Settings was closed is still running on the
+  // server, or finished meanwhile: then the connection shown is stale.
   useEffect(() => {
-    api<LoginState>('/api/chatgpt/login').then(
-      (st) => st.state === 'pending' && setLogin(st),
-      () => {},
-    )
-  }, [])
+    let stop = false
+    api<LoginState>('/api/chatgpt/login')
+      .then(async (st) => {
+        if (stop) return
+        if (st.state === 'pending') setLogin(st)
+        else if (st.state === 'done') {
+          const status = await api<ChatGPTStatus>('/api/chatgpt/status')
+          if (!stop) onChange(status)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      stop = true
+    }
+  }, [onChange])
 
   const pending = login?.state === 'pending'
   useEffect(() => {
