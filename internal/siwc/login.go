@@ -26,6 +26,13 @@ func NewHostID() string {
 	return fmt.Sprintf("urn:uuid:%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
+// ErrDenied means the person cancelled the sign-in or denied access in ChatGPT.
+var ErrDenied = errors.New("sign-in was cancelled or denied")
+
+// ErrOtherAccount means the sign-in used another ChatGPT account than the
+// saved registration (Saved) belongs to.
+var ErrOtherAccount = errors.New("signed in with a different ChatGPT account than the saved one")
+
 // LoginOptions configures the local loopback sign-in.
 type LoginOptions struct {
 	HostID string
@@ -120,7 +127,7 @@ func Login(ctx context.Context, o LoginOptions) (*Credentials, error) {
 		var res result
 		switch {
 		case p.Get("error") == "access_denied":
-			res.err = errors.New("sign-in was cancelled or denied")
+			res.err = ErrDenied
 		case p.Get("error") != "":
 			res.err = fmt.Errorf("authorization failed: %s %s", p.Get("error"), p.Get("error_description"))
 		case p.Get("code") == "":
@@ -196,7 +203,7 @@ func Login(ctx context.Context, o LoginOptions) (*Credentials, error) {
 		return nil, errors.New("id token: nonce mismatch")
 	}
 	if o.Saved != nil && o.Saved.Subject != "" && idt.Subject != o.Saved.Subject {
-		return nil, errors.New("signed in with a different ChatGPT account than the saved one; use -new to register it separately")
+		return nil, ErrOtherAccount
 	}
 	var claims struct {
 		Email string `json:"email"`

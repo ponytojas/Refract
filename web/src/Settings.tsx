@@ -52,6 +52,7 @@ import { useMonthUsage } from '@/components/useMonthUsage'
 import { shortcutGroups } from '@/lib/shortcuts'
 import { setTheme, useTheme, type Theme } from '@/lib/theme'
 import PlanBadge from './PlanBadge'
+import ChatGPTSignIn from './ChatGPTSignIn'
 import { useMe } from '@/components/AccountMenu'
 import { useAccount } from '@/components/useAccount'
 import { chatgptOffered } from '@/lib/mode'
@@ -252,13 +253,20 @@ function AssistantPane({ status, onChange }: Props) {
               >
                 {s.plan_granted && <PlanBadge manageUsage={status.manage_usage} />}
               </SettingsRow>
+              {status.sign_in_here && <ChatGPTSignIn again onChange={onChange} />}
               <SettingsRow
                 label={t('Credentials')}
-                description={t('Replace them after running {cmd} again.', { cmd: 'refract login' })}
+                description={
+                  status.sign_in_here
+                    ? t('Signing out disconnects Refract from this ChatGPT account.')
+                    : t('Replace them after running {cmd} again.', { cmd: 'refract login' })
+                }
               >
-                <Button size="sm" variant="secondary" disabled={busy} onClick={() => input.current?.click()}>
-                  <Upload /> {t('Replace…')}
-                </Button>
+                {!status.sign_in_here && (
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => input.current?.click()}>
+                    <Upload /> {t('Replace…')}
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"
@@ -276,6 +284,18 @@ function AssistantPane({ status, onChange }: Props) {
                   nativeButton={false}
                 >
                   {t('Manage usage')} <ExternalLink />
+                </Button>
+              </SettingsRow>
+            </>
+          ) : status.sign_in_here ? (
+            <>
+              <ChatGPTSignIn onChange={onChange} />
+              <SettingsRow
+                label={t('Credentials file')}
+                description={t('Signed in elsewhere with {cmd}? Upload the file it wrote.', { cmd: 'refract login' })}
+              >
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => input.current?.click()}>
+                  <Upload /> {t('Upload…')}
                 </Button>
               </SettingsRow>
             </>

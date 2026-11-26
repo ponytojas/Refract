@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -40,6 +41,12 @@ func newAIServerDB(t *testing.T, m mode.Mode) (http.Handler, *sql.DB) {
 // from the mode.
 func newAIServerOutbound(t *testing.T, m mode.Mode, publicOnly bool) (http.Handler, *sql.DB) {
 	t.Helper()
+	return newAIServerWith(t, m, func(a *api) { a.publicOnly = publicOnly })
+}
+
+// newAIServerWith is newAIServerDB with the api adjusted by set.
+func newAIServerWith(t *testing.T, m mode.Mode, set func(*api)) (http.Handler, *sql.DB) {
+	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +66,8 @@ func newAIServerOutbound(t *testing.T, m mode.Mode, publicOnly bool) (http.Handl
 		t.Fatal(err)
 	}
 
-	a := &api{base: &siwc.Session{DB: db, Key: key}, mode: m, publicOnly: publicOnly, providers: &providers.Store{DB: db, Key: key}, usage: &usage.Recorder{DB: db}}
+	a := &api{base: &siwc.Session{DB: db, Key: key}, mode: m, providers: &providers.Store{DB: db, Key: key}, usage: &usage.Recorder{DB: db}}
+	set(a)
 	mux := http.NewServeMux()
 	a.routes(&router{mux: mux, acc: &access.Checker{DB: db}})
 	mux.HandleFunc("/api/", http.NotFound) // as in main
@@ -122,6 +130,146 @@ func TestSelfHostKeepsChatGPT(t *testing.T) {
 	var me struct{ Mode string }
 	if call(t, h, "GET", "/api/me", &me); me.Mode != "selfhost" {
 		t.Errorf("me.mode = %q", me.Mode)
+	}
+}
+
+// callLocal is call from a browser on this computer, straight to the server.
+func callLocal(t *testing.T, h http.Handler, method, path string, out any, header ...string) int {
+	t.Helper()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(method, path, strings.NewReader("{}"))
+	r.RemoteAddr, r.Host = "127.0.0.1:50000", "127.0.0.1:8080"
+	for i := 0; i+1 < len(header); i += 2 {
+		r.Header.Set(header[i], header[i+1])
+	}
+	h.ServeHTTP(w, r)
+	if out != nil && w.Code == http.StatusOK {
+		if err := json.Unmarshal(w.Body.Bytes(), out); err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+	}
+	return w.Code
+}
+
+// The in-server ChatGPT sign-in exists only where the server listens on
+// loopback (a.logins set) and the plan is offered; the status says which.
+func TestSignInHereRoutes(t *testing.T) {
+	type status struct {
+		SignInHere bool `json:"sign_in_here"`
+	}
+	for _, c := range []struct {
+		name   string
+		m      mode.Mode
+		logins bool
+		want   bool
+	}{
+		{"loopback", mode.SelfHost, true, true},
+		{"reachable from other computers", mode.SelfHost, false, false},
+		{"hosted service", mode.SaaS, true, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h, _ := newAIServerWith(t, c.m, func(a *api) {
+				if c.logins {
+					a.logins = &siwc.Logins{}
+				}
+			})
+			var st status
+			if callLocal(t, h, "GET", "/api/chatgpt/status", &st); st.SignInHere != c.want {
+				t.Errorf("sign_in_here = %v, want %v", st.SignInHere, c.want)
+			}
+			code := callLocal(t, h, "GET", "/api/chatgpt/login", nil)
+			if want := map[bool]int{true: http.StatusOK, false: http.StatusNotFound}[c.want]; code != want {
+				t.Errorf("GET /api/chatgpt/login = %d, want %d", code, want)
+			}
+		})
+	}
+}
+
+// A loopback listener behind a reverse proxy serves people on other
+// computers: their browser can't reach this computer's callback, so they get
+// the credentials file instead of the in-server sign-in.
+func TestSignInHereOnlyFromThisComputer(t *testing.T) {
+	h, _ := newAIServerWith(t, mode.SelfHost, func(a *api) { a.logins = &siwc.Logins{} })
+	type status struct {
+		SignInHere bool `json:"sign_in_here"`
+	}
+	var st status
+	if callLocal(t, h, "GET", "/api/chatgpt/status", &st); !st.SignInHere {
+		t.Fatal("a browser on this computer should sign in here")
+	}
+	for name, header := range map[string][]string{
+		"forwarded for":  {"X-Forwarded-For", "203.0.113.7"},
+		"forwarded host": {"X-Forwarded-Host", "refract.example.com"},
+		"forwarded":      {"Forwarded", "for=203.0.113.7"},
+		"real ip":        {"X-Real-Ip", "203.0.113.7"},
+	} {
+		st = status{SignInHere: true}
+		if callLocal(t, h, "GET", "/api/chatgpt/status", &st, header...); st.SignInHere {
+			t.Errorf("%s: sign_in_here = true behind a proxy", name)
+		}
+		for _, m := range []string{"POST", "GET", "DELETE"} {
+			if code := callLocal(t, h, m, "/api/chatgpt/login", nil, header...); code != http.StatusForbidden {
+				t.Errorf("%s: %s /api/chatgpt/login = %d, want 403", name, m, code)
+			}
+		}
+	}
+	st = status{SignInHere: true}
+	if call(t, h, "GET", "/api/chatgpt/status", &st); st.SignInHere {
+		t.Error("a request from another address should not sign in here")
+	}
+}
+
+func TestFromThisComputer(t *testing.T) {
+	for _, c := range []struct {
+		remote, host string
+		want         bool
+	}{
+		{"127.0.0.1:5000", "127.0.0.1:8080", true},
+		{"[::1]:5000", "[::1]:8080", true},
+		{"127.0.0.1:5000", "localhost:5173", true},
+		{"127.0.0.1:5000", "refract.localhost", true},
+		{"127.0.0.1:5000", "refract.example.com", false}, // a proxy on this computer passing the public name
+		{"192.168.1.5:5000", "127.0.0.1:8080", false},
+		{"bad", "127.0.0.1:8080", false},
+	} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr, r.Host = c.remote, c.host
+		if got := fromThisComputer(r); got != c.want {
+			t.Errorf("%s → %s: %v, want %v", c.remote, c.host, got, c.want)
+		}
+	}
+}
+
+// Signing out cancels a sign-in still waiting, so it can't store new
+// credentials afterwards.
+func TestSignOutCancelsPendingSignIn(t *testing.T) {
+	revoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(revoke.Close)
+	h, _ := newAIServerWith(t, mode.SelfHost, func(a *api) {
+		a.base.OAuth = &siwc.OAuth{RevokeURL: revoke.URL, HTTP: revoke.Client()}
+		a.logins = &siwc.Logins{Port: -1, AuthorizeURL: "https://auth.invalid/authorize"}
+	})
+	if code := callLocal(t, h, "POST", "/api/chatgpt/login", nil); code != http.StatusOK {
+		t.Fatalf("POST /api/chatgpt/login = %d", code)
+	}
+	var st siwc.LoginState
+	if callLocal(t, h, "GET", "/api/chatgpt/login", &st); st.State != siwc.LoginPending {
+		t.Fatalf("state = %+v, want pending", st)
+	}
+	if code := callLocal(t, h, "POST", "/api/chatgpt/signout", nil); code != http.StatusOK {
+		t.Fatalf("POST /api/chatgpt/signout = %d", code)
+	}
+	if callLocal(t, h, "GET", "/api/chatgpt/login", &st); st.State != siwc.LoginFailed || st.Kind != siwc.FailCancelled {
+		t.Errorf("state after sign-out = %+v, want failed/cancelled", st)
+	}
+}
+
+func TestLoginsOnlyOnLoopback(t *testing.T) {
+	for addr, want := range map[string]bool{"127.0.0.1:8080": true, "[::1]:8080": true, "0.0.0.0:8080": false, "192.168.1.5:8080": false} {
+		a, _ := net.ResolveTCPAddr("tcp", addr)
+		if got := loginsFor(a) != nil; got != want {
+			t.Errorf("%s: in-server sign-in = %v, want %v", addr, got, want)
+		}
 	}
 }
 

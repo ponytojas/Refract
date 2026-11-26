@@ -77,6 +77,9 @@ func runLogin(args []string) error {
 			return writeFileAtomic(*out, raw)
 		},
 	})
+	if errors.Is(err, siwc.ErrOtherAccount) {
+		return fmt.Errorf("%w; use -new to register it separately", err)
+	}
 	if err != nil {
 		return err
 	}
@@ -90,7 +93,7 @@ func runLogin(args []string) error {
 		fmt.Println("ChatGPT plan usage was NOT granted, so Refract cannot make AI requests.\nRun `refract login` again and allow plan usage.")
 		return nil
 	}
-	fmt.Printf("Next:\n  1. Set REFRACT_ALLOWED_SUBJECT=%s on the server.\n  2. Upload %s in Refract (Settings → ChatGPT).\n\nThe file holds live tokens: don't commit or share it.\n", c.Subject, *out)
+	fmt.Printf("Next: upload %s in Refract (Settings → Assistant).\nThe file holds live tokens: don't commit or share it.\n", *out)
 	return nil
 }
 

@@ -468,7 +468,11 @@ Each user connects their own AI in **Settings → Assistant**. Every connected m
 
 ### ChatGPT plan
 
-Refract can use a ChatGPT subscription through "Sign in with ChatGPT", so requests count against your plan instead of an API bill. The sign-in runs on your own computer, because ChatGPT only accepts it from a local address:
+Refract can use a ChatGPT subscription through "Sign in with ChatGPT", so requests count against your plan instead of an API bill. The sign-in runs on your own computer, because ChatGPT only accepts it from a local address.
+
+**Refract on your own computer** (the desktop app, `refract local`, `make dev`, or any server listening on `127.0.0.1` or `::1`): open **Settings → Assistant**, choose **Sign in with ChatGPT** and finish in the browser that opens. Refract waits for ChatGPT on `127.0.0.1:1455` and stores the credential itself; no file is written. One sign-in runs at a time per server, and it stops after 10 minutes or when you cancel it. A server listening on another address, including a container that listens on all its interfaces, doesn't offer the button. Neither does a loopback server reached through a reverse proxy (a request with `X-Forwarded-For`, `X-Forwarded-Host`, `Forwarded` or `X-Real-IP`, or a host name other than `localhost` or a loopback address): people opening it from elsewhere upload a credential file instead. Signing out of ChatGPT cancels a sign-in still waiting.
+
+**Refract on a server:**
 
 1. [Install the CLI](#install-the-cli) on your own computer, or run `make login` from a clone.
 2. Run `refract login` and choose **Continue with ChatGPT** in the browser that opens.
