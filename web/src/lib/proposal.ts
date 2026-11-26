@@ -4,7 +4,7 @@ import { wordDiff, type Op } from './worddiff'
 
 // A quick-action result waiting for accept/reject, shown in place as a word
 // diff: removed text struck through, new text as widgets.
-export type Proposal = { from: number; to: number; text: string; ops: Op[] }
+export type Proposal = { from: number; to: number; text: string; ops: Op[]; owner?: symbol }
 
 export const setProposal = StateEffect.define<Proposal | null>()
 
@@ -57,8 +57,10 @@ export const proposalField = StateField.define<{ p: Proposal; deco: DecorationSe
 
 export const proposal = (state: EditorState) => state.field(proposalField, false)?.p ?? null
 
-export function propose(view: EditorView, from: number, to: number, text: string) {
-  view.dispatch({ effects: setProposal.of({ from, to, text, ops: wordDiff(view.state.sliceDoc(from, to), text) }) })
+export function propose(view: EditorView, from: number, to: number, text: string, owner?: symbol) {
+  view.dispatch({
+    effects: setProposal.of({ from, to, text, ops: wordDiff(view.state.sliceDoc(from, to), text), owner }),
+  })
 }
 
 // Accepting is a normal, undoable edit; the new text stays selected so another action can follow.
