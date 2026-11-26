@@ -9,10 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"slices"
-	"strconv"
 	"sync"
-	"time"
 
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/assistant"
@@ -39,6 +36,7 @@ type api struct {
 	providers *providers.Store // users' API-key providers
 	outbound  *http.Client     // for those providers (see providers.HTTPClient)
 	usage     *usage.Recorder  // what each model call used; nil records nothing
+	admin     *adminAPI
 
 	users sync.Map // user id → *userAI
 }
@@ -87,9 +85,12 @@ func (a *api) metered(kind string) func(context.Context) ai.Provider {
 func (a *api) missing() []string { return append([]string{}, a.missingTools...) }
 
 func (a *api) routes(rt *router) {
+	a.admin.routes(rt)
 	rt.user("GET /api/me", func(w http.ResponseWriter, r *http.Request) {
 		u, _ := auth.UserFrom(r.Context())
-		writeJSON(w, map[string]any{"id": u.ID, "email": u.Email, "can_sign_out": a.canSignOut, "mode": a.mode, "missing_tools": a.missing()})
+		isAdmin, _ := rt.isAdmin(r.Context())
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, map[string]any{"id": u.ID, "email": u.Email, "can_sign_out": a.canSignOut, "mode": a.mode, "missing_tools": a.missing(), "is_admin": isAdmin})
 	})
 	rt.user("GET /api/chatgpt/status", a.status)
 	if a.mode.ChatGPT() { // elsewhere these fall through to a 404
@@ -109,30 +110,20 @@ func (a *api) routes(rt *router) {
 // usageSince is the signed-in account's token usage per model from ?since=
 // (Unix seconds; the client sends the start of its month), most used first.
 func (a *api) usageSince(w http.ResponseWriter, r *http.Request) {
-	since, err := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
-	if err != nil || since < 0 {
-		httpError(w, errors.New("since must be a Unix time in seconds"), http.StatusBadRequest)
+	since, err := usageStart(r.URL.Query().Get("since"))
+	if err != nil {
+		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	type model struct {
-		Model string `json:"model"`
-		usage.Totals
-	}
-	out := []model{}
+	out := []usage.ModelTotals{}
 	if a.usage != nil {
 		u, _ := auth.UserFrom(r.Context())
-		totals, err := a.usage.Since(r.Context(), u.ID, time.Unix(since, 0))
+		out, err = a.usage.Report(r.Context(), u.ID, since)
 		if err != nil {
 			httpError(w, err, http.StatusInternalServerError)
 			return
 		}
-		for m, t := range totals {
-			out = append(out, model{m, t})
-		}
 	}
-	slices.SortFunc(out, func(x, y model) int {
-		return cmp.Or(cmp.Compare(y.InputTokens+y.OutputTokens, x.InputTokens+x.OutputTokens), cmp.Compare(x.Model, y.Model))
-	})
 	writeJSON(w, map[string]any{"models": out})
 }
 

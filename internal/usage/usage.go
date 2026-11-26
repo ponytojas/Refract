@@ -4,9 +4,11 @@
 package usage
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/ponytojas/Refract/internal/ai"
@@ -56,6 +58,27 @@ type Totals struct {
 	CachedTokens    int `json:"cached_tokens"`
 	OutputTokens    int `json:"output_tokens"`
 	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+type ModelTotals struct {
+	Model string `json:"model"`
+	Totals
+}
+
+// Report orders the account's totals by tokens used, most used first.
+func (r *Recorder) Report(ctx context.Context, userID string, since time.Time) ([]ModelTotals, error) {
+	totals, err := r.Since(ctx, userID, since)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ModelTotals, 0, len(totals))
+	for model, t := range totals {
+		out = append(out, ModelTotals{model, t})
+	}
+	slices.SortFunc(out, func(x, y ModelTotals) int {
+		return cmp.Or(cmp.Compare(y.InputTokens+y.OutputTokens, x.InputTokens+x.OutputTokens), cmp.Compare(x.Model, y.Model))
+	})
+	return out, nil
 }
 
 // Since returns a user's totals per model for the calls made at or after since.

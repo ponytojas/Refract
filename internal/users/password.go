@@ -117,15 +117,31 @@ func (s *Service) SetPassword(ctx context.Context, email, pw string) (auth.User,
 	if err != nil {
 		return auth.User{}, err
 	}
-	if _, err := s.DB.ExecContext(ctx, `UPDATE users SET password = ? WHERE id = ?`, h, u.ID); err != nil {
-		return auth.User{}, err
-	}
-	if _, err = s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, u.ID); err != nil {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
 		return u, err
 	}
+	defer tx.Rollback()
+	if err := putPassword(ctx, tx, u.ID, h); err != nil {
+		return u, err
+	}
+	return u, tx.Commit()
+}
+
+func putPassword(ctx context.Context, tx *sql.Tx, id, hash string) error {
+	res, err := tx.ExecContext(ctx, `UPDATE users SET password = ? WHERE id = ?`, hash, id)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return cmp.Or(err, ErrNoAccount)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+		return err
+	}
 	// A link to choose a password is no longer wanted once one was chosen.
-	_, err = s.DB.ExecContext(ctx, `DELETE FROM account_tokens WHERE user_id = ? AND purpose = ?`, u.ID, Reset)
-	return u, err
+	_, err = tx.ExecContext(ctx, `DELETE FROM account_tokens WHERE user_id = ? AND purpose = ?`, id, Reset)
+	return err
 }
 
 // validEmail checks an already normalized address.
@@ -169,7 +185,7 @@ func (s *Service) SignIn(ctx context.Context, email, pw string, c Client) (auth.
 	if testHookPasswordChecked != nil {
 		testHookPasswordChecked(u.ID)
 	}
-	token, ok, err := s.newSession(ctx, u.ID, stored, c)
+	token, ok, err := s.newSession(ctx, u, stored, c)
 	if err != nil {
 		return auth.User{}, "", err
 	}
@@ -358,11 +374,14 @@ func ClientIP(r *http.Request) string {
 
 // SignOut ends every session of a user.
 func (s *Service) SignOut(ctx context.Context, email string) (int64, error) {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE email = ?)`, normEmail(email))
+	acct, err := s.Lookup(ctx, email)
+	if errors.Is(err, ErrNoAccount) {
+		return 0, nil
+	}
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	return s.SignOutAccount(ctx, acct.ID)
 }
 
 // ErrOwnsProjects is returned when an account can't be removed because it still has projects.
@@ -445,11 +464,11 @@ func (s *Service) OwnedCount(ctx context.Context, userID string) (n int, err err
 }
 
 // Remove deletes an account and everything it owns, and returns how many
-// projects went. destroy deletes one project for good, live or in the trash,
-// files included. It stops at the first project it can't delete, leaving the
-// account and the rest in place. Then it removes the account as Delete does,
+// projects went. destroy reserves and deletes the projects, live or in the
+// trash. If deletion fails part way, the account remains and the count says
+// how many projects went. Then it removes the account as Delete does,
 // refusing with ErrOwnsProjects if a project appeared meanwhile.
-func (s *Service) Remove(ctx context.Context, userID string, destroy func(ctx context.Context, projectID string) error) (int, error) {
+func (s *Service) Remove(ctx context.Context, userID string, destroy func(context.Context, []string) (int, error)) (int, error) {
 	acct, err := s.AccountByID(ctx, userID)
 	if err != nil {
 		return 0, err
@@ -458,40 +477,23 @@ func (s *Service) Remove(ctx context.Context, userID string, destroy func(ctx co
 	if err != nil {
 		return 0, err
 	}
-	for i, p := range owned {
-		if err := destroy(ctx, p.ID); err != nil {
-			return i, fmt.Errorf("deleting project %s (%s): %w", p.Name, p.ID, err)
-		}
+	ids := make([]string, 0, len(owned))
+	for _, p := range owned {
+		ids = append(ids, p.ID)
+	}
+	deleted, err := destroy(ctx, ids)
+	if err != nil {
+		return deleted, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return len(owned), err
+		return deleted, err
 	}
 	defer tx.Rollback()
 	if err := deleteAccount(ctx, tx, userID, acct.Email); err != nil {
-		return len(owned), err
+		return deleted, err
 	}
-	return len(owned), tx.Commit()
-}
-
-// Rename changes a user's email, keeping everything they own. Moving from
-// REFRACT_AUTH=none to a sign-in mode is "rename local you@example.com".
-func (s *Service) Rename(ctx context.Context, from, to string) error {
-	from, to = normEmail(from), normEmail(to)
-	if !strings.Contains(to, "@") || strings.ContainsAny(to, " \t\r\n") {
-		return fmt.Errorf("%q is not an email address", to)
-	}
-	if taken, err := s.Exists(ctx, to); err != nil || taken {
-		return cmp.Or(err, fmt.Errorf("%s already has an account", to))
-	}
-	res, err := s.DB.ExecContext(ctx, `UPDATE users SET email = ? WHERE email = ?`, to, from)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("there is no account %q", from)
-	}
-	return nil
+	return deleted, tx.Commit()
 }
 
 // Exists reports whether a user with this email exists.
@@ -503,21 +505,15 @@ func (s *Service) Exists(ctx context.Context, email string) (bool, error) {
 
 // List returns every user's email, and whether they have a password.
 func (s *Service) List(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT email, password != '' FROM users ORDER BY email`)
+	accounts, err := s.AdminAccounts(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := map[string]bool{}
-	for rows.Next() {
-		var email string
-		var has bool
-		if err := rows.Scan(&email, &has); err != nil {
-			return nil, err
-		}
-		out[email] = has
+	out := make(map[string]bool, len(accounts))
+	for _, a := range accounts {
+		out[a.Email] = a.HasPassword
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // sessionID is what the database keeps: a leaked database holds no usable cookies.

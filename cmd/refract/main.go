@@ -63,6 +63,10 @@ Usage:
                      let an account (or everyone) sign in again after too many failed attempts
   refract users remove <email> [--yes]
                      delete an account with its projects, chats and connections
+  refract users admin <email>
+                     grant administrator access to a confirmed account
+  refract users report <email> [since]
+                     show model usage and project disk space as JSON
   refract users list list accounts
   refract version    print the version
 `
@@ -289,6 +293,7 @@ func run(ctx context.Context, opts runOptions) error {
 		svc: &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Limits: projects.DefaultLimits, Key: key, PublicRemotes: publicOnly},
 		tmp: filepath.Join(dataDir, "tmp"),
 	}
+	a.admin = &adminAPI{users: people, projects: pa.svc, usage: a.usage}
 
 	fontResolver := fonts.NewResolver(filepath.Join(dataDir, "font-cache"))
 	fontResolver.Offline = os.Getenv("REFRACT_FONT_DOWNLOADS") == "0"
@@ -361,7 +366,7 @@ func run(ctx context.Context, opts runOptions) error {
 	if login != nil {
 		login.mode, login.public = deployment, base
 		login.signup = signup && mailReady
-		login.destroy = destroyer(pa.svc)
+		login.destroy = pa.svc.DestroyOwnedProjects
 		if mailReady {
 			outbox = mail.NewOutbox(smtp)
 			login.mail = outbox
@@ -373,7 +378,7 @@ func run(ctx context.Context, opts runOptions) error {
 
 	app := http.NewServeMux()
 	// Every API route goes through the route table and its access check.
-	registerRoutes(&router{mux: app, acc: acc}, a, pa, ca, asa, ra, pp, login)
+	registerRoutes(&router{mux: app, acc: acc, disableAdmin: authKind == "none" && !loopbackListener(ln.Addr())}, a, pa, ca, asa, ra, pp, login)
 	app.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	app.Handle("/", web.Handler())
 

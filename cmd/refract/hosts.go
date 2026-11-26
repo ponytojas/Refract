@@ -68,8 +68,7 @@ func newHostPolicy(publicURL, allowed string) (hostPolicy, error) {
 // the address actually bound, not by how REFRACT_ADDR spells it. authKind is
 // REFRACT_AUTH after authMode. warning, when not empty, is for the log.
 func (p *hostPolicy) forListener(addr net.Addr, authKind string) (warning string, err error) {
-	tcp, ok := addr.(*net.TCPAddr)
-	if p.configured || (ok && tcp.IP.IsLoopback()) {
+	if p.configured || loopbackListener(addr) {
 		return "", nil
 	}
 	if authKind == "none" {
@@ -77,6 +76,11 @@ func (p *hostPolicy) forListener(addr net.Addr, authKind string) (warning string
 	}
 	p.any = true
 	return "Refract accepts requests for any host name because it listens on " + addr.String() + " without REFRACT_PUBLIC_URL or REFRACT_ALLOWED_HOSTS. Set one of them to the names people open Refract at, to protect against DNS rebinding.", nil
+}
+
+func loopbackListener(addr net.Addr) bool {
+	tcp, ok := addr.(*net.TCPAddr)
+	return ok && tcp.IP.IsLoopback()
 }
 
 // parseAuthority reads a host with an optional port, as in a Host header or a

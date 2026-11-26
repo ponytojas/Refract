@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -39,12 +40,14 @@ type route struct {
 	Scope   scope
 	Min     access.Role
 	Needs   []access.Need // what the account must have; checked after the role
+	Admin   bool          // this route is visible only to administrators
 }
 
 type router struct {
-	mux    *http.ServeMux
-	acc    *access.Checker
-	routes []route
+	mux          *http.ServeMux
+	acc          *access.Checker
+	routes       []route
+	disableAdmin bool // no authenticated identity on a non-loopback listener
 	// stub, in tests, replaces each handler before it is registered, so the
 	// table can be walked through the real registration and guard.
 	stub func(route) http.HandlerFunc
@@ -52,6 +55,17 @@ type router struct {
 
 func (rt *router) user(pattern string, h http.HandlerFunc, needs ...access.Need) {
 	rt.register(route{Pattern: pattern, Scope: scopeUser, Needs: needs}, h)
+}
+
+func (rt *router) admin(pattern string, h http.HandlerFunc) {
+	rt.register(route{Pattern: pattern, Scope: scopeUser, Admin: true}, h)
+}
+
+func (rt *router) isAdmin(ctx context.Context) (bool, error) {
+	if rt.disableAdmin {
+		return false, nil
+	}
+	return rt.acc.IsAdmin(ctx)
 }
 
 func (rt *router) project(pattern string, min access.Role, h http.HandlerFunc, needs ...access.Need) {
@@ -110,6 +124,10 @@ func (r route) validate() error {
 	if !ok || method == "" || !strings.HasPrefix(path, "/") {
 		return fmt.Errorf("route %q: want \"METHOD /path\"", r.Pattern)
 	}
+	adminPath := path == "/admin" || path == "/api/admin" || strings.HasPrefix(path, "/api/admin/")
+	if r.Admin != adminPath || r.Admin && r.Scope != scopeUser {
+		return fmt.Errorf("route %q must match the administrator scope", r.Pattern)
+	}
 	wildcard := func(seg string) bool { return strings.HasPrefix(seg, "{") && seg != "{$}" }
 	segs := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	if len(segs) >= 3 && segs[0] == "api" {
@@ -144,12 +162,26 @@ func (rt *router) guard(r route, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
 		if _, err := access.UserFrom(ctx); err != nil {
-			if r.Scope == scopeUser {
+			if r.Admin {
+				http.NotFound(w, req)
+			} else if r.Scope == scopeUser {
 				httpError(w, err, http.StatusForbidden)
 			} else {
 				accessError(w, access.ErrNotFound)
 			}
 			return
+		}
+		if r.Admin {
+			ok, err := rt.isAdmin(ctx)
+			if err != nil {
+				accessError(w, err)
+				return
+			}
+			if !ok {
+				http.NotFound(w, req)
+				return
+			}
+			w.Header().Set("Cache-Control", "no-store")
 		}
 		var project string
 		var err error

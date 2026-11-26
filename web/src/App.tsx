@@ -17,6 +17,7 @@ import { FolderOpen, Keyboard, Monitor, Moon, Settings, Sun } from 'lucide-react
 // on its own, so the project list (and sign-in) open quickly.
 const loadWorkspace = () => import('./Workspace')
 const Workspace = lazy(loadWorkspace)
+const Admin = lazy(() => import('./Admin'))
 import { navigate, usePath } from '@/lib/router'
 
 export default function App() {
@@ -122,6 +123,10 @@ export default function App() {
         // Keyed: each project gets a fresh workspace (its autosave writes to its own id).
         <Suspense fallback={null}>
           <Workspace key={path} id={path.slice(3)} status={status} />
+        </Suspense>
+      ) : path === '/admin' ? (
+        <Suspense fallback={null}>
+          <Admin />
         </Suspense>
       ) : (
         <Projects status={status} />

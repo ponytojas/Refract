@@ -181,11 +181,21 @@ func (s *Service) link(ctx context.Context, a Account, p Purpose) (Link, bool, e
 		return Link{}, false, err
 	}
 	defer tx.Rollback()
+	current, err := scanAccount(tx.QueryRowContext(ctx, accountColumns+` WHERE id = ? AND email = ?`, a.ID, a.Email))
+	if errors.Is(err, ErrNoAccount) {
+		return Link{}, false, nil
+	}
+	if err != nil {
+		return Link{}, false, err
+	}
+	if p == Verify && current.Verified {
+		return Link{}, false, nil
+	}
 	tok, err := s.issue(ctx, tx, a.ID, p)
 	if err != nil {
 		return Link{}, false, err
 	}
-	return Link{To: a, Purpose: p, Token: tok}, true, tx.Commit()
+	return Link{To: current, Purpose: p, Token: tok}, true, tx.Commit()
 }
 
 // ResetPassword validates pw and the token (without using it), hashes pw, then
@@ -269,16 +279,19 @@ func (s *Service) VerifyEmail(ctx context.Context, token, signedInAs, pw, ip str
 // an account that was never verified: someone may have signed up for an address
 // that isn't theirs, so everything that account holds goes (see clearUnverified)
 // and it becomes verified. No-op for a verified account.
-func (s *Service) ConfirmByProvider(ctx context.Context, userID string) error {
+func (s *Service) ConfirmByProvider(ctx context.Context, u auth.User) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err := clearUnverified(ctx, tx, userID); err != nil {
+	if _, err := scanAccount(tx.QueryRowContext(ctx, accountColumns+` WHERE id = ? AND email = ?`, u.ID, u.Email)); err != nil {
 		return err
 	}
-	if err := s.markVerified(ctx, tx, userID); err != nil {
+	if err := clearUnverified(ctx, tx, u.ID); err != nil {
+		return err
+	}
+	if err := s.markVerified(ctx, tx, u.ID); err != nil {
 		return err
 	}
 	return tx.Commit()

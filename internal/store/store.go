@@ -123,6 +123,8 @@ var migrations = []string{
 	ALTER TABLE sessions ADD COLUMN user_agent TEXT NOT NULL DEFAULT '';
 	ALTER TABLE sessions ADD COLUMN ip TEXT NOT NULL DEFAULT '';
 	UPDATE sessions SET created_at = expires_at - 2592000, last_seen_at = CAST(strftime('%s', 'now') AS INTEGER)`,
+	// Existing accounts keep their privileges. The operator grants this role explicitly.
+	`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0 CHECK (is_admin IN (0, 1))`,
 }
 
 // Open opens (creating if needed) the database at path and applies pending migrations.

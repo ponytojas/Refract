@@ -169,7 +169,7 @@ func (a *loginAPI) resetPassword(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		httpError(w, err, http.StatusInternalServerError)
 	default:
-		a.signIn(w, r, u.ID)
+		a.signIn(w, r, u)
 	}
 }
 
@@ -197,7 +197,7 @@ func (a *loginAPI) verifyEmail(w http.ResponseWriter, r *http.Request) {
 	case u.ID == signedInAs:
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		a.signIn(w, r, u.ID)
+		a.signIn(w, r, u)
 	}
 }
 
@@ -304,6 +304,9 @@ func (a *loginAPI) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	// Once started, deleting runs to the end even if the client goes away.
 	n, err := a.users.Remove(context.WithoutCancel(r.Context()), u.ID, a.destroy)
 	switch {
+	case err != nil && n > 0:
+		partialAccountRemoval(w, int64(n), err)
+		return
 	case errors.Is(err, users.ErrOwnsProjects):
 		httpError(w, errors.New("a project was created meanwhile: try again"), http.StatusConflict)
 		return
@@ -319,6 +322,15 @@ func (a *loginAPI) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	users.ClearSessionCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 	slog.Info("account deleted", "user", u.ID, "projects", n)
+}
+
+func partialAccountRemoval(w http.ResponseWriter, removed int64, err error) {
+	slog.Warn("account removal stopped after deleting projects", "removed_projects", removed, "err", err)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+		"kind": "account_removal_partial", "message": "some projects were deleted before account removal stopped", "removed_projects": removed,
+	}})
 }
 
 // thenAccount is the only value oidcStart takes for ?then=.

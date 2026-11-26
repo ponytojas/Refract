@@ -23,6 +23,7 @@ import (
 	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/store"
+	"github.com/ponytojas/Refract/internal/usage"
 	"github.com/ponytojas/Refract/internal/users"
 )
 
@@ -63,7 +64,7 @@ func TestMain(m *testing.M) {
 func newAccountEnv(t *testing.T, o envOpts) *accountEnv {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := store.Open(filepath.Join(dir, "t.db"))
+	db, err := store.Open(filepath.Join(dir, "refract.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +72,7 @@ func newAccountEnv(t *testing.T, o envOpts) *accountEnv {
 	people := &users.Service{DB: db, Key: make([]byte, 32)}
 	ps := &projects.Service{DB: db, Dir: filepath.Join(dir, "projects"), Limits: projects.DefaultLimits}
 	e := &accountEnv{t: t, people: people, ps: ps, fake: &mail.Fake{}}
-	e.login = &loginAPI{users: people, mode: mode.SelfHost, signup: o.signup, destroy: destroyer(ps)}
+	e.login = &loginAPI{users: people, mode: mode.SelfHost, signup: o.signup, destroy: ps.DestroyOwnedProjects}
 	if !o.noMail {
 		e.login.public = "https://r.test"
 		e.outbox = mail.NewOutbox(e.fake)
@@ -80,6 +81,8 @@ func newAccountEnv(t *testing.T, o envOpts) *accountEnv {
 	}
 	app := http.NewServeMux()
 	rt := &router{mux: app, acc: &access.Checker{DB: db}}
+	rec := &usage.Recorder{DB: db}
+	(&api{usage: rec, admin: &adminAPI{users: people, projects: ps, usage: rec}}).routes(rt)
 	(&projectsAPI{svc: ps}).routes(rt)
 	e.login.accountRoutes(rt)
 	mux := http.NewServeMux()
@@ -410,9 +413,9 @@ func TestDeleteAccountSurvivesDisconnect(t *testing.T) {
 	reqCtx, cancel := context.WithCancel(as)
 	defer cancel()
 	inner := e.login.destroy
-	e.login.destroy = func(c context.Context, id string) error {
+	e.login.destroy = func(c context.Context, ids []string) (int, error) {
 		cancel() // the client hangs up as the first project goes
-		return inner(c, id)
+		return inner(c, ids)
 	}
 	body, _ := json.Marshal(map[string]string{"password": "correct horse"})
 	r := httptest.NewRequest("POST", "/api/account/delete", bytes.NewReader(body)).WithContext(reqCtx)

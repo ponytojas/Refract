@@ -21,11 +21,11 @@ type loginAPI struct {
 	oidc    *auth.OIDC // nil without OIDC
 	allowed []string   // emails and "@domains" OIDC may create accounts for; empty: existing users only
 
-	mode    mode.Mode                                         // REFRACT_MODE
-	signup  bool                                              // people may create their own account (open sign-up, and mail to confirm it)
-	public  string                                            // REFRACT_PUBLIC_URL, the base of links in emails; "" without
-	mail    *mail.Outbox                                      // nil when the server can't send email
-	destroy func(ctx context.Context, projectID string) error // deletes a project for good, for removing an account
+	mode    mode.Mode                                    // REFRACT_MODE
+	signup  bool                                         // people may create their own account (open sign-up, and mail to confirm it)
+	public  string                                       // REFRACT_PUBLIC_URL, the base of links in emails; "" without
+	mail    *mail.Outbox                                 // nil when the server can't send email
+	destroy func(context.Context, []string) (int, error) // deletes the account's projects
 }
 
 const oidcCookie = "refract_oidc"
@@ -90,8 +90,8 @@ func (a *loginAPI) login(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *loginAPI) signIn(w http.ResponseWriter, r *http.Request, userID string) bool {
-	token, err := a.users.StartSession(r.Context(), userID, users.ClientOf(r))
+func (a *loginAPI) signIn(w http.ResponseWriter, r *http.Request, u auth.User) bool {
+	token, err := a.users.StartSessionFor(r.Context(), u, users.ClientOf(r))
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return false
@@ -168,7 +168,7 @@ func (a *loginAPI) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		fail("failed", err)
 		return
 	}
-	token, err := a.users.StartSession(r.Context(), u.ID, users.ClientOf(r))
+	token, err := a.users.StartSessionFor(r.Context(), u, users.ClientOf(r))
 	if err != nil {
 		fail("failed", err)
 		return
@@ -211,7 +211,7 @@ func (a *loginAPI) admitOIDC(ctx context.Context, email string, verified bool) (
 		if !verified {
 			return auth.User{}, "unverified_email", nil
 		}
-		if err := a.users.ConfirmByProvider(ctx, acct.ID); err != nil {
+		if err := a.users.ConfirmByProvider(ctx, auth.User{ID: acct.ID, Email: acct.Email}); err != nil {
 			return auth.User{}, "", err
 		}
 	}
@@ -236,7 +236,7 @@ func (a *loginAPI) changePassword(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusBadRequest)
 		return
 	}
-	a.signIn(w, r, u.ID)
+	a.signIn(w, r, u)
 }
 
 func kindError(w http.ResponseWriter, status int, kind string, err error) {

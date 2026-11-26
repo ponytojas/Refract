@@ -320,6 +320,12 @@ docker exec refract refract users list
 
 Accounts you add this way count as confirmed: you vouch for the address. People can see and end their own sessions in Settings → Account. To end all of someone's sessions for them (a lost laptop, say), run `refract users signout <email>`. After too many failed sign-ins an account waits 15 minutes; `refract users unlock <email>` lets it in at once. To delete an account with its projects (those in the trash too), chats and connections, run `refract users remove <email>`: it lists what would go, and deletes only when run again with `--yes`. With Cloudflare Access, also remove the person from your Access policy, or they get a new, empty account on their next visit.
 
+Administrators can open **Account administration** from the account menu. They can create accounts, issue new passwords, change email addresses, end Refract sessions, clear lockouts and delete accounts. Changes are logged on the server. Changing an email address ends Refract sessions and invalidates existing account links. Passwords and Refract sessions apply to Refract's built-in sign-in. With Cloudflare Access, continue to manage access and sessions through Cloudflare. Without sign-in, account administration is available only when Refract itself listens on a loopback address.
+
+On a new installation, the first account created by the CLI or a trusted sign-in becomes an administrator if the account list is empty. An open sign-up never grants the role. After upgrading an existing installation, grant the role to the confirmed account you trust with `refract users admin <email>` on the server.
+
+Selecting an account shows its token usage this month and disk space per project, including Git history and projects in the trash. Generated build files are excluded from disk totals. For the same report as JSON, run `refract users report <email> [since]`. Pass a Unix timestamp in seconds to choose when to start counting tokens. The default counts all recorded usage.
+
 ### Sign in with OpenID Connect
 
 With `REFRACT_AUTH=builtin`, an OpenID Connect provider (Google, Microsoft Entra, Keycloak, Authentik, Authelia…) can add a **Continue with …** button next to the password form.
@@ -614,6 +620,8 @@ refract users rename <a> <b>    change an account's email, keeping its data
 refract users signout <email>   end all of an account's sessions
 refract users unlock <email>    clear an account's failed sign-ins and email limit (--all: every account and address)
 refract users remove <email>    delete an account and everything it owns, trash included (asks for --yes)
+refract users admin <email>     grant administrator access to a confirmed account
+refract users report <email> [since]   show model usage and project disk space as JSON
 refract users list              list accounts
 refract version                 print the version
 ```
