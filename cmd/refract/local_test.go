@@ -256,17 +256,15 @@ func TestListenLocal(t *testing.T) {
 	})
 }
 
-func TestLocalRefusesHostedAndTeamSetups(t *testing.T) {
-	for name, v := range map[string]string{"REFRACT_MODE": "saas", "REFRACT_PROFILE": "team"} {
-		err := startLocal(context.Background(), localOptions{
-			getenv:     func(k string) string { return map[string]string{name: v}[k] },
-			defaultDir: t.TempDir(),
-			out:        &bytes.Buffer{},
-			open:       func(string) {},
-		})
-		if err == nil || !strings.Contains(err.Error(), name) {
-			t.Errorf("%s=%s: err = %v", name, v, err)
-		}
+func TestLocalRefusesTeamProfile(t *testing.T) {
+	err := startLocal(context.Background(), localOptions{
+		getenv:     func(k string) string { return map[string]string{"REFRACT_PROFILE": "team"}[k] },
+		defaultDir: t.TempDir(),
+		out:        &bytes.Buffer{},
+		open:       func(string) {},
+	})
+	if err == nil || !strings.Contains(err.Error(), "REFRACT_PROFILE") {
+		t.Errorf("REFRACT_PROFILE=team: err = %v", err)
 	}
 }
 

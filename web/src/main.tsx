@@ -1,7 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import Login from './Login'
-import { setMode } from './lib/mode'
 import { setMissingTools } from './lib/tools'
 import { lang } from './lib/i18n'
 import { flushPending } from './lib/flush'
@@ -28,7 +27,6 @@ fetch('/api/me', { headers: { 'X-Refract': '1', 'X-Refract-Lang': lang } })
     async (r) => {
       if (r.status === 401) return true
       const me = await r.json().catch(() => undefined)
-      setMode(me?.mode)
       setMissingTools(me?.missing_tools)
       return false
     },

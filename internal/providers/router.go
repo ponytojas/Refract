@@ -15,7 +15,7 @@ import (
 // ("anthropic:claude-…") go to that provider with the user's key, the rest to
 // their ChatGPT plan. It implements ai.Provider, so nothing above it changes.
 type Router struct {
-	ChatGPT *ai.SIWC                                    // nil when the ChatGPT plan isn't offered (REFRACT_MODE=saas)
+	ChatGPT *ai.SIWC                                    // optional for callers that only use configured providers
 	Configs func(ctx context.Context) ([]Config, error) // the user's providers
 	HTTP    *http.Client
 

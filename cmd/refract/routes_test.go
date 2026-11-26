@@ -16,7 +16,6 @@ import (
 	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/assistant"
 	"github.com/ponytojas/Refract/internal/auth"
-	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/store"
 )
@@ -82,7 +81,7 @@ const reached = 299
 func table(acc *access.Checker) *router {
 	sentinel := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(reached) })
 	rt := &router{mux: http.NewServeMux(), acc: acc, stub: func(route) http.HandlerFunc { return sentinel }}
-	registerRoutes(rt, &api{mode: mode.SelfHost}, &projectsAPI{}, &compileAPI{}, &assistantAPI{}, &remoteAPI{}, &papersAPI{}, &loginAPI{})
+	registerRoutes(rt, &api{}, &projectsAPI{}, &compileAPI{}, &assistantAPI{}, &remoteAPI{}, &papersAPI{}, &loginAPI{})
 	return rt
 }
 
@@ -106,6 +105,11 @@ func TestRouteTableAccess(t *testing.T) {
 	rt := table(accessDB(t))
 	if len(rt.routes) < 43 {
 		t.Fatalf("only %d routes in the table", len(rt.routes))
+	}
+	for _, pattern := range []string{"POST /api/chatgpt/credentials", "POST /api/chatgpt/signout"} {
+		if _, got := rt.mux.Handler(request(route{Pattern: pattern}, ana)); got != pattern {
+			t.Errorf("ChatGPT route %q is missing", pattern)
+		}
 	}
 	as := func(user string) context.Context {
 		return auth.WithUser(context.Background(), auth.User{ID: user})

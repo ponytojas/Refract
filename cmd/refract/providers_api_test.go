@@ -6,8 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/ponytojas/Refract/internal/mode"
 )
 
 func send(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -40,9 +38,9 @@ func offersOllama(t *testing.T, h http.Handler) bool {
 }
 
 func TestOutboundPublicProvidersMustBePublic(t *testing.T) {
-	h, _ := newAIServerOutbound(t, mode.SelfHost, true)
+	h, _ := newAIServer(t, true)
 	if offersOllama(t, h) {
-		t.Error("the hosted service offers Ollama")
+		t.Error("REFRACT_OUTBOUND=public offers Ollama")
 	}
 	for _, body := range []string{
 		`{"kind":"ollama"}`,
@@ -59,21 +57,13 @@ func TestOutboundPublicProvidersMustBePublic(t *testing.T) {
 	}
 }
 
-// REFRACT_MODE=saas no longer decides the outbound policy.
-func TestSaaSModeDoesNotRestrictOutbound(t *testing.T) {
-	h, _ := newAIServerOutbound(t, mode.SaaS, false)
-	if !offersOllama(t, h) {
-		t.Error("REFRACT_OUTBOUND=any hides Ollama in saas mode")
-	}
-}
-
 func TestOutboundAnyKeepsLocalModels(t *testing.T) {
-	h, _ := newAIServerOutbound(t, mode.SelfHost, false)
+	h, _ := newAIServer(t, false)
 	if w := send(t, h, "PUT", "/api/providers/lan", `{"kind":"compat","base_url":"http://10.0.0.5:8000/v1"}`); w.Code != http.StatusOK {
 		t.Errorf("private http base URL: %d %s", w.Code, w.Body)
 	}
 	if !offersOllama(t, h) {
-		t.Error("self-hosted doesn't offer Ollama")
+		t.Error("REFRACT_OUTBOUND=any doesn't offer Ollama")
 	}
 	if w := send(t, h, "PUT", "/api/providers/local", `{"kind":"ollama"}`); w.Code != http.StatusOK {
 		t.Errorf("saving Ollama: %d %s", w.Code, w.Body)

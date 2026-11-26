@@ -403,7 +403,7 @@ public final class ServerSupervisor {
     public static func serverEnvironment(from env: [String: String]) -> [String: String] {
         let blocked: Set = [
             "REFRACT_DATA_DIR", "REFRACT_SECRET_KEY", "REFRACT_SECRET_KEY_FILE",
-            "REFRACT_AUTH", "REFRACT_MODE", "REFRACT_PROFILE", "REFRACT_EMBED_TOKEN", "REFRACT_ADDR",
+            "REFRACT_AUTH", "REFRACT_PROFILE", "REFRACT_EMBED_TOKEN", "REFRACT_ADDR",
         ]
         // REFRACT_APP_* configure the app itself, not the server.
         return env.filter { !blocked.contains($0.key) && !$0.key.hasPrefix("REFRACT_APP_") }

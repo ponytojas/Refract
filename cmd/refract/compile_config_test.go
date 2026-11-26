@@ -32,3 +32,23 @@ func TestParseCompileConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestCloudflareCompileWarning(t *testing.T) {
+	for _, tc := range []struct {
+		auth  string
+		total time.Duration
+		want  bool
+	}{
+		{"cloudflare", 94 * time.Second, false},
+		{"cloudflare", 95 * time.Second, false},
+		{"cloudflare", 96 * time.Second, true},
+		{"builtin", 96 * time.Second, false},
+		{"none", 96 * time.Second, false},
+	} {
+		cfg := compileConfig{maxWait: 20 * time.Second, timeout: tc.total - 20*time.Second}
+		warning := cloudflareCompileWarning(tc.auth, cfg)
+		if !tc.want && warning != "" || tc.want && !strings.Contains(warning, "Cloudflare cuts requests with no response at about 100s") {
+			t.Errorf("auth %q, total %s: warning = %q, want warning: %t", tc.auth, tc.total, warning, tc.want)
+		}
+	}
+}

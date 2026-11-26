@@ -54,7 +54,6 @@ import { setTheme, useTheme, type Theme } from '@/lib/theme'
 import PlanBadge from './PlanBadge'
 import { useMe } from '@/components/AccountMenu'
 import { useAccount } from '@/components/useAccount'
-import { chatgptOffered } from '@/lib/mode'
 
 type Props = { status: ChatGPTStatus | null; onChange: (s: ChatGPTStatus) => void }
 
@@ -66,11 +65,7 @@ export default function SettingsDialog({ status, onChange }: Props) {
     <Dialog open={section !== null} onOpenChange={(o) => !o && openSettings(null)}>
       <DialogContent className="h-[min(640px,calc(100dvh-2rem))] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-[860px]">
         <DialogTitle className="sr-only">{t('Settings')}</DialogTitle>
-        <DialogDescription className="sr-only">
-          {chatgptOffered()
-            ? t('Appearance, editor and ChatGPT settings')
-            : t('Appearance, editor and assistant settings')}
-        </DialogDescription>
+        <DialogDescription className="sr-only">{t('Appearance, editor and ChatGPT settings')}</DialogDescription>
         <SettingsPanel value={section ?? 'general'} onValueChange={(v) => openSettings(v)} className="h-full">
           <SettingsNav title={t('Settings')} className="bg-foreground/[0.025]">
             <SettingsNavItem value="general" icon={<SunMoon />}>
@@ -218,86 +213,78 @@ function AssistantPane({ status, onChange }: Props) {
   }
 
   const s = status?.status
-  // The hosted service offers no ChatGPT plan (REFRACT_MODE=saas): the server has no routes for it.
-  const chatgpt = chatgptOffered()
   return (
     <SettingsPane
       value="assistant"
       title={t('Assistant')}
-      description={
-        chatgpt
-          ? t('Refract uses your ChatGPT plan or your own API keys for AI requests.')
-          : t('Refract uses your own API keys for AI requests. To use your ChatGPT plan, self-host Refract.')
-      }
+      description={t('Refract uses your ChatGPT plan or your own API keys for AI requests.')}
     >
-      {chatgpt && (
-        <SettingsGroup title={t('ChatGPT account')}>
-          {!status ? (
-            <SettingsRow label={t('Loading…')} />
-          ) : s?.signed_in ? (
-            <>
-              <SettingsRow
-                label={
-                  <span className="flex items-center gap-2">
-                    <CheckCircle2 className="size-4 text-success" /> {s.email}
-                  </span>
-                }
-                description={
-                  s.limit_reached
-                    ? describe({ kind: 'usage_limit', message: '' })
-                    : s.plan_granted
-                      ? t('Signed in. Requests count against your ChatGPT plan.')
-                      : describe({ kind: 'plan_not_granted', message: '' })
-                }
-              >
-                {s.plan_granted && <PlanBadge manageUsage={status.manage_usage} />}
-              </SettingsRow>
-              <SettingsRow
-                label={t('Credentials')}
-                description={t('Replace them after running {cmd} again.', { cmd: 'refract login' })}
-              >
-                <Button size="sm" variant="secondary" disabled={busy} onClick={() => input.current?.click()}>
-                  <Upload /> {t('Replace…')}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => run(() => api('/api/chatgpt/signout', { method: 'POST' }), t('Signed out'))}
-                >
-                  {t('Sign out')}
-                </Button>
-              </SettingsRow>
-              <SettingsRow label={t('Usage')} description={t('Limits and remaining usage are managed by ChatGPT.')}>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  render={<a href={status.manage_usage} target="_blank" rel="noreferrer" />}
-                  nativeButton={false}
-                >
-                  {t('Manage usage')} <ExternalLink />
-                </Button>
-              </SettingsRow>
-            </>
-          ) : (
+      <SettingsGroup title={t('ChatGPT account')}>
+        {!status ? (
+          <SettingsRow label={t('Loading…')} />
+        ) : s?.signed_in ? (
+          <>
             <SettingsRow
-              stacked
-              label={t('Not connected')}
+              label={
+                <span className="flex items-center gap-2">
+                  <CheckCircle2 className="size-4 text-success" /> {s.email}
+                </span>
+              }
               description={
-                <>
-                  {t('Sign-in happens on your own computer: run')}{' '}
-                  <code className="rounded bg-muted px-1 py-0.5 text-foreground">refract login</code>, {t('choose')}{' '}
-                  <em>Continue with ChatGPT</em>, {t('then upload the credentials file it writes.')}
-                </>
+                s.limit_reached
+                  ? describe({ kind: 'usage_limit', message: '' })
+                  : s.plan_granted
+                    ? t('Signed in. Requests count against your ChatGPT plan.')
+                    : describe({ kind: 'plan_not_granted', message: '' })
               }
             >
-              <Button size="sm" disabled={busy} onClick={() => input.current?.click()}>
-                <Upload /> {t('Upload credentials…')}
+              {s.plan_granted && <PlanBadge manageUsage={status.manage_usage} />}
+            </SettingsRow>
+            <SettingsRow
+              label={t('Credentials')}
+              description={t('Replace them after running {cmd} again.', { cmd: 'refract login' })}
+            >
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => input.current?.click()}>
+                <Upload /> {t('Replace…')}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => run(() => api('/api/chatgpt/signout', { method: 'POST' }), t('Signed out'))}
+              >
+                {t('Sign out')}
               </Button>
             </SettingsRow>
-          )}
-        </SettingsGroup>
-      )}
+            <SettingsRow label={t('Usage')} description={t('Limits and remaining usage are managed by ChatGPT.')}>
+              <Button
+                size="sm"
+                variant="ghost"
+                render={<a href={status.manage_usage} target="_blank" rel="noreferrer" />}
+                nativeButton={false}
+              >
+                {t('Manage usage')} <ExternalLink />
+              </Button>
+            </SettingsRow>
+          </>
+        ) : (
+          <SettingsRow
+            stacked
+            label={t('Not connected')}
+            description={
+              <>
+                {t('Sign-in happens on your own computer: run')}{' '}
+                <code className="rounded bg-muted px-1 py-0.5 text-foreground">refract login</code>, {t('choose')}{' '}
+                <em>Continue with ChatGPT</em>, {t('then upload the credentials file it writes.')}
+              </>
+            }
+          >
+            <Button size="sm" disabled={busy} onClick={() => input.current?.click()}>
+              <Upload /> {t('Upload credentials…')}
+            </Button>
+          </SettingsRow>
+        )}
+      </SettingsGroup>
       <Providers onChange={() => api<ChatGPTStatus>('/api/chatgpt/status').then(onChange, () => {})} />
       <Usage />
       <SettingsGroup title={t('Chat')}>
@@ -824,12 +811,7 @@ function Providers({ onChange }: { onChange: () => void }) {
   return (
     <SettingsGroup
       title={t('API providers')}
-      description={
-        // A local model server runs on the user's computer, which the hosted service can't reach.
-        chatgptOffered()
-          ? t('Use your own API keys or a local model server. Their models appear in the model picker.')
-          : t('Use your own API keys. Their models appear in the model picker.')
-      }
+      description={t('Models from configured providers appear in the model picker.')}
     >
       {state.configured.map((c) => (
         <SettingsRow

@@ -28,7 +28,6 @@ import (
 	"github.com/ponytojas/Refract/internal/fonts"
 	"github.com/ponytojas/Refract/internal/github"
 	"github.com/ponytojas/Refract/internal/mail"
-	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/openalex"
 	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/providers"
@@ -166,10 +165,6 @@ func run(ctx context.Context, opts runOptions) error {
 		logAddr = listenAddr(os.Getenv) // logged as configured, as before
 		listen = func() (net.Listener, error) { return net.Listen("tcp", logAddr) }
 	}
-	deployment, err := mode.Parse(os.Getenv("REFRACT_MODE"))
-	if err != nil {
-		return err
-	}
 	publicOnly, err := parseOutbound(os.Getenv("REFRACT_OUTBOUND"))
 	if err != nil {
 		return err
@@ -195,10 +190,10 @@ func run(ctx context.Context, opts runOptions) error {
 	if w := unisolatedWarning(prof, authKind, cfg.sandbox); w != "" {
 		slog.Warn(w)
 	}
-	if err := checkDeployment(deployment, authKind, os.Getenv("REFRACT_PUBLIC_URL"), cfg.sandbox, cfg.maxWait, cfg.timeout); err != nil {
-		return err
+	if w := cloudflareCompileWarning(authKind, cfg); w != "" {
+		slog.Warn(w)
 	}
-	signup, err := parseSignup(deployment, os.Getenv("REFRACT_SIGNUP"))
+	signup, err := parseSignup(os.Getenv("REFRACT_SIGNUP"))
 	if err != nil {
 		return err
 	}
@@ -208,9 +203,6 @@ func run(ctx context.Context, opts runOptions) error {
 	}
 	base, _ := publicBase(os.Getenv("REFRACT_PUBLIC_URL"))
 	mailReady := smtp != nil && base != ""
-	if err := checkSignup(deployment, authKind, signup, mailReady); err != nil {
-		return err
-	}
 	hosts, err := newHostPolicy(os.Getenv("REFRACT_PUBLIC_URL"), os.Getenv("REFRACT_ALLOWED_HOSTS"))
 	if err != nil {
 		return err
@@ -260,12 +252,7 @@ func run(ctx context.Context, opts runOptions) error {
 		slog.Warn("REFRACT_AUTH=none: the web UI is unprotected; only use this locally or behind your own auth")
 	}
 
-	// The session also keeps per-user settings (the welcome flag), so it
-	// exists in every mode; it only talks to OpenAI where the plan is offered.
-	session := &siwc.Session{DB: db, Key: key, AllowedSubject: os.Getenv("REFRACT_ALLOWED_SUBJECT")}
-	if deployment.ChatGPT() {
-		session.OAuth = siwc.NewOAuth(ctx)
-	}
+	session := &siwc.Session{DB: db, Key: key, OAuth: siwc.NewOAuth(ctx), AllowedSubject: os.Getenv("REFRACT_ALLOWED_SUBJECT")}
 	if _, err := session.HostID(ctx); err != nil {
 		return err
 	}
@@ -273,7 +260,6 @@ func run(ctx context.Context, opts runOptions) error {
 	a := &api{
 		missingTools: missing,
 		base:         session,
-		mode:         deployment,
 		publicOnly:   publicOnly,
 		model:        os.Getenv("REFRACT_MODEL_AGENT"),
 		quick:        os.Getenv("REFRACT_MODEL_QUICK"),
@@ -359,7 +345,7 @@ func run(ctx context.Context, opts runOptions) error {
 	// Account lifecycle (A3): sign-up, confirmation, reset and self-delete.
 	var outbox *mail.Outbox
 	if login != nil {
-		login.mode, login.public = deployment, base
+		login.public = base
 		login.signup = signup && mailReady
 		login.destroy = destroyer(pa.svc)
 		if mailReady {

@@ -30,7 +30,6 @@ import { cn } from '@/lib/utils'
 import { lang, t } from '@/lib/i18n'
 import { allowanceLeft, compact, modelLabel, ownUsage, renewalDate, totalTokens } from '@/lib/usage'
 import { useMonthUsage } from './useMonthUsage'
-import { chatgptOffered } from '@/lib/mode'
 import { reloadTo } from '@/lib/router'
 
 const themes: { value: Theme; label: string; icon: typeof Sun }[] = [
@@ -55,9 +54,8 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
   const { theme } = useTheme()
   const me = useMe()
   // With several users, the chip shows who is signed in to Refract; alone, the ChatGPT account.
-  const chatgpt = chatgptOffered()
   const local = !me || me.email === 'local'
-  const email = !local ? me.email : chatgpt && status?.status.signed_in ? status.status.email : undefined
+  const email = !local ? me.email : status?.status.signed_in ? status.status.email : undefined
   const [open, setOpen] = useState(false)
   const { usage, allowance, error, retry, models } = useMonthUsage(open)
   const own = usage && ownUsage(usage)
@@ -75,17 +73,14 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
         {!compact && (
           <span className="min-w-0">
             <span className="flex items-center gap-1 truncate text-sm font-medium">
-              {email ?? (chatgpt ? t('Not signed in') : t('Local account'))}{' '}
-              <ChevronsUpDown className="size-3 shrink-0 text-muted-foreground" />
+              {email ?? t('Not signed in')} <ChevronsUpDown className="size-3 shrink-0 text-muted-foreground" />
             </span>
             <span className="block truncate text-xs text-muted-foreground">
               {status?.status.plan_granted
                 ? t('Using ChatGPT plan')
                 : status?.ai_ready
                   ? t('Using API providers')
-                  : chatgpt
-                    ? t('ChatGPT not connected')
-                    : t('No AI connected')}
+                  : t('ChatGPT not connected')}
             </span>
           </span>
         )}

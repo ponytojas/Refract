@@ -10,7 +10,6 @@ import (
 
 	"github.com/ponytojas/Refract/internal/auth"
 	"github.com/ponytojas/Refract/internal/mail"
-	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/users"
 )
 
@@ -21,7 +20,6 @@ type loginAPI struct {
 	oidc    *auth.OIDC // nil without OIDC
 	allowed []string   // emails and "@domains" OIDC may create accounts for; empty: existing users only
 
-	mode    mode.Mode                                         // REFRACT_MODE
 	signup  bool                                              // people may create their own account (open sign-up, and mail to confirm it)
 	public  string                                            // REFRACT_PUBLIC_URL, the base of links in emails; "" without
 	mail    *mail.Outbox                                      // nil when the server can't send email
