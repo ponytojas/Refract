@@ -23,7 +23,7 @@ Architecture: $arch
 Maintainer: Daniel Villalobos <ponytojas@users.noreply.github.com>
 Section: utils
 Priority: optional
-Homepage: https://github.com/ponytojas/Refract
+Homepage: https://github.com/Use-Refract/Refract
 Description: CLI for the Refract LaTeX workspace
  Sign in to ChatGPT on this computer with refract login, then upload
  the credential file to your Refract instance. No local server or

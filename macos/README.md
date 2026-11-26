@@ -273,7 +273,7 @@ for the same answer instead of asking twice.
   every Mach-O instead.
 - **One feed per architecture, on GitHub Releases.** Sparkle doesn't choose by architecture and the apps
   are per architecture (see "One app per architecture"), so each build is baked with its own feed,
-  `https://github.com/ponytojas/Refract/releases/latest/download/appcast-<arch>.xml` with `<arch>` as
+  `https://github.com/Use-Refract/Refract/releases/latest/download/appcast-<arch>.xml` with `<arch>` as
   everywhere else in this repository (`arm64`, `amd64`). Releases rather than Pages: the feed is published
   by the same job that publishes the archive it points to (nothing to keep in step, no second deployment
   or token), `releases/latest/download/` is a stable URL, and the only cost is that a release flagged

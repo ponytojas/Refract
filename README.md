@@ -8,12 +8,12 @@ Edit, compile and read the PDF side by side, cite real papers, and keep every ve
 </p>
 
 <p align="center">
-<a href="https://github.com/ponytojas/Refract/releases/latest"><img src="https://img.shields.io/github/v/release/ponytojas/Refract" alt="Latest release"></a>
-<a href="https://github.com/ponytojas/Refract/pkgs/container/refract"><img src="https://img.shields.io/badge/docker-ghcr.io%2Fponytojas%2Frefract-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
-<a href="https://github.com/ponytojas/Refract/actions/workflows/ci.yml"><img src="https://github.com/ponytojas/Refract/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-<a href="https://github.com/ponytojas/Refract/actions/workflows/security.yml"><img src="https://github.com/ponytojas/Refract/actions/workflows/security.yml/badge.svg" alt="Security"></a>
-<a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/ponytojas/Refract" alt="Go version"></a>
-<a href="LICENSE"><img src="https://img.shields.io/github/license/ponytojas/Refract" alt="MIT License"></a>
+<a href="https://github.com/Use-Refract/Refract/releases/latest"><img src="https://img.shields.io/github/v/release/Use-Refract/Refract" alt="Latest release"></a>
+<a href="https://github.com/Use-Refract/Refract/pkgs/container/refract"><img src="https://img.shields.io/badge/docker-ghcr.io%2Fuse-refract%2Frefract-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
+<a href="https://github.com/Use-Refract/Refract/actions/workflows/ci.yml"><img src="https://github.com/Use-Refract/Refract/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://github.com/Use-Refract/Refract/actions/workflows/security.yml"><img src="https://github.com/Use-Refract/Refract/actions/workflows/security.yml/badge.svg" alt="Security"></a>
+<a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/Use-Refract/Refract" alt="Go version"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/Use-Refract/Refract" alt="MIT License"></a>
 </p>
 
 <p align="center">
@@ -204,6 +204,8 @@ The seed is used only by `refract local`; the server (`refract` without `local`)
 
 You need [Docker](https://docs.docker.com/get-docker/).
 
+The image is `ghcr.io/use-refract/refract` from the release after v0.2.0 on. Versions up to v0.2.0 were published as `ghcr.io/ponytojas/refract`, where they stay.
+
 ```sh
 openssl rand -base64 32 > refract.key && chmod 600 refract.key   # once: keep this file
 docker run -d --name refract -p 127.0.0.1:8080:8080 -v refract-data:/data \
@@ -211,7 +213,7 @@ docker run -d --name refract -p 127.0.0.1:8080:8080 -v refract-data:/data \
   -e REFRACT_AUTH=none \
   -e REFRACT_SECRET_KEY="$(openssl rand -base64 32)" \
   -e REFRACT_AUTH=none -e REFRACT_ALLOWED_HOSTS=localhost \
-  ghcr.io/ponytojas/refract
+  ghcr.io/use-refract/refract
 ```
 
 The key encrypts the credentials you'll save (AI keys, git tokens), so use the same `refract.key` whenever you start the container again: with another key they can't be read back.
@@ -232,7 +234,7 @@ docker run -d --name refract --restart unless-stopped --stop-timeout 30 \
   -e REFRACT_SECRET_KEY="$(cat refract.key)" \
   -e REFRACT_AUTH=builtin \
   -e REFRACT_PUBLIC_URL=https://refract.example.com \
-  ghcr.io/ponytojas/refract:0.2
+  ghcr.io/use-refract/refract:0.2
 ```
 
 `refract.key` holds the secret key: create it once with `openssl rand -base64 32 > refract.key && chmod 600 refract.key`, and keep it with your backups.
@@ -253,7 +255,7 @@ The sandbox has no network, so Tectonic needs the whole TeX bundle on disk (abou
 ```sh
 # 1. The offline TeX bundle, into its own volume (downloads 2.7 GB).
 docker run --rm -v refract-tex:/opt/refract/tex --entrypoint refract-prepare-bundle \
-  ghcr.io/ponytojas/refract:0.2 /opt/refract/tex
+  ghcr.io/use-refract/refract:0.2 /opt/refract/tex
 
 # 2. Refract, with the bundle read-only and the options bubblewrap needs.
 docker run -d --name refract --restart unless-stopped --stop-timeout 30 \
@@ -262,7 +264,7 @@ docker run -d --name refract --restart unless-stopped --stop-timeout 30 \
   -e REFRACT_SECRET_KEY="$(cat refract.key)" \
   -e REFRACT_PROFILE=team -e REFRACT_AUTH=builtin \
   -e REFRACT_TECTONIC_BUNDLE=/opt/refract/tex/bundle -e TECTONIC_CACHE_DIR=/opt/refract/tex/cache \
-  ghcr.io/ponytojas/refract:0.2
+  ghcr.io/use-refract/refract:0.2
 ```
 
 Then create the accounts (`docker exec refract refract users add <email>`), put it [behind a reverse proxy](#behind-a-reverse-proxy) with https, and [back it up](#data-backups-and-upgrades) with the key. When you upgrade to an image with another Tectonic or bundle, prepare a new volume.
@@ -425,7 +427,7 @@ Everything lives in the `/data` volume:
 
 To back up, stop the container, copy the volume, and keep `REFRACT_SECRET_KEY` with the copy.
 
-To upgrade, pull the new image (`docker pull ghcr.io/ponytojas/refract:0.2`, or a newer version's tag) and start a new container on the same volume. Database changes are applied automatically at startup.
+To upgrade, pull the new image (`docker pull ghcr.io/use-refract/refract:0.2`, or a newer version's tag) and start a new container on the same volume. Database changes are applied automatically at startup.
 
 To go back to an older version after an upgrade:
 
@@ -479,13 +481,13 @@ The CLI lets you run `refract login` on your computer and upload the resulting c
 **macOS (Apple Silicon or Intel):**
 
 ```sh
-brew install ponytojas/tap/refract
+brew install use-refract/tap/refract
 refract login
 ```
 
-Update with `brew update` followed by `brew upgrade ponytojas/tap/refract`.
+Update with `brew update` followed by `brew upgrade use-refract/tap/refract`.
 
-**Debian / Ubuntu:** download the `.deb` for your architecture (`amd64` or `arm64`) from [Releases](https://github.com/ponytojas/Refract/releases). Packages are available starting with v0.1.2. For example, from the download directory:
+**Debian / Ubuntu:** download the `.deb` for your architecture (`amd64` or `arm64`) from [Releases](https://github.com/Use-Refract/Refract/releases). Packages are available starting with v0.1.2. For example, from the download directory:
 
 ```sh
 sudo apt install ./refract_0.1.2_amd64.deb
@@ -494,7 +496,7 @@ refract login
 
 Replace the version and architecture with those of your download. Install a newer `.deb` the same way to update; there is no Refract APT repository. On Linux, login opens a browser with `xdg-open` if available. Use `refract login --no-browser` to open the printed URL yourself on the same computer.
 
-**Windows and other Linux distributions:** download the `.zip` or `.tar.gz` for your system from [Releases](https://github.com/ponytojas/Refract/releases), extract it and run `refract.exe login` (Windows) or `./refract login` (Linux) from the extracted directory. You can also place the executable in a directory on your `PATH`.
+**Windows and other Linux distributions:** download the `.zip` or `.tar.gz` for your system from [Releases](https://github.com/Use-Refract/Refract/releases), extract it and run `refract.exe login` (Windows) or `./refract login` (Linux) from the extracted directory. You can also place the executable in a directory on your `PATH`.
 
 Each new release includes WinGet manifests for the Windows zip archives. These are prepared for submission to Microsoft's community repository; `winget install --id ponytojas.Refract --exact` becomes available after Microsoft accepts a submission. See [packaging maintenance](packaging/README.md) for validation and publication.
 

@@ -280,22 +280,22 @@ OAuth sign-in itself remains an interactive user step and is not exercised by CI
 
 ## Homebrew
 
-The tap is [ponytojas/homebrew-tap](https://github.com/ponytojas/homebrew-tap).
+The tap is [Use-Refract/homebrew-tap](https://github.com/Use-Refract/homebrew-tap).
 Copy the generated `homebrew/refract.rb` to `Formula/refract.rb` in that repository.
 It uses the existing macOS binaries; neither Go nor Node is needed to install.
 Validate on macOS before pushing the tap update:
 
 ```sh
 ruby -c Formula/refract.rb
-brew install ponytojas/tap/refract
-brew test ponytojas/tap/refract
+brew install use-refract/tap/refract
+brew test use-refract/tap/refract
 ```
 
 For automatic updates after stable releases, configure these in the **Refract**
 repository's GitHub Actions settings:
 
 - Secret `HOMEBREW_TAP_TOKEN`: a fine-grained token restricted to
-  `ponytojas/homebrew-tap`, with **Contents: read and write**. Enter it directly
+  `Use-Refract/homebrew-tap`, with **Contents: read and write**. Enter it directly
   in GitHub's settings, not in a shell command or a committed file.
 - Variable `HOMEBREW_TAP_ENABLED`: `true`, after adding the secret.
 

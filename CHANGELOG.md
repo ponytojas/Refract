@@ -18,6 +18,7 @@ Notable changes to Refract. The format follows [Keep a Changelog](https://keepac
 
 ### Changed
 
+- Refract moved to the [Use-Refract](https://github.com/Use-Refract) organization: the repository is `Use-Refract/Refract`, and the Docker image is published as `ghcr.io/use-refract/refract` (images up to v0.2.0 stay at `ghcr.io/ponytojas/refract`). The macOS app looks for updates in the new repository; old links redirect. The Homebrew tap moved too: `brew install use-refract/tap/refract` (taps added as `ponytojas/tap` keep updating through GitHub's redirect).
 - `refract login` points to **Settings → Assistant** and no longer tells you to set `REFRACT_ALLOWED_SUBJECT`, which stays optional. When plan usage isn't granted, the app says to sign in again instead of naming the command.
 - Sign in with ChatGPT is stricter: the sign-in address no longer carries a token, token responses and refreshed ID tokens are verified (a rotation cut short by a restart or a key-server outage resumes without a new login), the local callback ignores stray or malformed requests, a failed code exchange reuses the issued registration, sign-out retries revocation once, and ChatGPT requests don't follow redirects or retry a usage limit.
 - A failed database upgrade now says that nothing was changed and where the copy from before the upgrade is (`refract.db.pre-upgrade`).
@@ -119,7 +120,7 @@ The first release: a self-hosted LaTeX workspace with an AI assistant.
 
 - LaTeX editor with tabs, autosave and syntax highlighting.
 - Compilation with Tectonic, which fetches the packages a document needs; errors and warnings listed with file and line, each with **Fix with AI**.
-- Named `fontspec` families (`\setmainfont{Open Sans}`) work without changing the document: Refract uses the project's own font files, the TeX bundle's Latin Modern and TeX Gyre, or downloads the family from Google Fonts (`REFRACT_FONT_DOWNLOADS=0` turns downloads off). By [Lorena Jimenez](https://github.com/Lorena-J) in [#1](https://github.com/ponytojas/Refract/pull/1).
+- Named `fontspec` families (`\setmainfont{Open Sans}`) work without changing the document: Refract uses the project's own font files, the TeX bundle's Latin Modern and TeX Gyre, or downloads the family from Google Fonts (`REFRACT_FONT_DOWNLOADS=0` turns downloads off). By [Lorena Jimenez](https://github.com/Lorena-J) in [#1](https://github.com/Use-Refract/Refract/pull/1).
 - PDF preview with SyncTeX in both directions (<kbd>⌘J</kbd>, and <kbd>⌘</kbd>-click in the PDF), and a right-click menu in the PDF.
 - Command palette (<kbd>⌘K</kbd>) and a shortcut overlay.
 - English and Spanish interface, light and dark themes, installable as an app from the browser.
@@ -160,8 +161,8 @@ The first release: a self-hosted LaTeX workspace with an AI assistant.
 - `refract` binaries for macOS, Linux and Windows (amd64 and arm64).
 - A Docker image for amd64 and arm64 on GitHub Container Registry, with Tectonic and SyncTeX included.
 
-[Unreleased]: https://github.com/ponytojas/Refract/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/ponytojas/Refract/compare/v0.1.2...v0.2.0
-[0.1.2]: https://github.com/ponytojas/Refract/releases/tag/v0.1.2
-[0.1.1]: https://github.com/ponytojas/Refract/releases/tag/v0.1.1
-[0.1.0]: https://github.com/ponytojas/Refract/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Use-Refract/Refract/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Use-Refract/Refract/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/Use-Refract/Refract/releases/tag/v0.1.2
+[0.1.1]: https://github.com/Use-Refract/Refract/releases/tag/v0.1.1
+[0.1.0]: https://github.com/Use-Refract/Refract/releases/tag/v0.1.0
