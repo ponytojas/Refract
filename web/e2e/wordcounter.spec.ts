@@ -612,3 +612,31 @@ test('a right-click selection shows no quick actions toolbar, a keyboard selecti
   await page.keyboard.press('Shift+ArrowRight')
   await expect(toolbar).toBeVisible()
 })
+
+test('Ask the assistant… from the context menu opens the instruction field for a right-click selection', async ({
+  page,
+  request,
+}) => {
+  await openProject(page, request, true)
+  const word = { position: { x: 10, y: 8 } }
+  const line = page.locator('.cm-line').filter({ hasText: 'One two three' })
+  await line.dblclick(word)
+  await line.click({ button: 'right', ...word })
+  await page.getByRole('menuitem', { name: 'Ask the assistant…', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Instruction' })).toBeVisible()
+})
+
+test('selecting the right-clicked word again shows the quick actions toolbar', async ({ page, request }) => {
+  await openProject(page, request, true)
+  const toolbar = page.getByRole('toolbar', { name: 'Quick actions' })
+  const word = { position: { x: 10, y: 8 } }
+  const line = page.locator('.cm-line').filter({ hasText: 'One two three' })
+  await line.dblclick(word)
+  await line.click({ button: 'right', ...word })
+  await expect(page.getByRole('menuitem', { name: 'Word limit…', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(toolbar).toHaveCount(0)
+  await page.keyboard.press('End')
+  await line.dblclick(word)
+  await expect(toolbar).toBeVisible()
+})

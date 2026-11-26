@@ -268,6 +268,8 @@ export default function Editor({
         bump()
       if (u.selectionSet || u.docChanged) {
         const { from, to, empty } = u.state.selection.main
+        // The right-click suppression covers only that selection: any other one shows the toolbar again.
+        setMenuSel((s) => (s && s !== `${from}-${to}` ? '' : s))
         const a = u.state.doc.lineAt(from).number
         const b = u.state.doc.lineAt(to).number
         cb.current.onSelect?.(empty ? '' : a === b ? `${a}` : `${a}–${b}`)

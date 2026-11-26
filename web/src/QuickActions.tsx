@@ -58,7 +58,7 @@ type Props = {
   view: EditorView
   path: string
   dragging: boolean
-  hideSelection?: string // `from-to` of a selection made by a right-click: no toolbar until it changes
+  hideSelection?: string // `from-to` of a selection made by a right-click: no toolbar unless asked for
   handle: Ref<QuickHandle>
   onCite?: () => void // open "Add a reference" for the selection
   instructions?: () => Promise<string | undefined> // the project's REFRACT.md, as sent to the server
@@ -171,7 +171,7 @@ export default function QuickActions({ view, path, dragging, hideSelection, hand
 
   const visible =
     !dragging &&
-    !(!pending && !job && hideSelection === `${sel.from}-${sel.to}`) &&
+    !(!pending && !job && !asking && hideSelection === `${sel.from}-${sel.to}`) &&
     (view.hasFocus || within || !!job || !!pending)
   const a = range && visible ? view.coordsAtPos(range.from) : null
   const box = view.dom.getBoundingClientRect()
