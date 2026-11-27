@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { lang, languageNames, t } from '@/lib/i18n'
 import { linkToken } from '@/lib/account'
-import { setMode } from '@/lib/mode'
 import { Link, reloadTo, usePath } from '@/lib/router'
 
 // Why an OIDC sign-in came back refused (?login_error=…).
@@ -19,23 +18,17 @@ const oidcErrors: Record<string, string> = {
   ),
 }
 
-type Config = { oidc: string; mode: string; signup: boolean; reset: boolean }
+type Config = { oidc: string; signup: boolean; reset: boolean }
 
 // Shown instead of the app when the server asks for a session (REFRACT_AUTH=builtin):
 // sign-in, and the account screens people reach before they have a session.
 // signedIn: this browser already has one (the emailed links open here either way).
 export default function Login({ signedIn = false }: { signedIn?: boolean }) {
   const path = usePath()
-  const [config, setConfig] = useState<Config>({ oidc: '', mode: '', signup: false, reset: false })
+  const [config, setConfig] = useState<Config>({ oidc: '', signup: false, reset: false })
 
   useEffect(() => {
-    api<Config>('/api/auth/config').then(
-      (c) => {
-        setConfig(c)
-        setMode(c.mode)
-      },
-      () => {},
-    )
+    api<Config>('/api/auth/config').then(setConfig, () => {})
   }, [])
 
   switch (path) {

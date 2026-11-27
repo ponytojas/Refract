@@ -33,8 +33,8 @@ export default {
   'Refract uses your ChatGPT plan or your own API keys for AI requests.':
     'Refract usa tu plan de ChatGPT o tus propias claves de API para las peticiones de IA.',
   'API providers': 'Proveedores por API',
-  'Use your own API keys or a local model server. Their models appear in the model picker.':
-    'Usa tus propias claves de API o un servidor de modelos local. Sus modelos aparecen en el selector de modelos.',
+  'Models from configured providers appear in the model picker.':
+    'Los modelos de los proveedores configurados aparecen en el selector de modelos.',
   'key saved': 'clave guardada',
   Test: 'Probar',
   Edit: 'Editar',
@@ -243,14 +243,6 @@ export default {
   'Connect to push projects to your repositories, or create new ones.':
     'Conéctala para enviar proyectos a tus repositorios o crear otros nuevos.',
   'Connect GitHub': 'Conectar GitHub',
-  // On the hosted service (REFRACT_MODE=saas), which offers no ChatGPT plan
-  'Refract uses your own API keys for AI requests. To use your ChatGPT plan, self-host Refract.':
-    'Refract usa tus propias claves de API para las peticiones de IA. Para usar tu plan de ChatGPT, aloja Refract por tu cuenta.',
-  'Use your own API keys. Their models appear in the model picker.':
-    'Usa tus propias claves de API. Sus modelos aparecen en el selector de modelos.',
-  'Appearance, editor and assistant settings': 'Ajustes de apariencia, editor y asistente',
-  'Local account': 'Cuenta local',
-  'No AI connected': 'No hay IA conectada',
   Sections: 'Secciones',
   'Token usage': 'Uso de tokens',
   "Tokens used since {date}, by model, as each provider reported them. One assistant reply can take several calls. Your provider's bill is the reference.":

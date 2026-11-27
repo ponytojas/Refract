@@ -20,7 +20,6 @@ import (
 	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/auth"
 	"github.com/ponytojas/Refract/internal/mail"
-	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/projects"
 	"github.com/ponytojas/Refract/internal/store"
 	"github.com/ponytojas/Refract/internal/users"
@@ -42,6 +41,25 @@ type accountEnv struct {
 type envOpts struct {
 	noMail bool // no outbox: the server can't send email
 	signup bool
+}
+
+func TestParseSignup(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+		bad  bool
+	}{
+		{"", false, false},
+		{"open", true, false},
+		{"closed", false, false},
+		{"yes", false, true},
+		{"Open", false, true},
+	} {
+		got, err := parseSignup(tc.in)
+		if (err != nil) != tc.bad || got != tc.want {
+			t.Errorf("parseSignup(%q) = %v, %v; want %v, error: %t", tc.in, got, err, tc.want, tc.bad)
+		}
+	}
 }
 
 func TestMain(m *testing.M) {
@@ -71,7 +89,7 @@ func newAccountEnv(t *testing.T, o envOpts) *accountEnv {
 	people := &users.Service{DB: db, Key: make([]byte, 32)}
 	ps := &projects.Service{DB: db, Dir: filepath.Join(dir, "projects"), Limits: projects.DefaultLimits}
 	e := &accountEnv{t: t, people: people, ps: ps, fake: &mail.Fake{}}
-	e.login = &loginAPI{users: people, mode: mode.SelfHost, signup: o.signup, destroy: destroyer(ps)}
+	e.login = &loginAPI{users: people, signup: o.signup, destroy: destroyer(ps)}
 	if !o.noMail {
 		e.login.public = "https://r.test"
 		e.outbox = mail.NewOutbox(e.fake)
@@ -198,7 +216,7 @@ func TestAuthConfig(t *testing.T) {
 		a := e.browser().do("GET", "/api/auth/config", nil)
 		var got map[string]any
 		json.Unmarshal([]byte(a.Body), &got)
-		if got["mode"] != "selfhost" || got["signup"] != tc.wantSignup || got["reset"] != tc.wantReset {
+		if got["signup"] != tc.wantSignup || got["reset"] != tc.wantReset {
 			t.Errorf("%s: config = %s", tc.name, a.Body)
 		}
 	}

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/ponytojas/Refract/internal/localkey"
-	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/store"
 )
 
@@ -157,10 +156,10 @@ type localOptions struct {
 // startLocal resolves the data folder, key and listener, then runs the server
 // until ctx ends.
 func startLocal(ctx context.Context, o localOptions) error {
-	if m, err := mode.Parse(o.getenv("REFRACT_MODE")); err != nil {
-		return err
-	} else if m == mode.SaaS {
-		return errors.New("refract local runs Refract for yourself, not as the hosted service: unset REFRACT_MODE, or run the server with plain `refract`")
+	if !o.status {
+		if err := checkRemovedMode(o.getenv("REFRACT_MODE")); err != nil {
+			return err
+		}
 	}
 	if p, err := parseProfile(o.getenv("REFRACT_PROFILE")); err != nil {
 		return err

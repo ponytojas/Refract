@@ -31,7 +31,7 @@ Needs the `refract` program (README, [Install the CLI](README.md#install-the-cli
 refract local
 ```
 
-It needs no configuration: it creates the data folder and the secret key in the person's user folder (on macOS `~/Library/Application Support/Refract`; the README lists the others), listens only on loopback without sign-in, and opens the browser. It prints the address (`127.0.0.1:8080` by default, or a free port if that one is taken) and the data folder. Don't set `REFRACT_SECRET_KEY`, `REFRACT_AUTH`, `REFRACT_MODE` or `REFRACT_PROFILE` for it: it makes its own key, never has sign-in, and refuses `REFRACT_MODE=saas` and `REFRACT_PROFILE=team`. Leave it running; <kbd>Ctrl</kbd>+<kbd>C</kbd> stops it. Tell them to keep `secret.key` in that folder: without it, stored credentials can't be read back.
+It needs no configuration: it creates the data folder and the secret key in the person's user folder (on macOS `~/Library/Application Support/Refract`; the README lists the others), listens only on loopback without sign-in, and opens the browser. It prints the address (`127.0.0.1:8080` by default, or a free port if that one is taken) and the data folder. It makes its own key and runs without sign-in. The team profile requires the server command, `refract` without `local`. Leave it running; <kbd>Ctrl</kbd>+<kbd>C</kbd> stops it. Tell them to keep `secret.key` in that folder: without it, stored credentials can't be read back.
 
 Verify: `curl -s http://127.0.0.1:8080/healthz` (with the printed port) prints `ok`. Then tell them to create a project and press ⌘↵ (Ctrl+Enter) to compile.
 

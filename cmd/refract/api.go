@@ -17,7 +17,6 @@ import (
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/assistant"
 	"github.com/ponytojas/Refract/internal/auth"
-	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/providers"
 	"github.com/ponytojas/Refract/internal/quick"
 	"github.com/ponytojas/Refract/internal/siwc"
@@ -26,7 +25,6 @@ import (
 
 type api struct {
 	base *siwc.Session // DB, key, OAuth and allowlist shared by every user's session
-	mode mode.Mode     // REFRACT_MODE: whether the ChatGPT plan is offered
 	// publicOnly (REFRACT_OUTBOUND=public): provider addresses must be public https.
 	publicOnly bool
 	model      string // default model (REFRACT_MODEL_AGENT)
@@ -65,9 +63,7 @@ func (a *api) forUser(ctx context.Context) *userAI {
 	router := &providers.Router{HTTP: a.outbound, Configs: func(ctx context.Context) ([]providers.Config, error) {
 		return a.providers.List(ctx, u.ID)
 	}}
-	if a.mode.ChatGPT() { // never in saas, even with credentials stored earlier
-		router.ChatGPT = &ai.SIWC{Tokens: s, BaseURL: siwc.Resource, HTTP: &http.Client{CheckRedirect: noRedirect}}
-	}
+	router.ChatGPT = &ai.SIWC{Tokens: s, BaseURL: siwc.Resource, HTTP: &http.Client{CheckRedirect: noRedirect}}
 	v, _ := a.users.LoadOrStore(u.ID, &userAI{session: s, router: router})
 	return v.(*userAI)
 }
@@ -94,17 +90,15 @@ func (a *api) missing() []string { return append([]string{}, a.missingTools...) 
 func (a *api) routes(rt *router) {
 	rt.user("GET /api/me", func(w http.ResponseWriter, r *http.Request) {
 		u, _ := auth.UserFrom(r.Context())
-		writeJSON(w, map[string]any{"id": u.ID, "email": u.Email, "can_sign_out": a.canSignOut, "mode": a.mode, "missing_tools": a.missing()})
+		writeJSON(w, map[string]any{"id": u.ID, "email": u.Email, "can_sign_out": a.canSignOut, "missing_tools": a.missing()})
 	})
 	rt.user("GET /api/chatgpt/status", a.status)
-	if a.mode.ChatGPT() { // elsewhere these fall through to a 404
-		rt.user("POST /api/chatgpt/credentials", a.importCredentials)
-		rt.user("POST /api/chatgpt/signout", a.signOut)
-		if a.logins != nil {
-			rt.user("POST /api/chatgpt/login", a.hereOnly(a.startLogin))
-			rt.user("GET /api/chatgpt/login", a.hereOnly(a.loginStatus))
-			rt.user("DELETE /api/chatgpt/login", a.hereOnly(a.cancelLogin))
-		}
+	rt.user("POST /api/chatgpt/credentials", a.importCredentials)
+	rt.user("POST /api/chatgpt/signout", a.signOut)
+	if a.logins != nil {
+		rt.user("POST /api/chatgpt/login", a.hereOnly(a.startLogin))
+		rt.user("GET /api/chatgpt/login", a.hereOnly(a.loginStatus))
+		rt.user("DELETE /api/chatgpt/login", a.hereOnly(a.cancelLogin))
 	}
 	rt.user("POST /api/chatgpt/welcome-seen", a.welcomeSeen)
 	rt.user("GET /api/models", a.models)
@@ -165,7 +159,7 @@ func (a *api) status(w http.ResponseWriter, r *http.Request) {
 		"welcome_seen":  seen,
 		"manage_usage":  siwc.ManageUsage,
 		"default_model": a.model,
-		"sign_in_here":  a.mode.ChatGPT() && a.logins != nil && fromThisComputer(r),
+		"sign_in_here":  a.logins != nil && fromThisComputer(r),
 	})
 }
 
@@ -292,11 +286,7 @@ func (a *api) choose(ctx context.Context, want assistant.Choice, configured stri
 	case ok:
 		return assistant.Choice{Model: m.Slug, Effort: effort}, nil
 	case len(ms) == 0:
-		msg := "no models available: add an API provider in Settings"
-		if a.mode.ChatGPT() {
-			msg = "no models available: sign in with ChatGPT or add an API provider in Settings"
-		}
-		return assistant.Choice{}, &ai.Error{Kind: ai.ErrNotSignedIn, Message: msg}
+		return assistant.Choice{}, &ai.Error{Kind: ai.ErrNotSignedIn, Message: "no models available: sign in with ChatGPT or add an API provider in Settings"}
 	default:
 		return assistant.Choice{}, fmt.Errorf("model %q is not available", want.Model)
 	}

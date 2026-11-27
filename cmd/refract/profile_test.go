@@ -11,7 +11,7 @@ func TestParseProfile(t *testing.T) {
 			t.Errorf("parseProfile(%q) = %q, %v", v, got, err)
 		}
 	}
-	for _, bad := range []string{"Team", "saas", "teams"} {
+	for _, bad := range []string{"Team", "teams"} {
 		if _, err := parseProfile(bad); err == nil {
 			t.Errorf("accepted %q", bad)
 		}

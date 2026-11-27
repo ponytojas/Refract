@@ -32,3 +32,37 @@ func TestParseCompileConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestCloudflareCompileWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		auth    string
+		maxWait time.Duration
+		timeout time.Duration
+		want    string
+	}{
+		{"below threshold", "cloudflare", 20 * time.Second, 74 * time.Second, ""},
+		{"at threshold", "cloudflare", 20 * time.Second, 75 * time.Second, ""},
+		{"above threshold", "cloudflare", 20 * time.Second, 76 * time.Second, "exceeds 95s"},
+		{"defaults", "cloudflare", 20 * time.Second, 90 * time.Second, "exceeds 95s"},
+		{"unlimited wait", "cloudflare", 0, 60 * time.Second, "unlimited queue wait"},
+		{"builtin auth", "builtin", 0, 90 * time.Second, ""},
+		{"no auth", "none", 20 * time.Second, 90 * time.Second, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := compileConfig{maxWait: tc.maxWait, timeout: tc.timeout}
+			warning := cloudflareCompileWarning(tc.auth, cfg)
+			if tc.want == "" {
+				if warning != "" {
+					t.Errorf("unexpected warning: %q", warning)
+				}
+				return
+			}
+			for _, text := range []string{tc.want, "REFRACT_COMPILE_MAX_WAIT=20", "REFRACT_COMPILE_TIMEOUT=60"} {
+				if !strings.Contains(warning, text) {
+					t.Errorf("warning = %q, want it to mention %q", warning, text)
+				}
+			}
+		})
+	}
+}

@@ -349,7 +349,7 @@ func TestRouterRoutesByPrefix(t *testing.T) {
 	}
 }
 
-// Without the ChatGPT plan (REFRACT_MODE=saas) only configured providers are
+// Without a ChatGPT backend, only configured providers are
 // reachable: no panic, no ChatGPT models, and a clear error for other slugs.
 func TestRouterWithoutChatGPT(t *testing.T) {
 	ctx := context.Background()

@@ -506,8 +506,7 @@ func TestEmbeddedFailuresPrintOneJSONLine(t *testing.T) {
 		"no token":    {args: []string{"--embedded"}, want: "token"},
 		"short token": {args: []string{"--embedded"}, env: []string{embedTokenEnv + "=abc"}, want: "too short"},
 		"bad flag":    {args: []string{"--embedded", "--nope"}, env: []string{embedTokenEnv + "=" + testEmbedToken}, want: "nope"},
-		"saas":        {args: []string{"--embedded"}, env: []string{embedTokenEnv + "=" + testEmbedToken, "REFRACT_MODE=saas"}, want: "hosted service"},
-		"status":      {args: []string{"--status"}, env: []string{"REFRACT_MODE=bogus"}, want: "bogus"},
+		"status":      {args: []string{"--status"}, env: []string{"REFRACT_PROFILE=bogus"}, want: "bogus"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			exe, _ := os.Executable()

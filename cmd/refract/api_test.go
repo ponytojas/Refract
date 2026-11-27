@@ -16,36 +16,20 @@ import (
 	"github.com/ponytojas/Refract/internal/access"
 	"github.com/ponytojas/Refract/internal/ai"
 	"github.com/ponytojas/Refract/internal/auth"
-	"github.com/ponytojas/Refract/internal/mode"
 	"github.com/ponytojas/Refract/internal/providers"
 	"github.com/ponytojas/Refract/internal/siwc"
 	"github.com/ponytojas/Refract/internal/store"
 	"github.com/ponytojas/Refract/internal/usage"
 )
 
-// newAIServer serves the AI routes for one mode, for user "ana", who has a
-// ChatGPT credential with plan usage stored from before.
-func newAIServer(t *testing.T, m mode.Mode) http.Handler {
+// newAIServer serves the AI routes for user "ana", who has a stored ChatGPT credential.
+func newAIServer(t *testing.T, publicOnly bool) (http.Handler, *sql.DB) {
 	t.Helper()
-	h, _ := newAIServerDB(t, m)
-	return h
+	return newAIServerWith(t, publicOnly, func(*api) {})
 }
 
-// newAIServerDB is newAIServer that also returns its database.
-func newAIServerDB(t *testing.T, m mode.Mode) (http.Handler, *sql.DB) {
-	t.Helper()
-	return newAIServerOutbound(t, m, false)
-}
-
-// newAIServerOutbound is newAIServerDB with REFRACT_OUTBOUND chosen apart
-// from the mode.
-func newAIServerOutbound(t *testing.T, m mode.Mode, publicOnly bool) (http.Handler, *sql.DB) {
-	t.Helper()
-	return newAIServerWith(t, m, func(a *api) { a.publicOnly = publicOnly })
-}
-
-// newAIServerWith is newAIServerDB with the api adjusted by set.
-func newAIServerWith(t *testing.T, m mode.Mode, set func(*api)) (http.Handler, *sql.DB) {
+// newAIServerWith is newAIServer with the api adjusted by set.
+func newAIServerWith(t *testing.T, publicOnly bool, set func(*api)) (http.Handler, *sql.DB) {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -66,7 +50,7 @@ func newAIServerWith(t *testing.T, m mode.Mode, set func(*api)) (http.Handler, *
 		t.Fatal(err)
 	}
 
-	a := &api{base: &siwc.Session{DB: db, Key: key}, mode: m, providers: &providers.Store{DB: db, Key: key}, usage: &usage.Recorder{DB: db}}
+	a := &api{base: &siwc.Session{DB: db, Key: key}, publicOnly: publicOnly, providers: &providers.Store{DB: db, Key: key}, usage: &usage.Recorder{DB: db}}
 	set(a)
 	mux := http.NewServeMux()
 	a.routes(&router{mux: mux, acc: &access.Checker{DB: db}})
@@ -96,40 +80,22 @@ type chatgptStatus struct {
 	AIReady bool `json:"ai_ready"`
 }
 
-func TestSaaSHasNoChatGPT(t *testing.T) {
-	h := newAIServer(t, mode.SaaS)
-	for _, path := range []string{"/api/chatgpt/credentials", "/api/chatgpt/signout"} {
-		if code := call(t, h, "POST", path, nil); code != http.StatusNotFound {
-			t.Errorf("POST %s = %d, want 404", path, code)
-		}
-	}
-	var st chatgptStatus
-	if code := call(t, h, "GET", "/api/chatgpt/status", &st); code != http.StatusOK || st.Status.SignedIn || st.AIReady {
-		t.Errorf("status = %d %+v: a stored ChatGPT credential must be ignored", code, st)
-	}
-	var models []struct{ Provider string }
-	if code := call(t, h, "GET", "/api/models", &models); code != http.StatusOK || len(models) != 0 {
-		t.Errorf("models = %d %+v, want none", code, models)
-	}
-	var me struct{ Mode string }
-	if call(t, h, "GET", "/api/me", &me); me.Mode != "saas" {
-		t.Errorf("me.mode = %q", me.Mode)
-	}
-}
-
-func TestSelfHostKeepsChatGPT(t *testing.T) {
-	h := newAIServer(t, mode.SelfHost)
+func TestChatGPTAvailable(t *testing.T) {
+	h, _ := newAIServer(t, false)
 	// An invalid file is rejected by the handler: the route exists.
 	if code := call(t, h, "POST", "/api/chatgpt/credentials", nil); code != http.StatusBadRequest {
 		t.Errorf("POST credentials = %d, want 400", code)
 	}
 	var st chatgptStatus
-	if call(t, h, "GET", "/api/chatgpt/status", &st); !st.Status.SignedIn || !st.Status.PlanGranted || !st.AIReady {
-		t.Errorf("status = %+v: the stored credential should count", st)
+	if code := call(t, h, "GET", "/api/chatgpt/status", &st); code != http.StatusOK || !st.Status.SignedIn || !st.Status.PlanGranted || !st.AIReady {
+		t.Errorf("status = %d %+v: the stored credential should count", code, st)
 	}
-	var me struct{ Mode string }
-	if call(t, h, "GET", "/api/me", &me); me.Mode != "selfhost" {
-		t.Errorf("me.mode = %q", me.Mode)
+	var me map[string]any
+	if code := call(t, h, "GET", "/api/me", &me); code != http.StatusOK {
+		t.Fatalf("GET /api/me = %d, want 200", code)
+	}
+	if _, ok := me["mode"]; ok {
+		t.Error("GET /api/me still reports a deployment mode")
 	}
 }
 
@@ -152,23 +118,21 @@ func callLocal(t *testing.T, h http.Handler, method, path string, out any, heade
 }
 
 // The in-server ChatGPT sign-in exists only where the server listens on
-// loopback (a.logins set) and the plan is offered; the status says which.
+// loopback (a.logins set); the status says whether it is available.
 func TestSignInHereRoutes(t *testing.T) {
 	type status struct {
 		SignInHere bool `json:"sign_in_here"`
 	}
 	for _, c := range []struct {
 		name   string
-		m      mode.Mode
 		logins bool
 		want   bool
 	}{
-		{"loopback", mode.SelfHost, true, true},
-		{"reachable from other computers", mode.SelfHost, false, false},
-		{"hosted service", mode.SaaS, true, false},
+		{"loopback", true, true},
+		{"reachable from other computers", false, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			h, _ := newAIServerWith(t, c.m, func(a *api) {
+			h, _ := newAIServerWith(t, false, func(a *api) {
 				if c.logins {
 					a.logins = &siwc.Logins{}
 				}
@@ -189,7 +153,7 @@ func TestSignInHereRoutes(t *testing.T) {
 // computers: their browser can't reach this computer's callback, so they get
 // the credentials file instead of the in-server sign-in.
 func TestSignInHereOnlyFromThisComputer(t *testing.T) {
-	h, _ := newAIServerWith(t, mode.SelfHost, func(a *api) { a.logins = &siwc.Logins{} })
+	h, _ := newAIServerWith(t, false, func(a *api) { a.logins = &siwc.Logins{} })
 	type status struct {
 		SignInHere bool `json:"sign_in_here"`
 	}
@@ -245,7 +209,7 @@ func TestFromThisComputer(t *testing.T) {
 func TestSignOutCancelsPendingSignIn(t *testing.T) {
 	revoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	t.Cleanup(revoke.Close)
-	h, _ := newAIServerWith(t, mode.SelfHost, func(a *api) {
+	h, _ := newAIServerWith(t, false, func(a *api) {
 		a.base.OAuth = &siwc.OAuth{RevokeURL: revoke.URL, HTTP: revoke.Client()}
 		a.logins = &siwc.Logins{Port: -1, AuthorizeURL: "https://auth.invalid/authorize"}
 	})
@@ -276,7 +240,7 @@ func TestLoginsOnlyOnLoopback(t *testing.T) {
 // GET /api/usage: the signed-in account's tokens per model from since, most
 // used first; nobody else's.
 func TestUsage(t *testing.T) {
-	h, db := newAIServerDB(t, mode.SelfHost)
+	h, db := newAIServer(t, false)
 	ctx := context.Background()
 	add := func(at int64, user, model string, in, cached, out, reasoning int) {
 		rec := &usage.Recorder{DB: db, Now: func() time.Time { return time.Unix(at, 0) }}
@@ -323,7 +287,7 @@ func TestUsage(t *testing.T) {
 }
 
 func TestMeListsMissingTools(t *testing.T) {
-	h, _ := newAIServerDB(t, mode.SelfHost)
+	h, _ := newAIServer(t, false)
 	var me struct {
 		Missing []string `json:"missing_tools"`
 	}

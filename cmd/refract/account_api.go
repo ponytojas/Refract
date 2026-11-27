@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -23,6 +24,17 @@ import (
 
 const oidcThenCookie = "refract_oidc_then"
 
+// parseSignup reads REFRACT_SIGNUP. Accounts are created by an admin by default.
+func parseSignup(v string) (bool, error) {
+	switch v {
+	case "", "closed":
+		return false, nil
+	case "open":
+		return true, nil
+	}
+	return false, fmt.Errorf("REFRACT_SIGNUP=%q: want open or closed", v)
+}
+
 func (a *loginAPI) mailReady() bool { return a.mail != nil && a.public != "" }
 
 func decode(w http.ResponseWriter, r *http.Request, in any) bool {
@@ -38,7 +50,7 @@ func (a *loginAPI) config(w http.ResponseWriter, r *http.Request) {
 	if a.oidc != nil {
 		name = a.oidc.Name
 	}
-	writeJSON(w, map[string]any{"oidc": name, "mode": string(a.mode), "signup": a.signup, "reset": a.mailReady()})
+	writeJSON(w, map[string]any{"oidc": name, "signup": a.signup, "reset": a.mailReady()})
 }
 
 // allowMail answers 503 or 429 (ok is false) when an email can't be asked for

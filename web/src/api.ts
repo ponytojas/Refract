@@ -1,5 +1,4 @@
 import { lang, t } from '@/lib/i18n'
-import { chatgptOffered } from '@/lib/mode'
 
 // Every /api call carries X-Refract (the server rejects requests without it: CSRF),
 // and the interface language, which the server uses for the emails it sends.
@@ -126,9 +125,7 @@ export type ChatGPTStatus = {
 export function describe(e: ApiError): string {
   switch (e.kind) {
     case 'not_signed_in':
-      return chatgptOffered()
-        ? t('No AI connected. Sign in with ChatGPT or add an API provider in Settings → Assistant.')
-        : t('No AI connected. Add an API provider in Settings → Assistant.')
+      return t('No AI connected. Sign in with ChatGPT or add an API provider in Settings → Assistant.')
     case 'plan_not_granted':
       return t('ChatGPT plan usage was not granted. Sign in again and allow plan usage.')
     case 'usage_limit':
