@@ -47,6 +47,87 @@ test('automatic limits follow the section body and retain the limit when its tit
   assert.equal(range.name, 'Introduction')
 })
 
+test('edits spanning part of a heading and its body keep the limit on that heading', () => {
+  for (const nextTitle of ['Next', 'Intro']) {
+    const source = String.raw`\section{Intro}one two\section{${nextTitle}}three`
+    const [first] = findSections(source)
+    for (const [selected, insert] of [
+      ['}one', '}uno'],
+      ['tro}one', 'tro}uno'],
+    ]) {
+      let state = create(source)
+      const saved = { id: 'first', name: first.name, from: first.from, to: first.to, section: first.id, max: 1 }
+      state = state.update({ effects: setLimits.of({ rules: defaultRules, ranges: [saved] }) }).state
+      const from = source.indexOf(selected)
+      state = state.update({ changes: { from, to: from + selected.length, insert } }).state
+      assert.deepEqual(limits(state).ranges, [saved])
+      assert.equal(state.sliceDoc(saved.from, saved.to), 'uno two')
+    }
+  }
+})
+
+test('a partial rewrite keeps the limit on the surviving heading when it inserts another with the same title', () => {
+  const heading = String.raw`\section{Same}`
+  const source = `${heading}one two`
+  let state = create(source)
+  const [first] = findSections(source)
+  const saved = { id: 'first', name: first.name, from: first.from, to: first.to, section: first.id, max: 1 }
+  state = state.update({ effects: setLimits.of({ rules: defaultRules, ranges: [saved] }) }).state
+  state = state.update({
+    changes: { from: first.from - 1, to: source.length, insert: `}new body${heading}three` },
+  }).state
+  const [rewritten] = findSections(state.doc.toString())
+  assert.deepEqual(limits(state).ranges, [{ ...saved, to: rewritten.to }])
+})
+
+test('joining fragments of two identical headings does not transfer either limit', () => {
+  const source = String.raw`\section{Same}one\section{Same}two`
+  let state = create(source)
+  const ranges = findSections(source).map((section) => ({ ...section, section: section.id, max: 1 }))
+  state = state.update({ effects: setLimits.of({ rules: defaultRules, ranges }) }).state
+  const from = source.indexOf('Same') + 1
+  const to = source.lastIndexOf('Same') + 3
+  state = state.update({ changes: { from, to, insert: 'am' } }).state
+  assert.equal(state.doc.toString(), String.raw`\section{Same}two`)
+  assert.deepEqual(limits(state).ranges, [])
+})
+
+test('a quick action rewriting the heading and body keeps the limit on the rewritten section', () => {
+  const heading = String.raw`\section{Intro}`
+  for (const preamble of ['', 'Preamble\n']) {
+    const source = `${preamble}${heading}one two\n${heading}three four`
+    let state = create(source)
+    const [first] = findSections(source)
+    const saved = { id: 'a', name: first.name, from: first.from, to: first.to, section: first.id, max: 1 }
+    state = state.update({ effects: setLimits.of({ rules: defaultRules, ranges: [saved] }) }).state
+    state = state.update({
+      changes: { from: 0, to: first.to - 1, insert: `${preamble}${heading}better words` },
+      userEvent: 'input.quick',
+    }).state
+    const [rewritten] = findSections(state.doc.toString())
+    assert.deepEqual(limits(state).ranges, [{ ...saved, from: rewritten.from, to: rewritten.to }])
+    assert.equal(state.sliceDoc(rewritten.from, rewritten.to), 'better words\n')
+    assert.equal(state.field(excessWords).size, 1)
+  }
+})
+
+test('rewriting a span with ambiguous repeated headings does not transfer the limit', () => {
+  const heading = String.raw`\section{Same}`
+  const single = `${heading}one two`
+  const repeated = `${single}\n${heading}three four`
+  for (const [source, insert] of [
+    [single, repeated],
+    [repeated, single],
+  ]) {
+    let state = create(source)
+    const [first] = findSections(source)
+    const saved = { id: 'a', name: first.name, from: first.from, to: first.to, section: first.id, max: 1 }
+    state = state.update({ effects: setLimits.of({ rules: defaultRules, ranges: [saved] }) }).state
+    state = state.update({ changes: { from: 0, to: source.length, insert } }).state
+    assert.deepEqual(limits(state).ranges, [])
+  }
+})
+
 test('rule changes update red decorations, overlapping limits do not duplicate marks', () => {
   let state = create(String.raw`one \footnote{two three}`)
   const range = { id: 'a', name: 'A', from: 0, to: state.doc.length, max: 1 }
@@ -122,14 +203,15 @@ test('file and folder renames persist limits for closed files and preserve unrel
   assert.deepEqual(loadLimits('other', 'chapters/a.tex', 'one'), saved)
 })
 
-test('actual editor undo and redo restore the budget of a deleted heading', () => {
-  const source = String.raw`\section{Intro}one two\section{Next}three four`
+test('undo and redo restore and remove the budget on the original heading when titles repeat', () => {
+  const source = String.raw`\section{Same}one two\section{Same}three four`
   let state = EditorState.create({ doc: source, extensions: [history(), wordLimits, excessWords] })
-  const section = findSections(source)[0]
-  const saved = { ...section, section: section.id, max: 1 }
+  const [first, second] = findSections(source)
+  const saved = { id: 'first', name: first.name, from: first.from, to: first.to, section: first.id, max: 1 }
   state = state.update({ effects: setLimits.of({ rules: defaultRules, ranges: [saved] }) }).state
-  state = state.update({ changes: { from: 0, to: section.from } }).state
+  state = state.update({ changes: { from: first.headingFrom, to: first.from } }).state
   assert.equal(limits(state).ranges.length, 0)
+  assert.equal(state.field(excessWords).size, 0)
   const editor = {
     get state() {
       return state
@@ -142,11 +224,22 @@ test('actual editor undo and redo restore the budget of a deleted heading', () =
     assert.equal(undo(editor), true)
     assert.equal(state.doc.toString(), source)
     assert.deepEqual(limits(state).ranges, [saved])
+    assert.equal(limitAt(source, limits(state).ranges, second.headingFrom), undefined)
     assert.equal(state.field(excessWords).size, 1)
     assert.equal(redo(editor), true)
     assert.equal(limits(state).ranges.length, 0)
     assert.equal(state.field(excessWords).size, 0)
   }
+})
+
+test('deleting an adjacent heading leaves the preceding section without that budget', () => {
+  const source = String.raw`\section{Same}\section{Same}three four`
+  let state = create(source)
+  const [, second] = findSections(source)
+  const saved = { id: 'second', name: second.name, from: second.from, to: second.to, section: second.id, max: 1 }
+  state = state.update({ effects: setLimits.of({ rules: defaultRules, ranges: [saved] }) }).state
+  state = state.update({ changes: { from: second.headingFrom, to: second.from } }).state
+  assert.deepEqual(limits(state).ranges, [])
 })
 
 test('grouped title edits and heading deletion restore the original budget on undo', () => {
@@ -176,6 +269,34 @@ test('grouped title edits and heading deletion restore the original budget on un
     true,
   )
   assert.equal(state.doc.toString(), source)
+  assert.deepEqual(limits(state).ranges, [saved])
+})
+
+test('undo recovers a stale section occurrence at its saved body position', () => {
+  const source = String.raw`\section{Intro}one two\section{Next}three`
+  let state = EditorState.create({ doc: source, extensions: [history(), wordLimits] })
+  const [first, next] = findSections(source)
+  const saved = { id: 'intro', name: first.name, from: first.from, to: first.to, section: first.id, max: 1 }
+  state = state.update({
+    effects: setLimits.of({
+      rules: defaultRules,
+      ranges: [
+        { ...saved, section: 'section:Intro:9' },
+        { ...saved, id: 'unrelated', from: next.from, to: next.to, section: 'section:Missing:0' },
+      ],
+    }),
+  }).state
+  state = state.update({ changes: { from: first.headingFrom, to: first.from } }).state
+  assert.deepEqual(limits(state).ranges, [])
+  assert.equal(
+    undo({
+      state,
+      dispatch: (tr) => {
+        state = tr.state
+      },
+    }),
+    true,
+  )
   assert.deepEqual(limits(state).ranges, [saved])
 })
 
