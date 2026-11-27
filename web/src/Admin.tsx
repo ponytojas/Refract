@@ -55,6 +55,8 @@ export default function Admin() {
   const [selected, setSelected] = useState('')
   const [action, setAction] = useState<Action | null>(null)
   const account = accounts?.find((a) => a.id === selected) ?? accounts?.[0]
+  const hasPassword = accounts?.some((a) => a.id === me?.id && a.has_password) ?? false
+  const lastAdmin = account?.is_admin && accounts?.filter((a) => a.is_admin).length === 1
 
   useEffect(() => {
     const controller = new AbortController()
@@ -136,12 +138,16 @@ export default function Admin() {
                           key={kind}
                           size="sm"
                           variant={kind === 'remove' ? 'destructive' : 'outline'}
+                          disabled={kind === 'remove' && lastAdmin}
                           onClick={() => setAction({ kind, account })}
                         >
                           {accountActionLabels[kind]()}
                         </Button>
                       ))}
                     </div>
+                    {lastAdmin && (
+                      <p className="text-sm text-muted-foreground">{t('The last administrator cannot be deleted.')}</p>
+                    )}
                     <AccountReport key={`${account.id}:${version}`} id={account.id} />
                   </section>
                 )}
@@ -154,6 +160,8 @@ export default function Admin() {
         <ActionDialog
           action={action}
           self={!!action.account && action.account.id === me?.id}
+          hasPassword={hasPassword}
+          canSignIn={me?.can_sign_out ?? false}
           close={() => setAction(null)}
           refresh={() => setVersion((n) => n + 1)}
         />
@@ -230,18 +238,25 @@ function AccountReport({ id }: { id: string }) {
 function ActionDialog({
   action,
   self,
+  hasPassword,
+  canSignIn,
   close,
   refresh,
 }: {
   action: Action
   self: boolean
+  hasPassword: boolean
+  canSignIn: boolean
   close: () => void
   refresh: () => void
 }) {
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [password, setPassword] = useState('')
+  const [currentPassword, setCurrentPassword] = useState('')
   const needsEmail = action.kind === 'rename' || action.kind === 'add'
+  const sensitive =
+    action.kind === 'reset' || action.kind === 'rename' || (action.kind === 'remove' && action.account.is_admin)
   const title =
     action.kind === 'add'
       ? t('Add account')
@@ -260,7 +275,10 @@ function ActionDialog({
     close()
     if (
       self &&
-      (action.kind === 'remove' || action.kind === 'signout' || action.kind === 'reset' || action.kind === 'rename')
+      (action.kind === 'remove' ||
+        action.kind === 'signout' ||
+        action.kind === 'reset' ||
+        (action.kind === 'rename' && email.trim().toLowerCase() !== action.account.email))
     ) {
       void reloadTo('/')
       return
@@ -283,7 +301,13 @@ function ActionDialog({
     try {
       const result = await api<{ password?: string }>(accountsURL, {
         method: 'POST',
-        body: { action: action.kind, id: action.account?.id, email, confirmed: true },
+        body: {
+          action: action.kind,
+          id: action.account?.id,
+          email,
+          confirmed: true,
+          password: currentPassword || undefined,
+        },
       })
       if (result.password) {
         setPassword(result.password)
@@ -299,16 +323,33 @@ function ActionDialog({
         refresh()
         return
       }
-      const message =
-        kind === 'admin_account_exists'
-          ? t('An account already has this email address.')
-          : kind === 'admin_invalid_email'
-            ? t('Enter a valid email address.')
-            : kind === 'admin_account_busy'
-              ? t('The account’s projects are changing. Try again when they are ready.')
-              : t('Could not complete this action.')
-      toast.error(message)
+      switch (kind) {
+        case 'admin_account_exists':
+          toast.error(t('An account already has this email address.'))
+          break
+        case 'admin_invalid_email':
+          toast.error(t('Enter a valid email address.'))
+          break
+        case 'admin_account_busy':
+          toast.error(t('The account’s projects are changing. Try again when they are ready.'))
+          break
+        case 'reauth_required':
+          toast.error(
+            canSignIn
+              ? t('Sign in again and retry this action within 10 minutes.')
+              : t('Ask the server operator to perform this action.'),
+          )
+          break
+        case 'wrong_password':
+        case 'too_many_attempts':
+        case 'last_admin':
+          toast.error(errorText(error))
+          break
+        default:
+          toast.error(t('Could not complete this action.'))
+      }
     } finally {
+      setCurrentPassword('')
       setBusy(false)
     }
   }
@@ -348,7 +389,7 @@ function ActionDialog({
         ) : (
           <form onSubmit={submit} className="grid gap-5">
             <AlertDialogHeader>
-              <AlertDialogTitle>{title}</AlertDialogTitle>
+              <AlertDialogTitle>{action.kind === 'remove' ? t('Delete this account?') : title}</AlertDialogTitle>
               <AlertDialogDescription>{description}</AlertDialogDescription>
             </AlertDialogHeader>
             {needsEmail && (
@@ -360,6 +401,18 @@ function ActionDialog({
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                />
+              </label>
+            )}
+            {sensitive && hasPassword && (
+              <label className="grid gap-2 text-sm">
+                {t('Current password')}
+                <Input
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
                 />
               </label>
             )}

@@ -2,6 +2,7 @@ package projects
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"path/filepath"
 )
@@ -9,13 +10,15 @@ import (
 // StorageBytes measures regular files in a project, including Git history
 // and excluding generated build data. It never follows symbolic links.
 func (s *Service) StorageBytes(ctx context.Context, id string) (int64, error) {
-	defer lockRepo(id)()
 	var bytes int64
 	err := filepath.WalkDir(s.Path(id), func(_ string, entry fs.DirEntry, err error) error {
-		if err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := ctx.Err(); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
 		if entry.IsDir() && entry.Name() == ".refract" {
@@ -23,6 +26,9 @@ func (s *Service) StorageBytes(ctx context.Context, id string) (int64, error) {
 		}
 		if entry.Type().IsRegular() {
 			info, err := entry.Info()
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			if err != nil {
 				return err
 			}

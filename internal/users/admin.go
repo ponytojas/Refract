@@ -14,6 +14,7 @@ import (
 var (
 	ErrAccountExists = errors.New("an account already has this email address")
 	ErrAdminEmail    = errors.New("confirm the account's email address before granting administrator access")
+	ErrLastAdmin     = errors.New("the last administrator cannot be deleted")
 )
 
 type AdminAccount struct {
@@ -39,6 +40,34 @@ func (s *Service) AdminAccounts(ctx context.Context) ([]AdminAccount, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// RemoveKeepingAdmin serializes web removals so each request checks the
+// remaining roles before deleting projects. Self-service callers authenticate
+// first and pass nil for authorizeAdmin.
+func (s *Service) RemoveKeepingAdmin(ctx context.Context, id string, destroy func(context.Context, []string) (int, error), authorizeAdmin func() error) (int, error) {
+	s.removalMu.Lock()
+	defer s.removalMu.Unlock()
+	var admin, otherAdmin bool
+	err := s.DB.QueryRowContext(ctx, `SELECT is_admin, EXISTS (SELECT 1 FROM users WHERE is_admin AND id != ?)
+		FROM users WHERE id = ?`, id, id).Scan(&admin, &otherAdmin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNoAccount
+	}
+	if err != nil {
+		return 0, err
+	}
+	if admin {
+		if authorizeAdmin != nil {
+			if err := authorizeAdmin(); err != nil {
+				return 0, err
+			}
+		}
+		if !otherAdmin {
+			return 0, ErrLastAdmin
+		}
+	}
+	return s.Remove(ctx, id, destroy)
 }
 
 // GrantAdmin is reserved for the operator command.
@@ -106,6 +135,9 @@ func (s *Service) issuePassword(ctx context.Context, email, id string, onlyNew b
 	if err != nil {
 		return auth.User{}, "", err
 	}
+	if err := clearUnverified(ctx, tx, u.ID); err != nil {
+		return auth.User{}, "", err
+	}
 	if err := putPassword(ctx, tx, u.ID, hash); err != nil {
 		return auth.User{}, "", err
 	}
@@ -130,6 +162,15 @@ func (s *Service) RenameAccount(ctx context.Context, id, to string) error {
 		return err
 	}
 	defer tx.Rollback()
+	var current string
+	if err := tx.QueryRowContext(ctx, `SELECT email FROM users WHERE id = ?`, id).Scan(&current); errors.Is(err, sql.ErrNoRows) {
+		return ErrNoAccount
+	} else if err != nil {
+		return err
+	}
+	if current == to {
+		return nil
+	}
 	var one int
 	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE email = ?`, to).Scan(&one)
 	if err == nil {

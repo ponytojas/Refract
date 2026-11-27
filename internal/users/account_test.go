@@ -360,7 +360,7 @@ func TestSignInAfterTakeoverGetsNoSession(t *testing.T) {
 }
 
 func TestConfirmByProviderWipesWhatTheSquatterAttached(t *testing.T) {
-	for _, how := range []string{"provider", "reset"} {
+	for _, how := range []string{"provider", "reset", "admin reset", "operator provision"} {
 		t.Run(how, func(t *testing.T) {
 			s, ctx := newService(t), context.Background()
 			l, _ := s.SignUp(ctx, "ana@example.com", "attacker pass", "en")
@@ -389,6 +389,25 @@ func TestConfirmByProviderWipesWhatTheSquatterAttached(t *testing.T) {
 				if _, err := s.ResetPassword(ctx, r.Token, "owners new pass"); err != nil {
 					t.Fatal(err)
 				}
+			case "admin reset":
+				password, err := s.ResetAccountPassword(ctx, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Login(ctx, l.To.Email, password, ""); err != nil {
+					t.Fatalf("new credential was not saved: %v", err)
+				}
+			case "operator provision":
+				_, password, err := s.ProvisionPassword(ctx, l.To.Email, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Login(ctx, l.To.Email, password, ""); err != nil {
+					t.Fatalf("new credential was not saved: %v", err)
+				}
+			}
+			if acct, err := s.AccountByID(ctx, id); err != nil || !acct.Verified {
+				t.Fatalf("account did not become verified: %+v (%v)", acct, err)
 			}
 
 			count := func(q string, args ...any) int {

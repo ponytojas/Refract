@@ -24,6 +24,7 @@ export default {
     'Genera una contraseña nueva para {email} y cierra todas sus sesiones de Refract.',
   'End all Refract sessions for {email}.': 'Cierra todas las sesiones de Refract de {email}.',
   'Clear failed sign-in attempts for {email}.': 'Borra los intentos de inicio de sesión fallidos de {email}.',
+  'Delete this account?': '¿Seguro que quieres eliminar esta cuenta?',
   'Permanently delete {email}, their projects, history, chats and connections.':
     'Elimina de forma permanente la cuenta de {email}, sus proyectos, historial, conversaciones y conexiones.',
   'Create an account and generate its first password.': 'Crea una cuenta y genera su primera contraseña.',
@@ -35,6 +36,11 @@ export default {
   'The account’s projects are changing. Try again when they are ready.':
     'Los proyectos de la cuenta están cambiando. Inténtalo cuando estén listos.',
   'Could not complete this action.': 'No se pudo completar esta operación.',
+  'The last administrator cannot be deleted.': 'No se puede eliminar al último administrador.',
+  'Sign in again and retry this action within 10 minutes.':
+    'Vuelve a iniciar sesión e inténtalo de nuevo en los próximos 10 minutos.',
+  'Ask the server operator to perform this action.':
+    'Pide a la persona que administra el servidor que realice esta operación.',
   'One project was permanently deleted before removal stopped. The account still exists.':
     'Se eliminó un proyecto de forma permanente antes de que se interrumpiera el borrado. La cuenta sigue existiendo.',
   '{n} projects were permanently deleted before removal stopped. The account still exists.':

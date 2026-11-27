@@ -67,8 +67,15 @@ func TestAdminAccountActions(t *testing.T) {
 	for _, action := range []string{"reset", "remove", "signout", "unlock", "unlock_all", "rename"} {
 		operator.expect(operator.post(adminAccountsPath, adminAction{Action: action, ID: acct.ID, Email: email}), http.StatusBadRequest, "other")
 	}
+	for _, action := range []string{"reset", "rename"} {
+		operator.expect(operator.post(adminAccountsPath, adminAction{Action: action, ID: acct.ID, Email: email, Confirmed: true}), http.StatusForbidden, "wrong_password")
+	}
+	operator.expect(operator.post(adminAccountsPath, adminAction{
+		Action: "rename", ID: acct.ID, Email: strings.ToUpper(email), Confirmed: true, Password: "fixture admin password",
+	}), http.StatusOK, "")
+	member.expect(member.do("GET", "/api/account", nil), http.StatusOK, "")
 
-	reset := operator.post(adminAccountsPath, adminAction{Action: "reset", ID: acct.ID, Confirmed: true})
+	reset := operator.post(adminAccountsPath, adminAction{Action: "reset", ID: acct.ID, Confirmed: true, Password: "fixture admin password"})
 	var replacement adminResult
 	if err := json.Unmarshal([]byte(reset.Body), &replacement); reset.Status != http.StatusOK || err != nil ||
 		replacement.Password == "" || replacement.Password == issued.Password {
@@ -82,7 +89,7 @@ func TestAdminAccountActions(t *testing.T) {
 	member = signInForAdminTest(e, email, replacement.Password)
 
 	const renamed = "renamed@example.com"
-	operator.expect(operator.post(adminAccountsPath, adminAction{Action: "rename", ID: acct.ID, Email: renamed, Confirmed: true}), http.StatusOK, "")
+	operator.expect(operator.post(adminAccountsPath, adminAction{Action: "rename", ID: acct.ID, Email: renamed, Confirmed: true, Password: "fixture admin password"}), http.StatusOK, "")
 	if found, err := e.people.Lookup(ctx, renamed); err != nil || found.ID != acct.ID {
 		t.Fatalf("rename changed the account ID: %v", err)
 	}
@@ -122,6 +129,98 @@ func TestAdminAccountActions(t *testing.T) {
 		t.Fatal("project in the trash survived account removal")
 	}
 	member.expect(member.do("GET", "/api/account", nil), http.StatusUnauthorized, "login_required")
+}
+
+func TestAdminPasswordlessActionsRequireRecentSignIn(t *testing.T) {
+	e := newAccountEnv(t, envOpts{noMail: true})
+	ctx := t.Context()
+	admin, err := e.people.Resolve(ctx, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := e.people.Resolve(ctx, "member@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := e.people.NewSession(ctx, admin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := e.browser()
+	base, err := url.Parse(e.srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.c.Jar.SetCookies(base, []*http.Cookie{{Name: users.SessionCookie, Value: token, Path: "/"}})
+	if _, err := e.people.DB.Exec(`UPDATE sessions SET authenticated_at = ?`, time.Now().Add(-11*time.Minute).Unix()); err != nil {
+		t.Fatal(err)
+	}
+	action := adminAction{Action: "reset", ID: member.ID, Confirmed: true}
+	b.expect(b.post(adminAccountsPath, action), http.StatusForbidden, "reauth_required")
+	if _, err := e.people.DB.Exec(`UPDATE sessions SET authenticated_at = ?`, time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+	b.expect(b.post(adminAccountsPath, action), http.StatusOK, "")
+}
+
+func TestConcurrentWebRemovalsKeepTheLastAdmin(t *testing.T) {
+	e := newAccountEnv(t, envOpts{noMail: true})
+	ctx := t.Context()
+	const password = "fixture admin password"
+	first, err := e.people.SetPassword(ctx, "first@example.com", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.people.SetPassword(ctx, "second@example.com", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.people.GrantAdmin(ctx, second.Email); err != nil {
+		t.Fatal(err)
+	}
+	firstClient := signInForAdminTest(e, first.Email, password)
+	secondClient := signInForAdminTest(e, second.Email, password)
+	for _, id := range []string{first.ID, second.ID} {
+		firstClient.expect(firstClient.post(adminAccountsPath, adminAction{Action: "remove", ID: id, Confirmed: true}), http.StatusForbidden, "wrong_password")
+	}
+	for _, account := range []auth.User{first, second} {
+		if _, err := e.ps.Create(auth.WithUser(ctx, account), "Admin's project"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	results := make(chan answer, 2)
+	start := make(chan struct{})
+	go func() {
+		<-start
+		results <- firstClient.post(adminAccountsPath, adminAction{Action: "remove", ID: first.ID, Confirmed: true, Password: password})
+	}()
+	go func() {
+		<-start
+		results <- secondClient.post("/api/account/delete", map[string]string{"password": password})
+	}()
+	close(start)
+	nOK, nBlocked := 0, 0
+	for i := 0; i < 2; i++ {
+		res := <-results
+		switch {
+		case res.Status == http.StatusOK || res.Status == http.StatusNoContent:
+			nOK++
+		case res.Status == http.StatusConflict && res.kind() == "last_admin":
+			nBlocked++
+		default:
+			t.Errorf("unexpected removal result: %d %s", res.Status, res.Body)
+		}
+	}
+	if nOK != 1 || nBlocked != 1 {
+		t.Fatalf("successful removals = %d, blocked as last admin = %d", nOK, nBlocked)
+	}
+	accounts, err := e.people.AdminAccounts(ctx)
+	if err != nil || len(accounts) != 1 || !accounts[0].IsAdmin {
+		t.Fatalf("remaining accounts: %+v (%v)", accounts, err)
+	}
+	if n, err := e.people.OwnedCount(ctx, accounts[0].ID); err != nil || n != 1 {
+		t.Errorf("remaining admin's projects = %d (%v), want 1", n, err)
+	}
 }
 
 func TestAdminRemovePreflightsAndReportsPartialDeletion(t *testing.T) {
@@ -309,6 +408,13 @@ func TestAdminReportMatchesCLIAndOwner(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(build, "generated.pdf"), []byte("ignored build output"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	missing, err := e.ps.Create(owner, "Z missing project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(e.ps.Path(missing.ID), filepath.Join(t.TempDir(), "moved-project")); err != nil {
+		t.Fatal(err)
+	}
 	recorder := &usage.Recorder{DB: e.people.DB, Now: func() time.Time { return time.Unix(100, 0) }}
 	for _, user := range []auth.User{member, admin} {
 		if err := recorder.Record(ctx, usage.Entry{UserID: user.ID, Kind: "quick", Model: user.Email,
@@ -319,7 +425,8 @@ func TestAdminReportMatchesCLIAndOwner(t *testing.T) {
 	r := operator.do("GET", adminAccountsPath+"/report?id="+url.QueryEscape(member.ID)+"&since=100", nil)
 	var webReport accountReport
 	if err := json.Unmarshal([]byte(r.Body), &webReport); r.Status != http.StatusOK || err != nil ||
-		len(webReport.Projects) != 1 || webReport.Projects[0].ID != p.ID || webReport.Projects[0].Bytes != initial+6 {
+		len(webReport.Projects) != 2 || webReport.Projects[0].ID != p.ID || webReport.Projects[0].Bytes != initial+6 ||
+		webReport.Projects[1].ID != missing.ID || webReport.Projects[1].Bytes != 0 {
 		t.Fatalf("unexpected report %d %+v, %v", r.Status, webReport, err)
 	}
 	own := ownerBrowser.do("GET", "/api/usage?since=100", nil)

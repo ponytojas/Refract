@@ -159,6 +159,8 @@ export function describe(e: ApiError): string {
       return t('Wrong email or password.')
     case 'wrong_password':
       return t('The current password is wrong.')
+    case 'last_admin':
+      return t('The last administrator cannot be deleted.')
     case 'too_many_attempts':
       return t('Too many failed attempts. Try again in a few minutes.')
     case 'email_unverified':

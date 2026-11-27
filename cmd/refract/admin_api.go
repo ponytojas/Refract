@@ -101,6 +101,7 @@ type adminAction struct {
 	ID        string `json:"id"`
 	Email     string `json:"email"`
 	Confirmed bool   `json:"confirmed"`
+	Password  string `json:"password,omitempty"`
 }
 
 type adminResult struct {
@@ -112,6 +113,7 @@ var (
 	errAdminAction       = errors.New("unknown account action")
 	errAdminConfirmation = errors.New("confirm this action first")
 	errAdminAddress      = errors.New("enter a valid email address")
+	errAdminReauth       = errors.New("reauthentication response already written")
 )
 
 func (a *adminAPI) manage(w http.ResponseWriter, r *http.Request) {
@@ -125,7 +127,20 @@ func (a *adminAPI) manage(w http.ResponseWriter, r *http.Request) {
 		adminError(w, errAdminAction)
 		return
 	}
-	out, target, err := a.apply(r.Context(), in)
+	reauthenticate := func() error {
+		actor, err := a.users.AccountByID(r.Context(), requestUser(r.Context()))
+		if err != nil {
+			return err
+		}
+		if !requireAccountReauth(a.users, w, r, actor, in.Password) {
+			return errAdminReauth
+		}
+		return nil
+	}
+	out, target, err := a.apply(r.Context(), in, reauthenticate)
+	if errors.Is(err, errAdminReauth) {
+		return
+	}
 	partial := err != nil && in.Action == "remove" && out.Count > 0
 	result := "success"
 	if err != nil {
@@ -146,7 +161,7 @@ func (a *adminAPI) manage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-func (a *adminAPI) apply(ctx context.Context, in adminAction) (adminResult, string, error) {
+func (a *adminAPI) apply(ctx context.Context, in adminAction, reauthenticate func() error) (adminResult, string, error) {
 	var out adminResult
 	if in.Action == "add" || in.Action == "rename" {
 		if err := users.ValidateEmail(in.Email); err != nil {
@@ -171,6 +186,11 @@ func (a *adminAPI) apply(ctx context.Context, in adminAction) (adminResult, stri
 	if err != nil {
 		return out, "", err
 	}
+	if in.Action == "reset" || in.Action == "rename" {
+		if err := reauthenticate(); err != nil {
+			return out, acct.ID, err
+		}
+	}
 	switch in.Action {
 	case "reset":
 		out.Password, err = a.users.ResetAccountPassword(ctx, acct.ID)
@@ -186,7 +206,7 @@ func (a *adminAPI) apply(ctx context.Context, in adminAction) (adminResult, stri
 		}
 	case "remove":
 		var deleted int
-		deleted, err = a.users.Remove(context.WithoutCancel(ctx), acct.ID, a.projects.DestroyOwnedProjects)
+		deleted, err = a.users.RemoveKeepingAdmin(context.WithoutCancel(ctx), acct.ID, a.projects.DestroyOwnedProjects, reauthenticate)
 		out.Count = int64(deleted)
 	}
 	return out, acct.ID, err
@@ -202,6 +222,8 @@ func adminError(w http.ResponseWriter, err error) {
 		kindError(w, http.StatusBadRequest, "admin_invalid_email", err)
 	case errors.Is(err, users.ErrAccountExists):
 		kindError(w, http.StatusConflict, "admin_account_exists", err)
+	case errors.Is(err, users.ErrLastAdmin):
+		kindError(w, http.StatusConflict, "last_admin", err)
 	case errors.Is(err, users.ErrOwnsProjects), errors.Is(err, projects.ErrTurnRunning):
 		kindError(w, http.StatusConflict, "admin_account_busy", errors.New("the account's projects are changing"))
 	default:

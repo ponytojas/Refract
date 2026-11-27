@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ponytojas/Refract/internal/auth"
@@ -21,6 +22,8 @@ type Service struct {
 	DB  *sql.DB
 	Key []byte           // to re-seal adopted credentials
 	Now func() time.Time // tests set it; nil means time.Now
+
+	removalMu sync.Mutex // serializes web account removals through project destruction
 }
 
 func (s *Service) now() time.Time {
@@ -131,7 +134,17 @@ func (s *Service) adopt(ctx context.Context, tx *sql.Tx, id string) error {
 // Middleware turns the auth layer's identity into the request's user.
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, lang, err := s.resolve(r.Context(), auth.Identity(r.Context()))
+		ctx := r.Context()
+		var u auth.User
+		var lang string
+		var err error
+		if id := CurrentSession(ctx); id != "" {
+			// Recheck a built-in session by its account ID. A revoked session
+			// must never enter the trusted email provisioning path.
+			u, lang, _, err = s.sessionByID(ctx, id)
+		} else {
+			u, lang, err = s.resolve(ctx, auth.Identity(ctx))
+		}
 		if err != nil {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return

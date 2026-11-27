@@ -113,11 +113,16 @@ func (s *Service) Session(ctx context.Context, token string) (auth.User, error) 
 }
 
 func (s *Service) session(ctx context.Context, token string) (u auth.User, lastSeen int64, err error) {
-	now := s.now()
-	err = s.DB.QueryRowContext(ctx, `SELECT u.id, u.email, s.last_seen_at FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.id = ? AND s.expires_at > ? AND s.last_seen_at > ?`,
-		sessionID(token), now.Unix(), now.Add(-SessionIdle).Unix()).Scan(&u.ID, &u.Email, &lastSeen)
+	u, _, lastSeen, err = s.sessionByID(ctx, sessionID(token))
 	return u, lastSeen, err
+}
+
+func (s *Service) sessionByID(ctx context.Context, id string) (u auth.User, lang string, lastSeen int64, err error) {
+	now := s.now()
+	err = s.DB.QueryRowContext(ctx, `SELECT u.id, u.email, u.lang, s.last_seen_at FROM sessions s JOIN users u ON u.id = s.user_id
+		WHERE s.id = ? AND s.expires_at > ? AND s.last_seen_at > ?`,
+		id, now.Unix(), now.Add(-SessionIdle).Unix()).Scan(&u.ID, &u.Email, &lang, &lastSeen)
+	return u, lang, lastSeen, err
 }
 
 // seen records that a session was used now, from c, unless that was already

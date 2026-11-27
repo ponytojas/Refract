@@ -230,18 +230,19 @@ func (a *loginAPI) account(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{
 		"email": acct.Email, "has_password": acct.HasPassword, "email_verified": acct.Verified, "lang": acct.Lang,
-		"projects": owned, "mail": a.mailReady(), "oidc": name, "recent_sign_in": a.recentSignIn(r),
+		"projects": owned, "mail": a.mailReady(), "oidc": name, "recent_sign_in": recentSignIn(a.users, r, u.ID),
 	})
 }
 
 // recentSignIn: this session's sign-in happened within users.RecentAuth.
-func (a *loginAPI) recentSignIn(r *http.Request) bool {
-	_, token, err := a.users.SessionFrom(r.Context(), r)
-	if err != nil {
+func recentSignIn(s *users.Service, r *http.Request, id string) bool {
+	u, token, err := s.SessionFrom(r.Context(), r)
+	if err != nil || u.ID != id {
 		return false
 	}
-	at, err := a.users.AuthenticatedAt(r.Context(), token)
-	return err == nil && !at.IsZero() && time.Since(at) <= users.RecentAuth
+	at, err := s.AuthenticatedAt(r.Context(), token)
+	age := time.Since(at)
+	return err == nil && !at.IsZero() && age >= 0 && age <= users.RecentAuth
 }
 
 func (a *loginAPI) resendVerification(w http.ResponseWriter, r *http.Request) {
@@ -288,27 +289,20 @@ func (a *loginAPI) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	if acct.HasPassword {
-		switch _, err := a.users.Login(r.Context(), acct.Email, in.Password, users.ClientIP(r)); {
-		case errors.Is(err, users.ErrTooMany):
-			kindError(w, http.StatusTooManyRequests, "too_many_attempts", err)
-			return
-		case err != nil:
-			kindError(w, http.StatusForbidden, "wrong_password", errors.New("the password is wrong"))
-			return
-		}
-	} else if !a.recentSignIn(r) {
-		kindError(w, http.StatusForbidden, "reauth_required", errors.New("sign in again to delete your account"))
+	if !requireAccountReauth(a.users, w, r, acct, in.Password) {
 		return
 	}
 	// Once started, deleting runs to the end even if the client goes away.
-	n, err := a.users.Remove(context.WithoutCancel(r.Context()), u.ID, a.destroy)
+	n, err := a.users.RemoveKeepingAdmin(context.WithoutCancel(r.Context()), u.ID, a.destroy, nil)
 	switch {
 	case err != nil && n > 0:
 		partialAccountRemoval(w, int64(n), err)
 		return
 	case errors.Is(err, users.ErrOwnsProjects):
 		httpError(w, errors.New("a project was created meanwhile: try again"), http.StatusConflict)
+		return
+	case errors.Is(err, users.ErrLastAdmin):
+		kindError(w, http.StatusConflict, "last_admin", err)
 		return
 	case err != nil:
 		projectError(w, err)
@@ -322,6 +316,28 @@ func (a *loginAPI) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	users.ClearSessionCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 	slog.Info("account deleted", "user", u.ID, "projects", n)
+}
+
+func requireAccountReauth(s *users.Service, w http.ResponseWriter, r *http.Request, acct users.Account, password string) bool {
+	if !acct.HasPassword {
+		if recentSignIn(s, r, acct.ID) {
+			return true
+		}
+		kindError(w, http.StatusForbidden, "reauth_required", errors.New("sign in again to confirm your identity"))
+		return false
+	}
+	if password != "" {
+		u, err := s.Login(r.Context(), acct.Email, password, users.ClientIP(r))
+		if err == nil && u.ID == acct.ID {
+			return true
+		}
+		if errors.Is(err, users.ErrTooMany) {
+			kindError(w, http.StatusTooManyRequests, "too_many_attempts", err)
+			return false
+		}
+	}
+	kindError(w, http.StatusForbidden, "wrong_password", errors.New("the password is wrong"))
+	return false
 }
 
 func partialAccountRemoval(w http.ResponseWriter, removed int64, err error) {

@@ -407,6 +407,12 @@ func TestDeleteAccountSurvivesDisconnect(t *testing.T) {
 	e := newAccountEnv(t, envOpts{})
 	ctx := context.Background()
 	u, _ := e.people.SetPassword(ctx, "ana@example.com", "correct horse")
+	if _, err := e.people.Resolve(ctx, "backup@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.people.GrantAdmin(ctx, "backup@example.com"); err != nil {
+		t.Fatal(err)
+	}
 	as := auth.WithUser(ctx, u)
 	e.ps.Create(as, "One")
 	e.ps.Create(as, "Two")
@@ -524,6 +530,9 @@ func TestDeleteAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	other, _ := e.people.SetPassword(ctx, "bob@example.com", "correct horse")
+	if err := e.people.GrantAdmin(ctx, other.Email); err != nil {
+		t.Fatal(err)
+	}
 	bobs, _ := e.ps.Create(auth.WithUser(ctx, other), "Bob's")
 
 	b := e.browser()
@@ -580,6 +589,12 @@ func TestDeleteAccountWithoutPassword(t *testing.T) {
 	e := newAccountEnv(t, envOpts{})
 	ctx := context.Background()
 	u, _ := e.people.Resolve(ctx, "ana@example.com") // as an identity provider would
+	if _, err := e.people.Resolve(ctx, "backup@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.people.GrantAdmin(ctx, "backup@example.com"); err != nil {
+		t.Fatal(err)
+	}
 	token, _ := e.people.NewSession(ctx, u.ID)
 	b := e.browser()
 	url, _ := http.NewRequest("GET", e.srv.URL, nil)
