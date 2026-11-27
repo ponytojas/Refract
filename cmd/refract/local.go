@@ -156,6 +156,11 @@ type localOptions struct {
 // startLocal resolves the data folder, key and listener, then runs the server
 // until ctx ends.
 func startLocal(ctx context.Context, o localOptions) error {
+	if !o.status {
+		if err := checkRemovedMode(o.getenv("REFRACT_MODE")); err != nil {
+			return err
+		}
+	}
 	if p, err := parseProfile(o.getenv("REFRACT_PROFILE")); err != nil {
 		return err
 	} else if p == profileTeam {

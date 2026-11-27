@@ -256,6 +256,15 @@ Each release publishes the image for amd64 and arm64 as `latest`, as `0.1` (the 
 
 **Decide who you trust before you invite anyone.** By default (`REFRACT_PROFILE=personal`) Tectonic runs with the server's own permissions: a document can `\input` any file the server can read, including the database (accounts, sessions, encrypted credentials) and every other account's projects. That is fine for one person, or for people who would trust each other with all of that. If the people signing in don't, run the [team profile](#run-it-for-a-team): every compile is isolated, and Refract refuses to start if it can't be. Without it, Refract warns at startup when several accounts compile without isolation.
 
+### Upgrading from REFRACT_MODE
+
+Refract refuses to start when `REFRACT_MODE` has a non-empty value. If you used `REFRACT_MODE=selfhost`, remove it and keep your existing settings. If you used `REFRACT_MODE=saas`, configure the deployment before removing the variable and restarting.
+
+- Follow [Run it for a team](#run-it-for-a-team) to set `REFRACT_PROFILE=team` with sign-in and the compile sandbox. Set `REFRACT_OUTBOUND=public` to restrict AI provider and Git connections to public addresses.
+- Keep `REFRACT_PUBLIC_URL` set to your HTTPS address and terminate TLS at your [reverse proxy](#behind-a-reverse-proxy). Keep `REFRACT_SIGNUP=closed` if you add accounts yourself.
+- Set a finite compile queue wait. Behind Cloudflare, `REFRACT_COMPILE_MAX_WAIT=20` and `REFRACT_COMPILE_TIMEOUT=60` are one combination within Refract's 95-second warning threshold.
+- The ChatGPT plan option is now available alongside API providers in every deployment.
+
 ### Run it for a team
 
 `REFRACT_PROFILE=team` is for people who must not read each other's files: a lab, a class, a department. It requires sign-in (`REFRACT_AUTH=builtin` or `cloudflare`), runs every compile in the [compile sandbox](#compile-sandbox), the editor's and the assistant's alike, and refuses to start, saying what is missing, without sign-in, with `REFRACT_SANDBOX=none`, or when the sandbox can't compile its self-test document. It runs on Linux hosts (amd64 and arm64) with Docker, or directly with the [systemd unit](packaging/server/refract.service). Verified end to end with Docker 29 on arm64 and, on every change to the sandbox and weekly, on GitHub's Ubuntu runners (amd64, `.github/workflows/team-sandbox.yml`).
@@ -558,7 +567,7 @@ All settings are environment variables.
 | `REFRACT_PROFILE` | `personal` (default) or `team`: people who must not read each other's files. `team` requires sign-in and the [compile sandbox](#compile-sandbox) (it turns `REFRACT_SANDBOX=bwrap` on), and refuses to start without them. See [Run it for a team](#run-it-for-a-team). |
 | `REFRACT_SANDBOX` | `none` (default; `bwrap` with `REFRACT_PROFILE=team`) or `bwrap`: run every compile in a [sandbox](#compile-sandbox). Required with `REFRACT_PROFILE=team`. |
 | `REFRACT_COMPILE_WORKERS` | Compiles running at once, across all accounts. Default: the number of CPUs minus one, at least 1. Each account runs one compile at a time. |
-| `REFRACT_COMPILE_MAX_WAIT` | Seconds a compile waits for its turn before the server answers "busy, try again". Default 20. With `REFRACT_AUTH=cloudflare`, Refract logs a warning at startup if this plus `REFRACT_COMPILE_TIMEOUT` exceeds 95 seconds. Cloudflare cuts requests with no response at about 100 seconds. |
+| `REFRACT_COMPILE_MAX_WAIT` | Seconds a compile waits for its turn before the server answers "busy, try again". Default 20. Set to 0 for an unlimited wait. With `REFRACT_AUTH=cloudflare`, Refract warns at startup if the wait is unlimited or if the wait plus `REFRACT_COMPILE_TIMEOUT` exceeds 95 seconds. For example, use a wait of 20 seconds and a timeout of 60 seconds. |
 | `REFRACT_FONT_DOWNLOADS` | `0` disables Google Fonts requests; project, TeX bundle and cached fonts still work. Default: downloads enabled. |
 | `REFRACT_GITHUB_CLIENT_ID` | Client ID of your GitHub OAuth App, to connect GitHub accounts (see below). |
 | `REFRACT_OPENALEX_API_KEY` | A free [OpenAlex key](https://openalex.org/settings/api). Without one, paper searches share a small daily budget per IP address. |

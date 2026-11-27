@@ -18,10 +18,17 @@ type compileConfig struct {
 
 // cloudflareCompileWarning flags compiles that could outlast the proxy's response timeout.
 func cloudflareCompileWarning(authKind string, cfg compileConfig) string {
-	if authKind != "cloudflare" || cfg.maxWait+cfg.timeout <= 95*time.Second {
+	if authKind != "cloudflare" {
 		return ""
 	}
-	return fmt.Sprintf("REFRACT_COMPILE_MAX_WAIT (%s) plus REFRACT_COMPILE_TIMEOUT (%s) exceeds 95s. Cloudflare cuts requests with no response at about 100s", cfg.maxWait, cfg.timeout)
+	const hint = "Cloudflare may close the request before compilation finishes. Set REFRACT_COMPILE_MAX_WAIT=20 and REFRACT_COMPILE_TIMEOUT=60, or use another positive wait and timeout totaling at most 95s."
+	if cfg.maxWait == 0 {
+		return "REFRACT_COMPILE_MAX_WAIT=0 allows an unlimited queue wait. " + hint
+	}
+	if cfg.maxWait+cfg.timeout > 95*time.Second {
+		return fmt.Sprintf("REFRACT_COMPILE_MAX_WAIT (%s) plus REFRACT_COMPILE_TIMEOUT (%s) exceeds 95s. %s", cfg.maxWait, cfg.timeout, hint)
+	}
+	return ""
 }
 
 func parseCompileConfig(getenv func(string) string) (compileConfig, error) {

@@ -153,8 +153,18 @@ type runOptions struct {
 	wrap func(http.Handler) http.Handler
 }
 
+func checkRemovedMode(value string) error {
+	if value == "" {
+		return nil
+	}
+	return errors.New("REFRACT_MODE was removed. Unset it before starting Refract. For a former SaaS deployment, configure REFRACT_PROFILE=team and REFRACT_OUTBOUND=public. See the README section Upgrading from REFRACT_MODE")
+}
+
 // run serves Refract until ctx ends, then shuts down gracefully.
 func run(ctx context.Context, opts runOptions) error {
+	if err := checkRemovedMode(os.Getenv("REFRACT_MODE")); err != nil {
+		return err
+	}
 	// Absolute: tectonic and synctex run in other working directories.
 	dataDir, err := filepath.Abs(cmp.Or(opts.dataDir, os.Getenv("REFRACT_DATA_DIR"), "/data"))
 	if err != nil {

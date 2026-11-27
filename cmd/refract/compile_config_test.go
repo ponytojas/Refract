@@ -35,20 +35,34 @@ func TestParseCompileConfig(t *testing.T) {
 
 func TestCloudflareCompileWarning(t *testing.T) {
 	for _, tc := range []struct {
-		auth  string
-		total time.Duration
-		want  bool
+		name    string
+		auth    string
+		maxWait time.Duration
+		timeout time.Duration
+		want    string
 	}{
-		{"cloudflare", 94 * time.Second, false},
-		{"cloudflare", 95 * time.Second, false},
-		{"cloudflare", 96 * time.Second, true},
-		{"builtin", 96 * time.Second, false},
-		{"none", 96 * time.Second, false},
+		{"below threshold", "cloudflare", 20 * time.Second, 74 * time.Second, ""},
+		{"at threshold", "cloudflare", 20 * time.Second, 75 * time.Second, ""},
+		{"above threshold", "cloudflare", 20 * time.Second, 76 * time.Second, "exceeds 95s"},
+		{"defaults", "cloudflare", 20 * time.Second, 90 * time.Second, "exceeds 95s"},
+		{"unlimited wait", "cloudflare", 0, 60 * time.Second, "unlimited queue wait"},
+		{"builtin auth", "builtin", 0, 90 * time.Second, ""},
+		{"no auth", "none", 20 * time.Second, 90 * time.Second, ""},
 	} {
-		cfg := compileConfig{maxWait: 20 * time.Second, timeout: tc.total - 20*time.Second}
-		warning := cloudflareCompileWarning(tc.auth, cfg)
-		if !tc.want && warning != "" || tc.want && !strings.Contains(warning, "Cloudflare cuts requests with no response at about 100s") {
-			t.Errorf("auth %q, total %s: warning = %q, want warning: %t", tc.auth, tc.total, warning, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := compileConfig{maxWait: tc.maxWait, timeout: tc.timeout}
+			warning := cloudflareCompileWarning(tc.auth, cfg)
+			if tc.want == "" {
+				if warning != "" {
+					t.Errorf("unexpected warning: %q", warning)
+				}
+				return
+			}
+			for _, text := range []string{tc.want, "REFRACT_COMPILE_MAX_WAIT=20", "REFRACT_COMPILE_TIMEOUT=60"} {
+				if !strings.Contains(warning, text) {
+					t.Errorf("warning = %q, want it to mention %q", warning, text)
+				}
+			}
+		})
 	}
 }
