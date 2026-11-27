@@ -33,9 +33,9 @@ export default function WordCounter({ view, path, ai, enabled, onCount, target, 
   const count = empty ? null : selectedWords(words, from, to).length
   const [max, setMax] = useState('100')
   const [running, setRunning] = useState(false)
-  const [result, setResult] = useState<{ before: number; after: number; text: string } | null>(null)
+  const [result, setResult] = useState<{ before: number; after: number } | null>(null)
+  const [proposalOwner] = useState(() => Symbol())
   const abort = useRef<AbortController | null>(null)
-  const ownedProposal = useRef<ReturnType<typeof proposal>>(null)
   const pending = proposal(view.state)
   const existing =
     target && limits.ranges.find((r) => (target.section ? r.section === target.section : r.id === target.id))
@@ -43,9 +43,9 @@ export default function WordCounter({ view, path, ai, enabled, onCount, target, 
   useEffect(
     () => () => {
       abort.current?.abort()
-      if (ownedProposal.current && proposal(view.state) === ownedProposal.current) reject(view)
+      if (proposal(view.state)?.owner === proposalOwner) reject(view)
     },
-    [],
+    [proposalOwner, view],
   )
   useEffect(() => {
     onCount(enabled ? count : null)
@@ -88,9 +88,21 @@ export default function WordCounter({ view, path, ai, enabled, onCount, target, 
       const after = selectedWords(latexWords(next, limits.rules), range.from, range.from + response.text.length).length
       if (!response.text.trim() || after === 0 || after > range.max)
         throw new Error(t('The suggestion does not meet the word limit. Try again.'))
-      propose(view, range.from, range.to, response.text)
-      ownedProposal.current = proposal(view.state)
-      setResult({ before, after, text: response.text })
+      propose(view, range.from, range.to, response.text, {
+        owner: proposalOwner,
+        isValid: (state, pending) => {
+          const current = state.field(wordLimits)
+          const limit = current.ranges.find((r) => r.id === range.id)
+          return (
+            current.rules === limits.rules &&
+            !!limit &&
+            limit.from === pending.from &&
+            limit.to === pending.to &&
+            after <= limit.max
+          )
+        },
+      })
+      setResult({ before, after })
       view.focus()
     } catch (error) {
       if (!controller.signal.aborted) toast.error(errorText(error))
@@ -102,7 +114,7 @@ export default function WordCounter({ view, path, ai, enabled, onCount, target, 
   const exceeded = limits.ranges.filter((r) => selectedWords(words, r.from, r.to).length > r.max)
   const contextual = limitAt(source, limits.ranges, from, to)
   const active = exceeded.find((r) => r.id === contextual?.id)
-  const reviewing = result && pending?.text === result.text
+  const reviewing = result && pending?.owner === proposalOwner
 
   return (
     <>

@@ -552,20 +552,91 @@ test('turning the counter off hides all limit features and keeps saved limits af
   await expect(page.getByLabel('Maximum words')).toHaveValue('3')
 })
 
-test('turning the counter off discards its pending AI suggestion', async ({ page, request }) => {
+test('turning the counter off discards its pending AI suggestion after an outside edit', async ({ page, request }) => {
   await openProject(page, request, true)
   await page.route('**/api/quick', (route) => route.fulfill({ json: { text: 'One essential idea.' } }))
   await abstractLimit(page)
   await shorter(page).click()
   await expect(page.getByText('8 → 3 words', { exact: true })).toBeVisible()
+
+  await page.keyboard.press('ControlOrMeta+Home')
+  await page.keyboard.insertText('% Added before the abstract\n')
+  const editor = page.locator('.cm-content')
+  const diff = editor.locator('.cm-quick-ins, .cm-quick-del')
+  const accept = page.getByRole('toolbar', { name: 'Quick actions' }).getByRole('button', { name: /Accept/ })
+  await expect(editor).toContainText('% Added before the abstract')
+  await expect(diff.first()).toBeVisible()
+  await expect(accept).toBeVisible()
+
   await openWordCountSettings(page)
-  await page.getByRole('switch', { name: 'Word count', exact: true }).click()
-  await expect(page.locator('.cm-quick-ins')).toHaveCount(0)
+  const toggle = page.getByRole('switch', { name: 'Word count', exact: true })
+  await toggle.click()
+  await page.keyboard.press('Escape')
+  await expect(diff).toHaveCount(0)
+  await expect(accept).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Word limit assistant' })).toHaveCount(0)
-  await page.getByRole('switch', { name: 'Word count', exact: true }).click()
+  const abstract = editor.locator('.cm-line').filter({ hasText: 'One two three' })
+  await abstract.click()
+  await page.keyboard.press('Tab')
+  await expect(abstract).toContainText('One two three four five six seven eight.')
+  await expect(editor).not.toContainText('essential idea.')
+
+  await openWordCountSettings(page)
+  await toggle.click()
   await page.keyboard.press('Escape')
   await expect(page.locator('.cm-word-excess')).toHaveCount(5)
-  await expect(page.getByText('8 → 3 words', { exact: true })).toHaveCount(0)
+  await expect(diff).toHaveCount(0)
+  await expect(accept).toHaveCount(0)
+})
+
+for (const change of ['lowering', 'removing'] as const) {
+  test(`${change} a word limit discards an invalid suggestion before Tab can accept it`, async ({ page, request }) => {
+    await openProject(page, request, true)
+    await page.route('**/api/quick', (route) => route.fulfill({ json: { text: 'One essential idea.' } }))
+    await abstractLimit(page)
+    await shorter(page).click()
+    const panel = page.getByRole('region', { name: 'Word limit assistant' })
+    await expect(panel.getByText('8 → 3 words', { exact: true })).toBeVisible()
+
+    // The proposal still fits after a change to the maximum.
+    await abstractLimit(page, '4')
+    await expect(panel.getByText('8 → 3 words', { exact: true })).toBeVisible()
+
+    if (change === 'lowering') {
+      await abstractLimit(page, '2')
+    } else {
+      await openLimit(page)
+      await page.getByRole('button', { name: 'Remove limit', exact: true }).click()
+    }
+    const editor = page.locator('.cm-content')
+    await expect(editor.locator('.cm-quick-ins, .cm-quick-del')).toHaveCount(0)
+    await expect(panel.getByRole('button', { name: 'Accept', exact: true })).toHaveCount(0)
+    const abstract = editor.locator('.cm-line').filter({ hasText: 'One two three' })
+    await abstract.click()
+    await page.keyboard.press('Tab')
+    await expect(abstract).toContainText('One two three four five six seven eight.')
+    await expect(editor).not.toContainText('essential idea.')
+  })
+}
+
+test('turning the counter off preserves a quick-action proposal', async ({ page, request }) => {
+  await openProject(page, request, true)
+  await page.route('**/api/quick', (route) => route.fulfill({ json: { text: 'Closing' } }))
+  const tail = page.locator('.cm-line').filter({ hasText: 'Tail text.' })
+  await tail.dblclick({ position: { x: 10, y: 8 } })
+  const toolbar = page.getByRole('toolbar', { name: 'Quick actions' })
+  const inserted = page.locator('.cm-quick-ins')
+  await toolbar.getByRole('button', { name: 'Improve', exact: true }).click()
+  await expect(inserted).toHaveText('Closing')
+
+  await openWordCountSettings(page)
+  const toggle = page.getByRole('switch', { name: 'Word count', exact: true })
+  await toggle.click()
+  await expect(toggle).not.toBeChecked()
+  await page.keyboard.press('Escape')
+  await expect(inserted).toHaveText('Closing')
+  await toolbar.getByRole('button', { name: /Accept/ }).click()
+  await expect(page.locator('.cm-line').filter({ hasText: 'Closing text.' })).toBeVisible()
 })
 
 test('renaming a heading updates the shortening label through undo, redo and reload', async ({ page, request }) => {
