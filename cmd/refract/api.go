@@ -34,6 +34,11 @@ type api struct {
 
 	canSignOut bool // REFRACT_AUTH=builtin: Refract keeps the session
 
+	// logins runs the ChatGPT sign-in inside the server. Only set when it
+	// listens on loopback: the browser is then on this computer and OpenAI's
+	// redirect to 127.0.0.1 reaches us.
+	logins *siwc.Logins
+
 	missingTools []string // external programs not found at startup (internal/tools), for the UI notice
 
 	providers *providers.Store // users' API-key providers
@@ -95,6 +100,11 @@ func (a *api) routes(rt *router) {
 	if a.mode.ChatGPT() { // elsewhere these fall through to a 404
 		rt.user("POST /api/chatgpt/credentials", a.importCredentials)
 		rt.user("POST /api/chatgpt/signout", a.signOut)
+		if a.logins != nil {
+			rt.user("POST /api/chatgpt/login", a.hereOnly(a.startLogin))
+			rt.user("GET /api/chatgpt/login", a.hereOnly(a.loginStatus))
+			rt.user("DELETE /api/chatgpt/login", a.hereOnly(a.cancelLogin))
+		}
 	}
 	rt.user("POST /api/chatgpt/welcome-seen", a.welcomeSeen)
 	rt.user("GET /api/models", a.models)
@@ -155,7 +165,60 @@ func (a *api) status(w http.ResponseWriter, r *http.Request) {
 		"welcome_seen":  seen,
 		"manage_usage":  siwc.ManageUsage,
 		"default_model": a.model,
+		"sign_in_here":  a.mode.ChatGPT() && a.logins != nil && fromThisComputer(r),
 	})
+}
+
+// hereOnly refuses the in-server sign-in to browsers on other computers
+// (behind a reverse proxy): OpenAI's redirect goes to this computer's
+// 127.0.0.1, so they upload a credentials file instead.
+func (a *api) hereOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !fromThisComputer(r) {
+			httpError(w, errors.New("signing in to ChatGPT from Settings works only on the computer Refract runs on; upload a credentials file instead"), http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// startLogin begins the in-server ChatGPT sign-in. The server opens the
+// browser itself (it is on this computer); the answer carries the authorize
+// URL and whether that worked, so the page opens it otherwise. {"new": true} registers another account.
+func (a *api) startLogin(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		New bool `json:"new"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
+		httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	started, err := a.logins.Start(r.Context(), a.forUser(r.Context()).session, in.New)
+	switch {
+	case errors.Is(err, siwc.ErrLoginBusy):
+		httpError(w, err, http.StatusConflict)
+	case err != nil:
+		writeLoginFailure(w, a.logins.Status(requestUser(r.Context())))
+	default:
+		writeJSON(w, started)
+	}
+}
+
+func (a *api) loginStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, a.logins.Status(requestUser(r.Context())))
+}
+
+func (a *api) cancelLogin(w http.ResponseWriter, r *http.Request) {
+	a.logins.Cancel(requestUser(r.Context()))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeLoginFailure answers a sign-in that failed before it could start
+// (the callback port is taken) with its state, for the page to explain.
+func writeLoginFailure(w http.ResponseWriter, st siwc.LoginState) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"kind": st.Kind, "message": st.Message}})
 }
 
 func (a *api) importCredentials(w http.ResponseWriter, r *http.Request) {
@@ -173,6 +236,10 @@ func (a *api) importCredentials(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) signOut(w http.ResponseWriter, r *http.Request) {
+	// A sign-in still waiting would store new credentials after this.
+	if a.logins != nil {
+		a.logins.Cancel(requestUser(r.Context()))
+	}
 	if err := a.forUser(r.Context()).session.SignOut(r.Context()); err != nil {
 		httpError(w, err, http.StatusBadGateway)
 		return

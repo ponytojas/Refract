@@ -58,6 +58,7 @@ type Props = {
   view: EditorView
   path: string
   dragging: boolean
+  hideSelection?: string // `from-to` of a selection made by a right-click: no toolbar unless asked for
   handle: Ref<QuickHandle>
   onCite?: () => void // open "Add a reference" for the selection
   instructions?: () => Promise<string | undefined> // the project's REFRACT.md, as sent to the server
@@ -65,7 +66,7 @@ type Props = {
 
 // Floating toolbar over the editor selection: one-shot AI edits (§4.7), shown
 // as an inline diff to accept (Tab) or reject (Esc).
-export default function QuickActions({ view, path, dragging, handle, onCite, instructions }: Props) {
+export default function QuickActions({ view, path, dragging, hideSelection, handle, onCite, instructions }: Props) {
   const [job, setJob] = useState<Job | null>(null) // running, or finished with an error/explanation
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
@@ -168,7 +169,10 @@ export default function QuickActions({ view, path, dragging, handle, onCite, ins
     setAsking(false)
   }, [sel.from, sel.to])
 
-  const visible = !dragging && (view.hasFocus || within || !!job || !!pending)
+  const visible =
+    !dragging &&
+    !(!pending && !job && !asking && hideSelection === `${sel.from}-${sel.to}`) &&
+    (view.hasFocus || within || !!job || !!pending)
   const a = range && visible ? view.coordsAtPos(range.from) : null
   const box = view.dom.getBoundingClientRect()
   const above = a ? a.top - box.top - 44 : 0
