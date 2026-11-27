@@ -97,7 +97,7 @@ var members = map[string]struct {
 
 // userWildcards are the only user routes that take a path wildcard, none of
 // them a project, chat or turn. Adding one is a decision to review.
-var userWildcards = []string{"/api/providers/{id}", "/api/account/sessions/{id}"}
+var userWildcards = []string{"/api/providers/{id}", "/api/account/sessions/{id}", "/api/account/export/{id}"}
 
 // trashRoutes are the only routes that reach a project in the trash. Adding one is a decision to review.
 var trashRoutes = []string{"POST /api/projects/{id}/restore", "DELETE /api/projects/{id}/purge"}

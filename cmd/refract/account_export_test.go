@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,33 @@ import (
 	"github.com/ponytojas/Refract/internal/store"
 	"github.com/ponytojas/Refract/internal/tools"
 )
+
+const accountExportEndpoint = "/api/account/export"
+
+func startAccountExport(t *testing.T, b *browser) string {
+	t.Helper()
+	res := b.post(accountExportEndpoint, nil)
+	b.expect(res, http.StatusAccepted, "")
+	var job struct{ ID string }
+	if err := json.Unmarshal([]byte(res.Body), &job); err != nil || job.ID == "" {
+		t.Fatalf("start export response: %s (%v)", res.Body, err)
+	}
+	return accountExportEndpoint + "/" + job.ID
+}
+
+func waitForAccountExport(t *testing.T, b *browser, endpoint string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		res := b.do("GET", endpoint, nil)
+		if res.Status == http.StatusOK && strings.Contains(res.Body, `"ready"`) {
+			return
+		}
+		if res.Status != http.StatusOK || strings.Contains(res.Body, `"failed"`) || time.Now().After(deadline) {
+			t.Fatalf("export status: %d %s", res.Status, res.Body)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 func readAccountZip(t *testing.T, raw []byte, forbidden ...string) map[string][]byte {
 	t.Helper()
@@ -166,18 +194,14 @@ func TestAccountExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	forbidden = append(forbidden, sessionHash)
-	const endpoint = "/api/account/export"
-	b.expect(a.post(endpoint, nil), http.StatusAccepted, "")
-	for deadline := time.Now().Add(10 * time.Second); ; {
-		res := a.do("GET", endpoint, nil)
-		if res.Status == http.StatusOK && strings.Contains(res.Body, `"ready"`) {
-			break
-		}
-		if res.Status != http.StatusOK || strings.Contains(res.Body, `"failed"`) || time.Now().After(deadline) {
-			t.Fatalf("export status: %d %s", res.Status, res.Body)
-		}
-		time.Sleep(10 * time.Millisecond)
+	old := startAccountExport(t, a)
+	waitForAccountExport(t, a, old)
+	if err := e.ps.WriteFile(owner, draft.ID, "main.tex", strings.NewReader("Edit after the first export")); err != nil {
+		t.Fatal(err)
 	}
+	endpoint := startAccountExport(t, a)
+	waitForAccountExport(t, a, endpoint)
+	a.expect(a.do("GET", old+"/download", nil), http.StatusNotFound, "")
 	for _, path := range []string{endpoint, endpoint + "/download"} {
 		b.expect(b.do("GET", path, nil), http.StatusNotFound, "")
 	}
@@ -211,7 +235,7 @@ func TestAccountExport(t *testing.T) {
 		t.Errorf("unexpected settings: %s", settings)
 	}
 	prefix := "projects/" + draft.ID + "/"
-	if text := string(entries[prefix+"files/main.tex"]); text != "Latest uncommitted edit" {
+	if text := string(entries[prefix+"files/main.tex"]); text != "Edit after the first export" {
 		t.Errorf("worktree file = %q", text)
 	}
 	dir := t.TempDir()
@@ -226,6 +250,158 @@ func TestAccountExport(t *testing.T) {
 	}
 	if text := gitRun("-C", clone, "show", "HEAD:main.tex"); text != "Committed text" {
 		t.Errorf("bundle HEAD = %q", text)
+	}
+}
+
+func TestAccountExportSkipsMissingProject(t *testing.T) {
+	e := newAccountEnv(t, envOpts{noMail: true})
+	ana, err := e.people.SetPassword(t.Context(), "ana@example.com", "fixture-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := auth.WithUser(t.Context(), ana)
+	first, err := e.ps.Create(ctx, "Available project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing, err := e.ps.Create(ctx, "Missing project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(e.ps.Path(missing.ID), filepath.Join(t.TempDir(), "moved-repo")); err != nil {
+		t.Fatal(err)
+	}
+	b := e.browser()
+	b.expect(b.post("/api/auth/login", map[string]string{"email": ana.Email, "password": "fixture-password"}), http.StatusNoContent, "")
+	endpoint := startAccountExport(t, b)
+	waitForAccountExport(t, b, endpoint)
+	res := b.do("GET", endpoint+"/download", nil)
+	b.expect(res, http.StatusOK, "")
+	entries := readAccountZip(t, []byte(res.Body))
+	var omitted []struct {
+		ID string `json:"project_id"`
+	}
+	if err := json.Unmarshal(entries["errors.json"], &omitted); err != nil || len(omitted) != 1 || omitted[0].ID != missing.ID {
+		t.Fatalf("omitted projects: %s (%v)", entries["errors.json"], err)
+	}
+	if len(entries["projects/"+first.ID+"/history.bundle"]) == 0 {
+		t.Error("archive does not contain the available project's history")
+	}
+	for entry := range entries {
+		if strings.HasPrefix(entry, "projects/"+missing.ID+"/") {
+			t.Errorf("partial project entry: %s", entry)
+		}
+	}
+}
+
+func TestAccountExportReplacesPreparingJobAtCapacity(t *testing.T) {
+	e := newAccountEnv(t, envOpts{noMail: true})
+	ana, err := e.people.SetPassword(t.Context(), "ana@example.com", "fixture-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := e.people.SetPassword(t.Context(), "bob@example.com", "fixture-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := e.browser()
+	b.expect(b.post("/api/auth/login", map[string]string{"email": ana.Email, "password": "fixture-password"}), http.StatusNoContent, "")
+	e.people.DB.SetMaxOpenConns(1)
+	conn, err := e.people.DB.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close() // keep both workers waiting for the database
+	exports := e.login.exports
+	old := exports.start(ana.ID)
+	other := exports.start(bob.ID)
+	replacement := exports.start(ana.ID)
+	if old == "" || other == "" || replacement == "" || replacement == old || exports.start("third") != "" {
+		t.Fatalf("unexpected job IDs %q, %q, %q or third export accepted", old, other, replacement)
+	}
+	conn.Close()
+	waitForAccountExport(t, b, accountExportEndpoint+"/"+replacement)
+	b.expect(b.do("GET", accountExportEndpoint+"/"+old+"/download", nil), http.StatusNotFound, "")
+	exports.close()
+	if entries, err := os.ReadDir(exports.tmp); err != nil && !os.IsNotExist(err) || len(entries) != 0 {
+		t.Errorf("staging files remain after close: %v (%v)", entries, err)
+	}
+}
+
+func TestAccountExportStartupCleansStagingFiles(t *testing.T) {
+	tmp := t.TempDir()
+	staging := filepath.Join(tmp, "account-exports")
+	stale := filepath.Join(staging, exportDirPrefix+"abandoned")
+	if err := os.MkdirAll(stale, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(staging, "unrelated")
+	if err := os.WriteFile(other, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tr := newAccountExports(t.Context(), nil, tmp)
+	defer tr.close()
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("abandoned staging directory was not removed: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("unrelated file was removed: %v", err)
+	}
+}
+
+type blockedExportWriter struct {
+	http.ResponseWriter
+	started chan struct{}
+	release chan struct{}
+}
+
+func (w blockedExportWriter) Write(p []byte) (int, error) {
+	close(w.started)
+	<-w.release
+	return w.ResponseWriter.Write(p)
+}
+
+func TestAccountExportDefersCleanupUntilDownloadCloses(t *testing.T) {
+	exports := newAccountExports(t.Context(), nil, t.TempDir())
+	defer exports.close()
+	dir := filepath.Join(exports.tmp, exportDirPrefix+"download")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "account.zip"), []byte("archive data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	exports.jobs["owner"] = &accountExport{id: "download", status: "ready", dir: dir, ctx: ctx, cancel: cancel}
+	r := httptest.NewRequest(http.MethodGet, "/api/account/export/download/download", nil)
+	r.SetPathValue("id", "download")
+	r = r.WithContext(auth.WithUser(r.Context(), auth.User{ID: "owner"}))
+	rec := httptest.NewRecorder()
+	w := blockedExportWriter{rec, make(chan struct{}), make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		exports.downloadExport(w, r)
+	}()
+	select {
+	case <-w.started:
+	case <-done:
+		t.Fatalf("download finished early with status %d", rec.Code)
+	case <-time.After(5 * time.Second):
+		close(w.release)
+		t.Fatal("download did not start")
+	}
+	exports.discard("owner")
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("staging directory removed during download: %v", err)
+	}
+	close(w.release)
+	<-done
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("staging directory not removed after download: %v", err)
+	}
+	if rec.Body.String() != "archive data" {
+		t.Errorf("download body = %q", rec.Body.String())
 	}
 }
 

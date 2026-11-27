@@ -292,7 +292,7 @@ func run(ctx context.Context, opts runOptions) error {
 		svc: &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Limits: projects.DefaultLimits, Key: key, PublicRemotes: publicOnly},
 		tmp: filepath.Join(dataDir, "tmp"),
 	}
-	exports := &accountExports{ctx: ctx, projects: pa.svc}
+	exports := newAccountExports(ctx, pa.svc, pa.tmp)
 	defer exports.close()
 	a.exports = exports
 

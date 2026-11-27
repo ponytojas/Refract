@@ -1,6 +1,7 @@
 package projects
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -96,8 +97,10 @@ func extract(dir string, src Source, lim Limits) (skipped []string, err error) {
 	return skipped, err
 }
 
-// walkFiles calls fn for every regular file in the project tree (slash
-// paths), skipping .git and .refract.
+const saveTempPrefix = ".refract-tmp-"
+
+// walkFiles calls fn for each regular project file, skipping Git metadata,
+// build output, and temporary files that a save has yet to rename.
 func walkFiles(dir string, fn func(rel string, info fs.FileInfo) error) error {
 	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -108,6 +111,11 @@ func walkFiles(dir string, fn func(rel string, info fs.FileInfo) error) error {
 		}
 		if !d.Type().IsRegular() {
 			return nil
+		}
+		if suffix, ok := strings.CutPrefix(d.Name(), saveTempPrefix); ok && len(suffix) == 12 {
+			if _, err := hex.DecodeString(suffix); err == nil {
+				return nil
+			}
 		}
 		rel, err := filepath.Rel(dir, p)
 		if err != nil {

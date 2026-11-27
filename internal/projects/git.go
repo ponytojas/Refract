@@ -29,6 +29,12 @@ func gitEnv(ctx context.Context, dir string, env []string, args ...string) (stri
 
 // runGit runs git with base as the inherited environment, then env.
 func runGit(ctx context.Context, dir string, base0, env []string, args ...string) (string, error) {
+	// An interrupted git add or commit can leave .git/index.lock behind.
+	return runGitWithContext(context.WithoutCancel(ctx), dir, base0, env, args...)
+}
+
+// Read-only repository operations can pass a cancellable context.
+func runGitWithContext(ctx context.Context, dir string, base0, env []string, args ...string) (string, error) {
 	base := []string{
 		"-c", "core.hooksPath=/dev/null",
 		"-c", "user.name=Refract",
@@ -36,10 +42,7 @@ func runGit(ctx context.Context, dir string, base0, env []string, args ...string
 		"-c", "commit.gpgsign=false",
 		"-c", "init.defaultBranch=main",
 	}
-	// Never killed half-way: an interrupted `git add`/`commit` leaves
-	// .git/index.lock behind and blocks the repo. Git ops are local and short;
-	// the timeout only guards against a hang.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	bin, err := tools.Path("git")
 	if err != nil {

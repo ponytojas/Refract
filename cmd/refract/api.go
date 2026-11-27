@@ -93,7 +93,9 @@ func (a *api) metered(kind string) func(context.Context) ai.Provider {
 func (a *api) missing() []string { return append([]string{}, a.missingTools...) }
 
 func (a *api) routes(rt *router) {
-	a.exports.routes(rt)
+	if a.exports != nil {
+		a.exports.routes(rt)
+	}
 	rt.user("GET /api/me", func(w http.ResponseWriter, r *http.Request) {
 		u, _ := auth.UserFrom(r.Context())
 		writeJSON(w, map[string]any{"id": u.ID, "email": u.Email, "can_sign_out": a.canSignOut, "mode": a.mode, "missing_tools": a.missing()})

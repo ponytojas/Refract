@@ -169,6 +169,8 @@ export default {
   'Could not save your edits before exporting. Try again.':
     'No se pudieron guardar tus cambios antes de exportar. Inténtalo de nuevo.',
   'Could not export your data. Try again.': 'No se pudieron exportar tus datos. Inténtalo de nuevo.',
+  'The server is busy preparing exports. Try again in a few minutes.':
+    'El servidor está preparando otras exportaciones. Inténtalo de nuevo en unos minutos.',
   'New password (8+ characters)': 'Contraseña nueva (8 caracteres o más)',
   'New password': 'Contraseña nueva',
   Change: 'Cambiar',

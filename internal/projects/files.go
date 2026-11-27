@@ -138,7 +138,7 @@ func (s *Service) WriteFile(ctx context.Context, id, p string, r io.Reader) erro
 	}
 	suffix := make([]byte, 6)
 	rand.Read(suffix)
-	tmp := path.Join(path.Dir(p), ".refract-tmp-"+hex.EncodeToString(suffix))
+	tmp := path.Join(path.Dir(p), saveTempPrefix+hex.EncodeToString(suffix))
 	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err

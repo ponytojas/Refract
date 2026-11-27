@@ -71,7 +71,7 @@ func newAccountEnv(t *testing.T, o envOpts) *accountEnv {
 	people := &users.Service{DB: db, Key: make([]byte, 32)}
 	ps := &projects.Service{DB: db, Dir: filepath.Join(dir, "projects"), Limits: projects.DefaultLimits, Key: people.Key}
 	e := &accountEnv{t: t, people: people, ps: ps, fake: &mail.Fake{}}
-	exports := &accountExports{ctx: context.Background(), projects: ps}
+	exports := newAccountExports(context.Background(), ps, filepath.Join(dir, "tmp"))
 	t.Cleanup(exports.close)
 	e.login = &loginAPI{users: people, mode: mode.SelfHost, signup: o.signup, destroy: destroyer(ps), exports: exports}
 	if !o.noMail {

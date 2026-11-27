@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,86 +16,134 @@ import (
 	"github.com/ponytojas/Refract/internal/projects"
 )
 
-const exportRetention = 10 * time.Minute
+const (
+	exportRetention = 10 * time.Minute
+	exportDirPrefix = "refract-account-export-"
+)
 
 type accountExport struct {
-	status     string // preparing, ready or failed
-	cancel     context.CancelFunc
-	timer      *time.Timer
-	path       string
-	downloaded bool
+	id      string
+	status  string // preparing, ready or failed
+	ctx     context.Context
+	cancel  context.CancelFunc
+	timer   *time.Timer
+	dir     string
+	readers int
 }
 
-// accountExports keeps in-progress archives off request threads and finished
-// archives on disk. The map is indexed by the authenticated account ID.
+// accountExports keeps at most one current request per account. A newer
+// request for an account reuses its worker slot after the old build stops.
 type accountExports struct {
 	ctx      context.Context
 	projects *projects.Service
+	tmp      string
 	mu       sync.Mutex
 	jobs     map[string]*accountExport
-	running  int
+	workers  map[string]bool
+	builds   sync.WaitGroup
 	closed   bool
 }
 
-func (e *accountExports) start(owner string) (string, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.closed || e.ctx.Err() != nil {
-		return "", false
+func newAccountExports(ctx context.Context, ps *projects.Service, tmp string) *accountExports {
+	e := &accountExports{
+		ctx: ctx, projects: ps, tmp: filepath.Join(tmp, "account-exports"),
+		jobs: make(map[string]*accountExport), workers: make(map[string]bool),
 	}
-	existing := e.jobs[owner]
-	if existing != nil && (existing.status == "preparing" || existing.status == "ready" && !existing.downloaded) {
-		return existing.status, true
+	entries, err := os.ReadDir(e.tmp)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("could not list account export staging files", "err", err)
 	}
-	// A small number of simultaneous git packs keeps a shared server responsive.
-	if e.running >= 2 {
-		return "", false
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), exportDirPrefix) {
+			cleanExportDir(filepath.Join(e.tmp, entry.Name()))
+		}
 	}
-	e.removeLocked(owner)
-	if e.jobs == nil {
-		e.jobs = make(map[string]*accountExport)
-	}
-	ctx, cancel := context.WithTimeout(e.ctx, 30*time.Minute)
-	job := &accountExport{status: "preparing", cancel: cancel}
-	e.jobs[owner] = job
-	e.running++
-	go e.build(ctx, owner, job)
-	return job.status, true
+	return e
 }
 
-func (e *accountExports) build(ctx context.Context, owner string, job *accountExport) {
-	defer job.cancel()
-	f, err := os.CreateTemp("", "refract-account-export-*.zip")
-	var path string
-	if err == nil {
-		path = f.Name()
-		err = errors.Join(accountexport.Write(ctx, f, e.projects, owner), f.Close(), ctx.Err())
+func cleanExportDir(dir string) {
+	if err := os.RemoveAll(dir); err != nil {
+		slog.Warn("could not remove account export staging files", "err", err)
 	}
+}
+
+func (e *accountExports) start(owner string) string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.running--
-	if e.jobs[owner] != job {
-		if path != "" {
-			os.Remove(path)
+	if e.closed || e.ctx.Err() != nil || (!e.workers[owner] && len(e.workers) >= 2) {
+		return ""
+	}
+	e.removeLocked(owner)
+	ctx, cancel := context.WithTimeout(e.ctx, 30*time.Minute)
+	job := &accountExport{id: rand.Text(), status: "preparing", ctx: ctx, cancel: cancel}
+	e.jobs[owner] = job
+	if !e.workers[owner] {
+		e.workers[owner] = true
+		e.builds.Add(1)
+		go e.run(owner, job)
+	}
+	return job.id
+}
+
+func (e *accountExports) run(owner string, job *accountExport) {
+	defer e.builds.Done()
+	for {
+		dir, err := e.build(owner, job.ctx)
+		job.cancel()
+		e.mu.Lock()
+		current := e.jobs[owner]
+		if current != job {
+			e.mu.Unlock()
+			if dir != "" {
+				cleanExportDir(dir)
+			}
+			e.mu.Lock()
+			job = e.jobs[owner]
+			if job != nil {
+				e.mu.Unlock()
+				continue
+			}
+		} else {
+			if err != nil {
+				slog.Warn("account export failed", "user", owner, "err", err)
+				job.status = "failed"
+			} else {
+				job.status, job.dir = "ready", dir
+			}
+			job.timer = time.AfterFunc(exportRetention, func() {
+				e.mu.Lock()
+				defer e.mu.Unlock()
+				if e.jobs[owner] == job {
+					e.removeLocked(owner)
+				}
+			})
 		}
+		delete(e.workers, owner)
+		e.mu.Unlock()
 		return
 	}
-	if err != nil {
-		if path != "" {
-			os.Remove(path)
-		}
-		slog.Warn("account export failed", "user", owner, "err", err)
-		job.status = "failed"
-	} else {
-		job.status, job.path = "ready", path
+}
+
+func (e *accountExports) build(owner string, ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	job.timer = time.AfterFunc(exportRetention, func() {
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		if e.jobs[owner] == job {
-			e.removeLocked(owner)
-		}
-	})
+	if err := os.MkdirAll(e.tmp, 0o700); err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp(e.tmp, exportDirPrefix)
+	if err != nil {
+		return "", err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "account.zip"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err == nil {
+		err = errors.Join(accountexport.Write(ctx, f, e.projects, owner, dir), f.Close(), ctx.Err())
+	}
+	if err != nil {
+		cleanExportDir(dir)
+		return "", err
+	}
+	return dir, nil
 }
 
 func (e *accountExports) removeLocked(owner string) {
@@ -105,8 +156,8 @@ func (e *accountExports) removeLocked(owner string) {
 	if job.timer != nil {
 		job.timer.Stop()
 	}
-	if job.path != "" {
-		os.Remove(job.path)
+	if job.dir != "" && job.readers == 0 {
+		cleanExportDir(job.dir)
 	}
 }
 
@@ -118,36 +169,37 @@ func (e *accountExports) discard(owner string) {
 
 func (e *accountExports) close() {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.closed = true
 	for owner := range e.jobs {
 		e.removeLocked(owner)
 	}
+	e.mu.Unlock()
+	e.builds.Wait()
 }
 
 func (e *accountExports) routes(rt *router) {
 	rt.user("POST /api/account/export", e.startExport)
-	rt.user("GET /api/account/export", e.exportStatus)
-	rt.user("GET /api/account/export/download", e.downloadExport)
+	rt.user("GET /api/account/export/{id}", e.exportStatus)
+	rt.user("GET /api/account/export/{id}/download", e.downloadExport)
 }
 
 func (e *accountExports) startExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	status, ok := e.start(requestUser(r.Context()))
-	if !ok {
+	id := e.start(requestUser(r.Context()))
+	if id == "" {
 		httpError(w, errors.New("account export is busy"), http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, map[string]string{"status": status})
+	writeJSON(w, map[string]string{"id": id, "status": "preparing"})
 }
 
 func (e *accountExports) exportStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	e.mu.Lock()
 	var status string
-	if job := e.jobs[requestUser(r.Context())]; job != nil {
+	if job := e.jobs[requestUser(r.Context())]; job != nil && job.id == r.PathValue("id") {
 		status = job.status
 	}
 	e.mu.Unlock()
@@ -161,22 +213,31 @@ func (e *accountExports) exportStatus(w http.ResponseWriter, r *http.Request) {
 func (e *accountExports) downloadExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	e.mu.Lock()
-	job := e.jobs[requestUser(r.Context())]
-	if job == nil || job.status != "ready" {
+	owner := requestUser(r.Context())
+	job := e.jobs[owner]
+	if job == nil || job.id != r.PathValue("id") || job.status != "ready" {
 		e.mu.Unlock()
 		http.NotFound(w, r)
 		return
 	}
-	f, err := os.Open(job.path)
-	if err == nil && r.Method != http.MethodHead {
-		job.downloaded = true
+	f, err := os.Open(filepath.Join(job.dir, "account.zip"))
+	if err == nil {
+		job.readers++
 	}
 	e.mu.Unlock()
 	if err != nil {
 		httpError(w, errors.New("account export is unavailable"), http.StatusInternalServerError)
 		return
 	}
-	defer f.Close()
+	defer func() {
+		f.Close()
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		job.readers--
+		if job.readers == 0 && e.jobs[owner] != job {
+			cleanExportDir(job.dir)
+		}
+	}()
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="refract-account.zip"`)
 	http.ServeContent(w, r, "refract-account.zip", time.Time{}, f)

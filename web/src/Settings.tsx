@@ -364,27 +364,49 @@ function AccountPane() {
 
 function ExportGroup() {
   const [busy, setBusy] = useState(false)
+  const active = useRef<AbortController | null>(null)
+
+  useEffect(() => () => active.current?.abort(), [])
 
   async function exportData() {
+    if (active.current) return
+    const controller = new AbortController()
+    active.current = controller
+    const { signal } = controller
+    const deadline = setTimeout(() => {
+      toast.error(t('Could not export your data. Try again.'))
+      controller.abort('timeout')
+    }, 31 * 60_000)
     setBusy(true)
     try {
-      if (!(await flushPending())) {
+      const saved = await flushPending()
+      if (signal.aborted) return
+      if (!saved) {
         toast.error(t('Could not save your edits before exporting. Try again.'))
         return
       }
       type ExportStatus = { status: 'preparing' | 'ready' | 'failed' }
-      const path = '/api/account/export'
-      let job = await api<ExportStatus>(path, { method: 'POST' })
+      const started = await api<ExportStatus & { id: string }>('/api/account/export', { method: 'POST', signal })
+      const path = '/api/account/export/' + encodeURIComponent(started.id)
+      let job: ExportStatus = started
       while (job.status === 'preparing') {
         await new Promise((resolve) => setTimeout(resolve, 1000))
-        job = await api<ExportStatus>(path)
+        if (signal.aborted) return
+        job = await api<ExportStatus>(path, { signal })
       }
       if (job.status !== 'ready') throw new Error('account export failed')
-      await download(path + '/download', 'refract-account.zip')
-    } catch {
-      toast.error(t('Could not export your data. Try again.'))
+      await download(path + '/download', 'refract-account.zip', signal)
+    } catch (error) {
+      if (signal.aborted) return
+      if (error instanceof RequestError && error.status === 503) {
+        toast.error(t('The server is busy preparing exports. Try again in a few minutes.'))
+      } else {
+        toast.error(t('Could not export your data. Try again.'))
+      }
     } finally {
-      setBusy(false)
+      clearTimeout(deadline)
+      active.current = null
+      if (!signal.aborted || signal.reason === 'timeout') setBusy(false)
     }
   }
 

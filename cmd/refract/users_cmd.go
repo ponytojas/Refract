@@ -25,6 +25,7 @@ const usersUsage = `usage:
   refract users unlock <email> | --all    let an account (or everyone) sign in again after too many failed attempts
   refract users remove <email> [--yes]    delete an account and everything it owns
   refract users export <email> <file>    write an account archive with projects, history and chats
+                                        stop the server before exporting
   refract users list                      list accounts`
 
 // runUsers manages accounts on the server's own database (same
@@ -106,7 +107,7 @@ func runUsers(args []string, out io.Writer) error {
 			return err
 		}
 		ps := &projects.Service{DB: db, Dir: filepath.Join(dataDir, "projects"), Key: key}
-		if err := accountexport.WriteFile(ctx, args[2], ps, acct.ID); err != nil {
+		if err := accountexport.WriteFile(ctx, args[2], ps, acct.ID, filepath.Join(dataDir, "tmp")); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "Exported %s to %s.\n", acct.Email, args[2])

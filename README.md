@@ -332,7 +332,9 @@ Accounts you add this way count as confirmed: you vouch for the address. People 
 
 **Export my data** in **Settings → Account** prepares a ZIP in the background and downloads it when ready. It contains current project files, including edits saved since the last commit, and a `history.bundle` for each project. Use `git clone history.bundle <directory>` to open a project's history. `projects.json` identifies projects in the trash by their `deleted_at` date and marks saved templates. Each project's `chats.json` contains its conversations and turns. The ZIP includes account settings and token totals. Refract excludes passwords, sessions, connection credentials, provider endpoints and raw provider errors. Files, commits and messages are exported as written.
 
-An administrator can create the same ZIP with `refract users export <email> <file>` using the server's data folder and encryption key. The command requires a new destination file.
+If a project cannot be read, the ZIP includes the remaining projects and an `errors.json` listing the omitted project IDs. Look up their names in `projects.json`. The server stages exports under `<data>/tmp/account-exports`.
+
+An administrator can create the same ZIP with `refract users export <email> <file>` using the server's data folder and encryption key. Stop the Refract server before running the command so project files and Git history stay consistent. The command requires a new destination file.
 
 ### Sign in with OpenID Connect
 

@@ -45,7 +45,7 @@ func (s *Service) AccountProjects(ctx context.Context, owner string) ([]ExportPr
 
 // WriteAccountProject writes the complete reachable git history and a copy
 // of the current files, including edits made since the last checkpoint.
-func (s *Service) WriteAccountProject(ctx context.Context, zw *zip.Writer, owner, id string) error {
+func (s *Service) WriteAccountProject(ctx context.Context, zw *zip.Writer, owner, id, tmp string) error {
 	if !filepath.IsLocal(id) || filepath.Base(id) != id || id == "." || strings.Contains(id, "\\") {
 		return fmt.Errorf("invalid project ID %q", id)
 	}
@@ -58,14 +58,15 @@ func (s *Service) WriteAccountProject(ctx context.Context, zw *zip.Writer, owner
 	if err != nil {
 		return err
 	}
-	dir, err := os.MkdirTemp("", "refract-git-bundle-")
+	dir, err := os.MkdirTemp(tmp, "refract-git-bundle-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(dir)
 	bundle := filepath.Join(dir, "history.bundle")
 	repo := s.Path(id)
-	if _, err := git(ctx, repo, "bundle", "create", bundle, "--all", "HEAD"); err != nil {
+	// Bundle creation only writes to the private staging directory.
+	if _, err := runGitWithContext(ctx, repo, os.Environ(), nil, "bundle", "create", bundle, "--all", "HEAD"); err != nil {
 		return err
 	}
 	f, err := os.Open(bundle)
