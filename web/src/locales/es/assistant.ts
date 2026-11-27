@@ -97,10 +97,10 @@ export default {
   Cite: 'Citar',
 
   // api.ts
-  'No AI connected. Sign in with ChatGPT (run `refract login` and upload the credentials) or add an API provider in Settings → Assistant.':
-    'No hay IA conectada. Inicia sesión con ChatGPT (ejecuta `refract login` y sube las credenciales) o añade un proveedor por API en Ajustes → Asistente.',
-  'ChatGPT plan usage was not granted. Run `refract login` again and allow plan usage.':
-    'No se concedió el uso del plan de ChatGPT. Vuelve a ejecutar `refract login` y permite el uso del plan.',
+  'No AI connected. Sign in with ChatGPT or add an API provider in Settings → Assistant.':
+    'No hay IA conectada. Inicia sesión con ChatGPT o añade un proveedor por API en Ajustes → Asistente.',
+  'ChatGPT plan usage was not granted. Sign in again and allow plan usage.':
+    'No se concedió el uso del plan de ChatGPT. Vuelve a iniciar sesión y permite el uso del plan.',
   'You have reached a usage limit on your ChatGPT plan or for this app. Review it in ChatGPT settings → Usage.':
     'Has alcanzado un límite de uso de tu plan de ChatGPT o de esta app. Revísalo en los ajustes de ChatGPT → Uso.',
   'ChatGPT plan usage is not available for this account: {message}':

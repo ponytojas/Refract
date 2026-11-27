@@ -72,6 +72,29 @@ export default {
   choose: 'elige',
   'then upload the credentials file it writes.': 'y después sube el archivo de credenciales que genera.',
   'Upload credentials…': 'Subir credenciales…',
+  'Signed in with ChatGPT': 'Sesión iniciada con ChatGPT',
+  'Waiting for ChatGPT…': 'Esperando a ChatGPT…',
+  'Finish signing in in your browser, then come back here.': 'Termina de iniciar sesión en el navegador y vuelve aquí.',
+  'Open the sign-in page': 'Abrir la página de inicio de sesión',
+  'To renew access or use another ChatGPT account.': 'Para renovar el acceso o usar otra cuenta de ChatGPT.',
+  'Use your ChatGPT plan for the assistant. Your browser opens to finish signing in.':
+    'Usa tu plan de ChatGPT con el asistente. Se abrirá el navegador para terminar de iniciar sesión.',
+  'Use the new account': 'Usar la cuenta nueva',
+  'Sign in with ChatGPT': 'Iniciar sesión con ChatGPT',
+  'Signing out disconnects Refract from this ChatGPT account.':
+    'Al cerrar sesión, Refract se desconecta de esta cuenta de ChatGPT.',
+  'Credentials file': 'Archivo de credenciales',
+  'Signed in elsewhere with {cmd}? Upload the file it wrote.':
+    '¿Iniciaste sesión en otro sitio con {cmd}? Sube el archivo que generó.',
+  'Upload…': 'Subir…',
+  'Sign-in was cancelled.': 'Se canceló el inicio de sesión.',
+  'Sign-in took too long and stopped. Try again when you are ready.':
+    'El inicio de sesión tardó demasiado y se detuvo. Vuelve a intentarlo cuando quieras.',
+  'Another app is signing in to ChatGPT on this computer (port 1455). Close it and try again.':
+    'Otra aplicación está iniciando sesión en ChatGPT en este ordenador (puerto 1455). Ciérrala y vuelve a intentarlo.',
+  'You signed in with a different ChatGPT account than the one connected before.':
+    'Iniciaste sesión con una cuenta de ChatGPT distinta de la que estaba conectada.',
+  'Sign-in did not complete.': 'No se completó el inicio de sesión.',
   Chat: 'Chat',
   'When collapsed': 'Al contraerlo',
   'Keep an input bar under the editor, or tuck the chat into a bubble.':
