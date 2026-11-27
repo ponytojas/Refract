@@ -1,5 +1,5 @@
 import { invertedEffects } from '@codemirror/commands'
-import { Facet, StateEffect, StateField, type EditorState } from '@codemirror/state'
+import { Facet, StateEffect, StateField, type EditorState, type Text } from '@codemirror/state'
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
 import { defaultRules, findSections, latexWords, selectedWords, type CountRules, type Section } from './wordcount.ts'
 
@@ -9,7 +9,18 @@ export const setLimits = StateEffect.define<Limits>()
 type SavedLimit = { range: WordLimit; headingFrom?: number }
 
 // Section IDs end in an occurrence number, which can change when titles repeat.
-const headingKey = (section: Section) => section.id.slice(0, section.id.lastIndexOf(':'))
+const headingKey = (id: string) => id.slice(0, id.lastIndexOf(':'))
+
+// CodeMirror documents are immutable. Share the scan across edits, highlighting, and undo.
+const sectionsByDoc = new WeakMap<Text, Section[]>()
+function sectionsFor(doc: Text): Section[] {
+  let sections = sectionsByDoc.get(doc)
+  if (!sections) {
+    sections = findSections(doc.toString())
+    sectionsByDoc.set(doc, sections)
+  }
+  return sections
+}
 
 // History maps these positions when several edits are grouped into one undo.
 const restoreLimits = StateEffect.define<SavedLimit[]>({
@@ -29,41 +40,58 @@ export const wordLimits = StateField.define<Limits>({
     for (const effect of tr.effects) if (effect.is(setLimits)) return effect.value
     const restored = tr.effects.flatMap((effect) => (effect.is(restoreLimits) ? effect.value : []))
     if (!restored.length && (!tr.docChanged || !value.ranges.length)) return value
-    const oldSections = value.ranges.some((r) => r.section) ? findSections(tr.startState.doc.toString()) : []
-    const sections =
-      oldSections.length || restored.some(({ range }) => range.section) ? findSections(tr.newDoc.toString()) : []
+    const oldSections = value.ranges.some((r) => r.section) ? sectionsFor(tr.startState.doc) : []
+    const sections = oldSections.length || restored.some(({ range }) => range.section) ? sectionsFor(tr.newDoc) : []
     function rewrittenHeading(heading: Section): Section | undefined {
       let match: Section | undefined
-      const key = headingKey(heading)
+      const key = headingKey(heading.id)
       tr.changes.iterChangedRanges((oldFrom, oldTo, newFrom, newTo) => {
-        if (heading.headingFrom < oldFrom || heading.from > oldTo || newFrom === newTo) return
-        // Match only a one-to-one rewrite within this replacement.
-        const ambiguous = oldSections.some(
-          (s) => s !== heading && s.headingFrom >= oldFrom && s.from <= oldTo && headingKey(s) === key,
+        if (oldTo <= heading.headingFrom || oldFrom >= heading.from || newFrom === newTo) return
+        // A surviving endpoint anchors the match even if another copy was inserted in the replacement.
+        const start = heading.headingFrom < oldFrom ? tr.changes.mapPos(heading.headingFrom, 1) : undefined
+        const end = heading.from > oldTo ? tr.changes.mapPos(heading.from, -1) : undefined
+        const candidates = sections.filter(
+          (s) =>
+            headingKey(s.id) === key &&
+            (start === undefined ? s.headingFrom >= newFrom : s.headingFrom === start) &&
+            (end === undefined ? s.from <= newTo : s.from === end),
         )
-        if (ambiguous) return
-        const candidates = sections.filter((s) => s.headingFrom >= newFrom && s.from <= newTo && headingKey(s) === key)
-        if (candidates.length === 1) match = candidates[0]
+        if (candidates.length !== 1) return
+        // Fully replaced headings have no anchor. Match only a one-to-one rewrite.
+        if (
+          start === undefined &&
+          end === undefined &&
+          oldSections.some(
+            (s) => s !== heading && s.headingFrom >= oldFrom && s.from <= oldTo && headingKey(s.id) === key,
+          )
+        )
+          return
+        match = candidates[0]
       }, true)
       return match
     }
-    function attach(range: WordLimit, headingFrom: number | undefined, oldHeading?: Section): WordLimit[] {
+    function attach(range: WordLimit, section: Section | undefined): WordLimit[] {
       if (!range.section) return [range]
-      const section =
-        sections.find((s) => s.headingFrom === headingFrom && s.from === range.from) ??
-        (oldHeading && rewrittenHeading(oldHeading))
       return section ? [{ ...range, name: section.name, section: section.id, from: section.from, to: section.to }] : []
     }
     const ranges = value.ranges.flatMap((range) => {
+      const from = tr.changes.mapPos(range.from, -1)
       const heading = oldSections.find((s) => s.id === range.section)
-      return attach(
-        { ...range, from: tr.changes.mapPos(range.from, -1), to: tr.changes.mapPos(range.to, 1) },
-        heading && tr.changes.mapPos(heading.headingFrom, 1),
-        heading,
-      )
+      const headingFrom = heading && tr.changes.mapPos(heading.headingFrom, 1)
+      const section =
+        heading && (sections.find((s) => s.headingFrom === headingFrom && s.from === from) ?? rewrittenHeading(heading))
+      return attach({ ...range, from, to: tr.changes.mapPos(range.to, 1) }, section)
     })
-    for (const { range, headingFrom } of restored)
-      if (!ranges.some((r) => r.id === range.id)) ranges.push(...attach(range, headingFrom))
+    for (const { range, headingFrom } of restored) {
+      if (ranges.some((r) => r.id === range.id)) continue
+      const key = range.section && headingKey(range.section)
+      const section = sections.find(
+        (s) =>
+          s.from === range.from &&
+          (headingFrom === undefined ? headingKey(s.id) === key : s.headingFrom === headingFrom),
+      )
+      ranges.push(...attach(range, section))
+    }
     return { ...value, ranges }
   },
   provide: (field) =>
@@ -72,7 +100,7 @@ export const wordLimits = StateField.define<Limits>({
       const remaining = new Set(tr.state.field(field).ranges.map((r) => r.id))
       const removed = tr.startState.field(field).ranges.filter((r) => !remaining.has(r.id))
       if (!removed.length) return []
-      const sections = findSections(tr.startState.doc.toString())
+      const sections = removed.some((r) => r.section) ? sectionsFor(tr.startState.doc) : []
       return [
         restoreLimits.of(
           removed.map((range) => ({
@@ -129,7 +157,7 @@ export const excessWords = StateField.define<DecorationSet>({
     if (!ranges.length) return Decoration.none
     const source = tr.newDoc.toString()
     const words = latexWords(source, rules)
-    const sections = findSections(source)
+    const sections = sectionsFor(tr.newDoc)
     const excess = new Map<string, { from: number; to: number }>()
     for (const range of ranges) {
       // A nested limit owns its highlighting, including when it is below its maximum.
