@@ -106,6 +106,7 @@ export default function Editor({
   const [mounted, setMounted] = useState<EditorView | null>(null)
   const [limitTarget, setLimitTarget] = useState<LimitTarget | null>(null)
   const contextPos = useRef<number | null>(null)
+  const [menuSel, setMenuSel] = useState('') // selection a right-click made: the context menu is the intent, no toolbar
   const [dragging, setDragging] = useState(false) // no toolbar while a mouse selection is being made
   const [, bump] = useReducer((n: number) => n + 1, 0) // re-render the toolbar (it reads the view)
   const quickRef = useRef<QuickHandle>(null)
@@ -267,6 +268,8 @@ export default function Editor({
         bump()
       if (u.selectionSet || u.docChanged) {
         const { from, to, empty } = u.state.selection.main
+        // The right-click suppression covers only that selection: any other one shows the toolbar again.
+        setMenuSel((s) => (s && s !== `${from}-${to}` ? '' : s))
         const a = u.state.doc.lineAt(from).number
         const b = u.state.doc.lineAt(to).number
         cb.current.onSelect?.(empty ? '' : a === b ? `${a}` : `${a}–${b}`)
@@ -474,6 +477,13 @@ export default function Editor({
         className="relative min-h-0 flex-1"
         onContextMenuCapture={(e) => {
           contextPos.current = view.current?.posAtCoords({ x: e.clientX, y: e.clientY }) ?? null
+          // WebKit selects the word under a right-click, maybe just after this event.
+          const mark = () => {
+            const m = view.current?.state.selection.main
+            setMenuSel(m && !m.empty ? `${m.from}-${m.to}` : '')
+          }
+          mark()
+          requestAnimationFrame(mark)
         }}
       >
         <WithContextMenu items={menu} className="h-full select-text">
@@ -497,6 +507,7 @@ export default function Editor({
             view={mounted}
             path={path}
             dragging={dragging}
+            hideSelection={menuSel}
             handle={quickRef}
             onCite={onCite ? () => cite(true) : undefined}
             instructions={instructions}

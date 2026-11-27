@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ponytojas/Refract/internal/siwc"
 )
 
 // listenAddr is REFRACT_ADDR, or 127.0.0.1:8080 without it: this computer
@@ -199,4 +201,41 @@ func newServer(mux http.Handler, hosts hostPolicy) *http.Server {
 		ReadHeaderTimeout:            10 * time.Second,
 		DisableGeneralOptionsHandler: true,
 	}
+}
+
+// loginsFor is the in-server ChatGPT sign-in for a server listening on addr:
+// only on loopback, where the browser is on this computer. A container that
+// listens on all its interfaces gets none: OpenAI's redirect to the host's
+// 127.0.0.1 can't reach it.
+func loginsFor(addr net.Addr) *siwc.Logins {
+	if tcp, ok := addr.(*net.TCPAddr); ok && tcp.IP.IsLoopback() {
+		// The server opens the browser itself: a page's window.open after a
+		// request is a popup that browsers and the desktop app's web view may drop.
+		return &siwc.Logins{OpenBrowser: openBrowser}
+	}
+	return nil
+}
+
+// fromThisComputer reports whether a request comes straight from a browser on
+// the computer Refract runs on: a loopback peer, a loopback host name and no
+// proxy headers. A loopback listener can also sit behind a reverse proxy for
+// people elsewhere, and their browser can't reach this computer's callback.
+func fromThisComputer(r *http.Request) bool {
+	for _, h := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Real-Ip"} {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
+	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(peer); err != nil || ip == nil || !ip.IsLoopback() {
+		return false
+	}
+	host, ok := parseAuthority(r.Host)
+	if !ok {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost" || strings.HasSuffix(host, ".localhost")
 }
