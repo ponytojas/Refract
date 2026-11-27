@@ -88,7 +88,20 @@ export default function WordCounter({ view, path, ai, enabled, onCount, target, 
       const after = selectedWords(latexWords(next, limits.rules), range.from, range.from + response.text.length).length
       if (!response.text.trim() || after === 0 || after > range.max)
         throw new Error(t('The suggestion does not meet the word limit. Try again.'))
-      propose(view, range.from, range.to, response.text, proposalOwner)
+      propose(view, range.from, range.to, response.text, {
+        owner: proposalOwner,
+        isValid: (state, pending) => {
+          const current = state.field(wordLimits)
+          const limit = current.ranges.find((r) => r.id === range.id)
+          return (
+            current.rules === limits.rules &&
+            !!limit &&
+            limit.from === pending.from &&
+            limit.to === pending.to &&
+            after <= limit.max
+          )
+        },
+      })
       setResult({ before, after })
       view.focus()
     } catch (error) {

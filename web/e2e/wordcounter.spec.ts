@@ -589,6 +589,36 @@ test('turning the counter off discards its pending AI suggestion after an outsid
   await expect(accept).toHaveCount(0)
 })
 
+for (const change of ['lowering', 'removing'] as const) {
+  test(`${change} a word limit discards an invalid suggestion before Tab can accept it`, async ({ page, request }) => {
+    await openProject(page, request, true)
+    await page.route('**/api/quick', (route) => route.fulfill({ json: { text: 'One essential idea.' } }))
+    await abstractLimit(page)
+    await shorter(page).click()
+    const panel = page.getByRole('region', { name: 'Word limit assistant' })
+    await expect(panel.getByText('8 → 3 words', { exact: true })).toBeVisible()
+
+    // The proposal still fits after a change to the maximum.
+    await abstractLimit(page, '4')
+    await expect(panel.getByText('8 → 3 words', { exact: true })).toBeVisible()
+
+    if (change === 'lowering') {
+      await abstractLimit(page, '2')
+    } else {
+      await openLimit(page)
+      await page.getByRole('button', { name: 'Remove limit', exact: true }).click()
+    }
+    const editor = page.locator('.cm-content')
+    await expect(editor.locator('.cm-quick-ins, .cm-quick-del')).toHaveCount(0)
+    await expect(panel.getByRole('button', { name: 'Accept', exact: true })).toHaveCount(0)
+    const abstract = editor.locator('.cm-line').filter({ hasText: 'One two three' })
+    await abstract.click()
+    await page.keyboard.press('Tab')
+    await expect(abstract).toContainText('One two three four five six seven eight.')
+    await expect(editor).not.toContainText('essential idea.')
+  })
+}
+
 test('turning the counter off preserves a quick-action proposal', async ({ page, request }) => {
   await openProject(page, request, true)
   await page.route('**/api/quick', (route) => route.fulfill({ json: { text: 'Closing' } }))
