@@ -14,6 +14,48 @@ import (
 	"github.com/ponytojas/Refract/internal/auth"
 )
 
+func TestSessionGuardDoesNotReviveRevokedAccount(t *testing.T) {
+	for _, action := range []string{"rename", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			s, ctx := newService(t), t.Context()
+			const email = "ana@example.com"
+			u, err := s.Resolve(ctx, email)
+			if err != nil {
+				t.Fatal(err)
+			}
+			token, err := s.NewSession(ctx, u.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			protected := s.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("revoked session reached the protected handler")
+			}))
+			h := s.SessionGuard(http.NotFoundHandler())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var err error
+				if action == "rename" {
+					err = s.RenameAccount(ctx, u.ID, "renamed@example.com")
+				} else {
+					err = s.Delete(ctx, email)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				protected.ServeHTTP(w, r)
+			}))
+			r := httptest.NewRequest("GET", "/api/me", nil)
+			r.AddCookie(&http.Cookie{Name: SessionCookie, Value: token})
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusForbidden {
+				t.Errorf("revoked session received status %d", w.Code)
+			}
+			if _, err := s.Lookup(ctx, email); !errors.Is(err, ErrNoAccount) {
+				t.Errorf("old address still exists: %v", err)
+			}
+		})
+	}
+}
+
 // clock is a settable time for a Service.
 type clock struct{ t time.Time }
 

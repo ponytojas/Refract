@@ -623,7 +623,8 @@ function DeleteGroup({
       reloadTo('/?account_deleted=1')
     } catch (err) {
       toast.error(errorText(err))
-      if (err instanceof RequestError && err.error.kind === 'reauth_required') reload()
+      if (err instanceof RequestError && ['reauth_required', 'account_removal_partial'].includes(err.error.kind))
+        reload()
       setBusy(false)
     }
   }

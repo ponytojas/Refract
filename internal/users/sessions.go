@@ -69,28 +69,40 @@ func (s *Service) NewSession(ctx context.Context, userID string) (string, error)
 
 // StartSession signs a user in from a client and returns the cookie's token.
 func (s *Service) StartSession(ctx context.Context, userID string, c Client) (string, error) {
-	token, _, err := s.newSession(ctx, userID, "", c)
+	return s.StartSessionFor(ctx, auth.User{ID: userID}, c)
+}
+
+// StartSessionFor checks that the address the caller authenticated is still
+// the account's address.
+func (s *Service) StartSessionFor(ctx context.Context, u auth.User, c Client) (string, error) {
+	token, ok, err := s.newSession(ctx, u, "", c)
+	if err == nil && !ok {
+		err = ErrBadLogin
+	}
 	return token, err
 }
 
-// newSession creates a session for userID. With a non-empty password hash it
-// does so only if that is still the account's password, in the same
-// statement, and reports ok=false otherwise.
-func (s *Service) newSession(ctx context.Context, userID, password string, c Client) (token string, ok bool, err error) {
+// newSession checks the account and any non-empty email and password hash
+// in the same statement that inserts the session.
+func (s *Service) newSession(ctx context.Context, u auth.User, password string, c Client) (token string, ok bool, err error) {
 	b := make([]byte, 32)
 	rand.Read(b)
 	token = base64.RawURLEncoding.EncodeToString(b)
 	now := s.now()
 	s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at < ? OR last_seen_at < ?`, now.Unix(), now.Add(-SessionIdle).Unix())
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO sessions (id, user_id, expires_at, authenticated_at, created_at, last_seen_at, user_agent, ip)
-		SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE ? = '' OR EXISTS (SELECT 1 FROM users WHERE id = ? AND password = ?)`,
-		sessionID(token), userID, now.Add(SessionTTL).Unix(), now.Unix(), now.Unix(), now.Unix(), c.UserAgent, c.IP,
-		password, userID, password)
+		SELECT ?, id, ?, ?, ?, ?, ?, ? FROM users
+		WHERE id = ? AND (? = '' OR email = ?) AND (? = '' OR password = ?)`,
+		sessionID(token), now.Add(SessionTTL).Unix(), now.Unix(), now.Unix(), now.Unix(), c.UserAgent, c.IP,
+		u.ID, u.Email, u.Email, password, password)
 	if err != nil {
 		return "", false, err
 	}
 	n, err := res.RowsAffected()
-	return token, n == 1, err
+	if n != 1 || err != nil {
+		return "", false, err
+	}
+	return token, true, nil
 }
 
 // Session returns the user a session token belongs to, if the session is
@@ -101,11 +113,16 @@ func (s *Service) Session(ctx context.Context, token string) (auth.User, error) 
 }
 
 func (s *Service) session(ctx context.Context, token string) (u auth.User, lastSeen int64, err error) {
-	now := s.now()
-	err = s.DB.QueryRowContext(ctx, `SELECT u.id, u.email, s.last_seen_at FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.id = ? AND s.expires_at > ? AND s.last_seen_at > ?`,
-		sessionID(token), now.Unix(), now.Add(-SessionIdle).Unix()).Scan(&u.ID, &u.Email, &lastSeen)
+	u, _, lastSeen, err = s.sessionByID(ctx, sessionID(token))
 	return u, lastSeen, err
+}
+
+func (s *Service) sessionByID(ctx context.Context, id string) (u auth.User, lang string, lastSeen int64, err error) {
+	now := s.now()
+	err = s.DB.QueryRowContext(ctx, `SELECT u.id, u.email, u.lang, s.last_seen_at FROM sessions s JOIN users u ON u.id = s.user_id
+		WHERE s.id = ? AND s.expires_at > ? AND s.last_seen_at > ?`,
+		id, now.Unix(), now.Add(-SessionIdle).Unix()).Scan(&u.ID, &u.Email, &lang, &lastSeen)
+	return u, lang, lastSeen, err
 }
 
 // seen records that a session was used now, from c, unless that was already

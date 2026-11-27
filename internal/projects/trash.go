@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -95,6 +97,35 @@ func (s *Service) Destroy(ctx context.Context, id string) error {
 	return s.purge(ctx, id, "1 = 1")
 }
 
+// DestroyOwnedProjects reserves every project before deleting any. It returns
+// the number deleted even if later filesystem or database work fails.
+func (s *Service) DestroyOwnedProjects(ctx context.Context, ids []string) (int, error) {
+	ordered := slices.Clone(ids)
+	slices.Sort(ordered)
+	for _, id := range ordered {
+		defer lockRemote(id)()
+	}
+	for _, id := range ordered {
+		release, ok := s.holdTurns(id)
+		if !ok {
+			return 0, fmt.Errorf("reserving project %s: %w", id, ErrTurnRunning)
+		}
+		defer release()
+	}
+	var deleted int
+	for _, id := range ids {
+		err := s.purgeReserved(ctx, id, "1 = 1")
+		if errors.Is(err, ErrNotFound) {
+			continue // a concurrent purge finished before we acquired the locks
+		}
+		if err != nil {
+			return deleted, fmt.Errorf("deleting project %s: %w", id, err)
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
 // PurgeExpired deletes the projects that have been in the trash for more than
 // TrashDays, and returns how many. One failure doesn't stop the rest.
 func (s *Service) PurgeExpired(ctx context.Context) (int, error) {
@@ -170,7 +201,10 @@ func (s *Service) purge(ctx context.Context, id, cond string, args ...any) error
 		return ErrTurnRunning
 	}
 	defer release()
+	return s.purgeReserved(ctx, id, cond, args...)
+}
 
+func (s *Service) purgeReserved(ctx context.Context, id, cond string, args ...any) error {
 	gone := filepath.Join(s.Dir, purgePrefix+id)
 	err := func() error {
 		defer lockRepo(id)()

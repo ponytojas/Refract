@@ -511,6 +511,31 @@ func TestAccountMigrationVerifiesExistingUsers(t *testing.T) {
 	}
 }
 
+func TestAdminMigrationDoesNotPromoteExistingAccounts(t *testing.T) {
+	idx := slices.IndexFunc(migrations, func(m string) bool { return strings.Contains(m, "ADD COLUMN is_admin") })
+	if idx < 0 {
+		t.Fatal("no administrator migration")
+	}
+	path := filepath.Join(t.TempDir(), "refract.db")
+	old := at(t, path, idx)
+	_, err := old.Exec(`INSERT INTO users (id, email, created_at, email_verified_at) VALUES
+		('unverified', 'unverified@example.com', 1, 0), ('first', 'first@example.com', 2, 4),
+		('second', 'second@example.com', 2, 3), ('third', 'third@example.com', 3, 3)`)
+	old.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM users WHERE is_admin = 1`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("administrators = %d, %v; want none", count, err)
+	}
+}
+
 func TestSessionMigrationDatesExistingSessions(t *testing.T) {
 	idx := slices.IndexFunc(migrations, func(m string) bool { return strings.Contains(m, "sessions ADD COLUMN last_seen_at") })
 	if idx < 0 {

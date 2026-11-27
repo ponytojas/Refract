@@ -9,6 +9,7 @@ import {
   Monitor,
   Moon,
   Settings,
+  Shield,
   Sun,
 } from 'lucide-react'
 import {
@@ -31,7 +32,7 @@ import { lang, t } from '@/lib/i18n'
 import { allowanceLeft, compact, modelLabel, ownUsage, renewalDate, totalTokens } from '@/lib/usage'
 import { useMonthUsage } from './useMonthUsage'
 import { chatgptOffered } from '@/lib/mode'
-import { reloadTo } from '@/lib/router'
+import { Link, reloadTo } from '@/lib/router'
 
 const themes: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: 'light', label: t('Light'), icon: Sun },
@@ -40,7 +41,7 @@ const themes: { value: Theme; label: string; icon: typeof Sun }[] = [
 ]
 
 // Bottom-left account chip: ChatGPT identity, settings, theme.
-type Me = { id: string; email: string; can_sign_out: boolean }
+type Me = { id: string; email: string; can_sign_out: boolean; is_admin: boolean }
 let mePromise: Promise<Me | null> | null = null
 export function useMe() {
   const [me, setMe] = useState<Me | null>(null)
@@ -115,6 +116,11 @@ export default function AccountMenu({ status, compact }: { status: ChatGPTStatus
         <DropdownMenuItem onClick={() => openSettings()}>
           <Settings /> {t('Settings')}
         </DropdownMenuItem>
+        {me?.is_admin && (
+          <DropdownMenuItem render={<Link to="/admin" />}>
+            <Shield /> {t('Account administration')}
+          </DropdownMenuItem>
+        )}
         {status?.status.signed_in && (
           <DropdownMenuItem render={<a href={status.manage_usage} target="_blank" rel="noreferrer" />}>
             <ExternalLink /> {t('Manage ChatGPT usage')}

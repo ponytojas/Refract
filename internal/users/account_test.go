@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ponytojas/Refract/internal/auth"
 )
 
 func countUsers(t *testing.T, s *Service) (n int) {
@@ -188,7 +190,7 @@ func TestConfirmByProvider(t *testing.T) {
 	s, ctx := newService(t), context.Background()
 	l, _ := s.SignUp(ctx, "ana@example.com", "attacker pass", "en")
 	tok, _ := s.NewSession(ctx, l.To.ID)
-	if err := s.ConfirmByProvider(ctx, l.To.ID); err != nil {
+	if err := s.ConfirmByProvider(ctx, auth.User{ID: l.To.ID, Email: l.To.Email}); err != nil {
 		t.Fatal(err)
 	}
 	a, _ := s.Lookup(ctx, "ana@example.com")
@@ -205,7 +207,7 @@ func TestConfirmByProvider(t *testing.T) {
 	// A verified account keeps everything.
 	u, _ := s.SetPassword(ctx, "ben@example.com", "correct horse")
 	tok, _ = s.NewSession(ctx, u.ID)
-	if err := s.ConfirmByProvider(ctx, u.ID); err != nil {
+	if err := s.ConfirmByProvider(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Session(ctx, tok); err != nil {
@@ -213,6 +215,63 @@ func TestConfirmByProvider(t *testing.T) {
 	}
 	if _, err := s.Login(ctx, "ben@example.com", "correct horse", ""); err != nil {
 		t.Errorf("a verified account lost its password: %v", err)
+	}
+}
+
+func TestRenameInvalidatesEmailProofs(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	start, err := s.SignUp(ctx, "old@example.com", "fixture account password", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery, ok, err := s.RequestReset(ctx, start.To.Email)
+	if err != nil || !ok {
+		t.Fatalf("request recovery link: %t %v", ok, err)
+	}
+	session, err := s.NewSession(ctx, start.To.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameAccount(ctx, start.To.ID, "new@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range []Link{start, recovery} {
+		if _, err := s.tokenAccount(ctx, link.Token, link.Purpose); !errors.Is(err, ErrBadToken) {
+			t.Errorf("old %s link wasn't revoked: %v", link.Purpose, err)
+		}
+	}
+	if _, err := s.Session(ctx, session); err == nil {
+		t.Error("previous session survived the email change")
+	}
+	if _, ok, err := s.link(ctx, start.To, Reset); err != nil || ok {
+		t.Errorf("issued a link using the pre-rename account: %t %v", ok, err)
+	}
+	oldIdentity := auth.User{ID: start.To.ID, Email: start.To.Email}
+	if _, err := s.StartSessionFor(ctx, oldIdentity, Client{}); !errors.Is(err, ErrBadLogin) {
+		t.Errorf("session for the previous address: %v", err)
+	}
+	if err := s.ConfirmByProvider(ctx, oldIdentity); !errors.Is(err, ErrNoAccount) {
+		t.Errorf("confirmation for the previous address: %v", err)
+	}
+	if _, ok, err := s.RequestReset(ctx, "new@example.com"); err != nil || !ok {
+		t.Errorf("recovery link for the new address: %t %v", ok, err)
+	}
+}
+
+func TestEmailChangeWhileCheckingPasswordPreventsSession(t *testing.T) {
+	s, ctx := newService(t), context.Background()
+	u, err := s.SetPassword(ctx, "old@example.com", "fixture account password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	testHookPasswordChecked = func(id string) {
+		if err := s.RenameAccount(ctx, id, "new@example.com"); err != nil {
+			t.Error(err)
+		}
+	}
+	defer func() { testHookPasswordChecked = nil }()
+	if _, token, err := s.SignIn(ctx, u.Email, "fixture account password", Client{}); !errors.Is(err, ErrBadLogin) || token != "" {
+		t.Error("the in-flight sign-in for the old address was not refused")
 	}
 }
 
@@ -269,7 +328,7 @@ func TestSignInAfterTakeoverGetsNoSession(t *testing.T) {
 
 	t.Cleanup(func() { testHookPasswordChecked = nil })
 	testHookPasswordChecked = func(id string) {
-		if err := s.ConfirmByProvider(ctx, id); err != nil {
+		if err := s.ConfirmByProvider(ctx, auth.User{ID: id, Email: l.To.Email}); err != nil {
 			t.Error(err)
 		}
 	}
@@ -301,7 +360,7 @@ func TestSignInAfterTakeoverGetsNoSession(t *testing.T) {
 }
 
 func TestConfirmByProviderWipesWhatTheSquatterAttached(t *testing.T) {
-	for _, how := range []string{"provider", "reset"} {
+	for _, how := range []string{"provider", "reset", "admin reset", "operator provision"} {
 		t.Run(how, func(t *testing.T) {
 			s, ctx := newService(t), context.Background()
 			l, _ := s.SignUp(ctx, "ana@example.com", "attacker pass", "en")
@@ -319,7 +378,7 @@ func TestConfirmByProviderWipesWhatTheSquatterAttached(t *testing.T) {
 
 			switch how {
 			case "provider":
-				if err := s.ConfirmByProvider(ctx, id); err != nil {
+				if err := s.ConfirmByProvider(ctx, auth.User{ID: id, Email: l.To.Email}); err != nil {
 					t.Fatal(err)
 				}
 			case "reset":
@@ -330,6 +389,25 @@ func TestConfirmByProviderWipesWhatTheSquatterAttached(t *testing.T) {
 				if _, err := s.ResetPassword(ctx, r.Token, "owners new pass"); err != nil {
 					t.Fatal(err)
 				}
+			case "admin reset":
+				password, err := s.ResetAccountPassword(ctx, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Login(ctx, l.To.Email, password, ""); err != nil {
+					t.Fatalf("new credential was not saved: %v", err)
+				}
+			case "operator provision":
+				_, password, err := s.ProvisionPassword(ctx, l.To.Email, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Login(ctx, l.To.Email, password, ""); err != nil {
+					t.Fatalf("new credential was not saved: %v", err)
+				}
+			}
+			if acct, err := s.AccountByID(ctx, id); err != nil || !acct.Verified {
+				t.Fatalf("account did not become verified: %+v (%v)", acct, err)
 			}
 
 			count := func(q string, args ...any) int {

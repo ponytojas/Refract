@@ -38,9 +38,10 @@ func accessDB(t *testing.T) *access.Checker {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	// ana and ben have verified emails, una has not.
+	// ana and ben have verified emails. For una, an administrator role alone
+	// is insufficient while their address remains unverified.
 	for id, verified := range map[string]int{"ana": 1, "ben": 1, "una": 0} {
-		if _, err := db.Exec(`INSERT INTO users (id, email, created_at, email_verified_at) VALUES (?, ?, 1, ?)`, id, id+"@example.com", verified); err != nil {
+		if _, err := db.Exec(`INSERT INTO users (id, email, created_at, email_verified_at, is_admin) VALUES (?, ?, 1, ?, ?)`, id, id+"@example.com", verified, id != "ben"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -127,11 +128,21 @@ func TestRouteTableAccess(t *testing.T) {
 			{"owner", as("ana"), ana, reached, reached},
 			{"stranger", as("ben"), ana, http.StatusNotFound, reached},
 			{"owner of other ids", as("ana"), ben, http.StatusNotFound, reached},
+			{"unconfirmed", as("una"), ana, http.StatusNotFound, reached},
 			{"empty user id", as(""), ana, http.StatusNotFound, http.StatusForbidden},
 			{"anonymous", context.Background(), ana, http.StatusNotFound, http.StatusForbidden},
 		} {
+			if tc.who == "unconfirmed" && !r.Admin {
+				continue // verified-email needs on other routes are covered below
+			}
 			want := tc.wantUser
-			if scoped {
+			if r.Admin {
+				u, _ := auth.UserFrom(tc.ctx)
+				want = http.StatusNotFound
+				if u.ID == "ana" {
+					want = reached
+				}
+			} else if scoped {
 				want = tc.want
 			}
 			if got := call(tc.ctx, tc.ids); got != want {
@@ -252,6 +263,9 @@ func TestOwnerIsToldTheProjectIsTrashed(t *testing.T) {
 
 func TestRouteScopeIsValidated(t *testing.T) {
 	for _, r := range []route{
+		{Pattern: "GET /admin", Scope: scopeUser},
+		{Pattern: "GET /api/admin/accounts", Scope: scopeUser},
+		{Pattern: "GET /api/me", Scope: scopeUser, Admin: true},
 		{Pattern: "GET /api/projects/{id}/files", Scope: scopeUser},
 		{Pattern: "GET /api/chats/{chat}/turns", Scope: scopeProject, Min: access.Owner},
 		{Pattern: "GET /api/projects/{id}/files", Scope: scopeProject}, // no role
@@ -436,7 +450,7 @@ func TestRouteNeeds(t *testing.T) {
 				}
 			}
 		}
-		if r.Scope != scopeUser {
+		if r.Scope != scopeUser || r.Admin {
 			continue
 		}
 		needs := slices.Contains(want, r.Pattern)

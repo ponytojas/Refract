@@ -322,16 +322,20 @@ func TestRemove(t *testing.T) {
 	}
 
 	var destroyed []string
-	del := func(ctx context.Context, id string) error {
-		destroyed = append(destroyed, id)
-		if id == "p2" && len(destroyed) == 2 && failSecond {
-			return errors.New("busy")
+	del := func(ctx context.Context, ids []string) (int, error) {
+		for i, id := range ids {
+			destroyed = append(destroyed, id)
+			if id == "p2" && len(destroyed) == 2 && failSecond {
+				return i, errors.New("deleting p2: busy")
+			}
+			if _, err := s.DB.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id); err != nil {
+				return i, err
+			}
 		}
-		_, err := s.DB.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
-		return err
+		return len(ids), nil
 	}
 	failSecond = true
-	if n, err := s.Remove(ctx, u.ID, del); err == nil || !strings.Contains(err.Error(), "Beta") || n != 1 {
+	if n, err := s.Remove(ctx, u.ID, del); err == nil || !strings.Contains(err.Error(), "p2") || n != 1 {
 		t.Fatalf("a failing destroy: n=%d err=%v; want an error naming the project", n, err)
 	}
 	if _, err := s.Lookup(ctx, "ana@example.com"); err != nil {
@@ -363,7 +367,7 @@ func TestRemove(t *testing.T) {
 
 	// An account with no projects goes at once; a project that appears
 	// between listing and deleting stops it.
-	if n, err := s.Remove(ctx, other.ID, func(context.Context, string) error { return nil }); !errors.Is(err, ErrOwnsProjects) || n != 1 {
+	if n, err := s.Remove(ctx, other.ID, func(context.Context, []string) (int, error) { return 0, nil }); !errors.Is(err, ErrOwnsProjects) || n != 0 {
 		t.Errorf("a destroy that left the project: n=%d, %v", n, err)
 	}
 	s.DB.Exec(`DELETE FROM projects`)

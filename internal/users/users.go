@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ponytojas/Refract/internal/auth"
@@ -21,6 +22,8 @@ type Service struct {
 	DB  *sql.DB
 	Key []byte           // to re-seal adopted credentials
 	Now func() time.Time // tests set it; nil means time.Now
+
+	removalMu sync.Mutex // serializes web account removals through project destruction
 }
 
 func (s *Service) now() time.Time {
@@ -65,27 +68,36 @@ func (s *Service) resolve(ctx context.Context, email string) (auth.User, string,
 	defer tx.Rollback()
 	err = tx.QueryRowContext(ctx, `SELECT id, lang FROM users WHERE email = ?`, email).Scan(&u.ID, &lang)
 	if errors.Is(err, sql.ErrNoRows) {
-		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&n); err != nil {
-			return auth.User{}, "", err
-		}
-		u.ID = newID()
-		at := s.now().Unix()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, created_at, email_verified_at) VALUES (?, ?, ?, ?)`, u.ID, email, at, at); err != nil {
-			return auth.User{}, "", err
-		}
-		if n == 0 {
-			if err := s.adopt(ctx, tx, u.ID); err != nil {
-				return auth.User{}, "", err
-			}
-		}
-	} else if err != nil {
+		u, err = s.createTrusted(ctx, tx, email)
+	}
+	if err != nil {
 		return auth.User{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
 		return auth.User{}, "", err
 	}
 	return u, lang, nil
+}
+
+// Only the trusted creation path can bootstrap an administrator. An open
+// self-sign-up uses its own insert and never grants this role.
+func (s *Service) createTrusted(ctx context.Context, tx *sql.Tx, email string) (auth.User, error) {
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&n); err != nil {
+		return auth.User{}, err
+	}
+	u := auth.User{ID: newID(), Email: email}
+	at := s.now().Unix()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, created_at, email_verified_at, is_admin)
+		VALUES (?, ?, ?, ?, ?)`, u.ID, email, at, max(at, 1), n == 0); err != nil {
+		return auth.User{}, err
+	}
+	if n == 0 {
+		if err := s.adopt(ctx, tx, u.ID); err != nil {
+			return auth.User{}, err
+		}
+	}
+	return u, nil
 }
 
 func (s *Service) adopt(ctx context.Context, tx *sql.Tx, id string) error {
@@ -122,7 +134,17 @@ func (s *Service) adopt(ctx context.Context, tx *sql.Tx, id string) error {
 // Middleware turns the auth layer's identity into the request's user.
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, lang, err := s.resolve(r.Context(), auth.Identity(r.Context()))
+		ctx := r.Context()
+		var u auth.User
+		var lang string
+		var err error
+		if id := CurrentSession(ctx); id != "" {
+			// Recheck a built-in session by its account ID. A revoked session
+			// must never enter the trusted email provisioning path.
+			u, lang, _, err = s.sessionByID(ctx, id)
+		} else {
+			u, lang, err = s.resolve(ctx, auth.Identity(ctx))
+		}
 		if err != nil {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return

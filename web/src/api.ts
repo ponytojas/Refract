@@ -1,11 +1,11 @@
-import { lang, t } from '@/lib/i18n'
+import { lang, t, tn } from '@/lib/i18n'
 import { chatgptOffered } from '@/lib/mode'
 
 // Every /api call carries X-Refract (the server rejects requests without it: CSRF),
 // and the interface language, which the server uses for the emails it sends.
 const headers = { 'X-Refract': '1', 'X-Refract-Lang': lang }
 
-export type ApiError = { kind: string; message: string; code?: string; param?: string }
+export type ApiError = { kind: string; message: string; code?: string; param?: string; removed_projects?: number }
 
 export class RequestError extends Error {
   constructor(
@@ -159,6 +159,8 @@ export function describe(e: ApiError): string {
       return t('Wrong email or password.')
     case 'wrong_password':
       return t('The current password is wrong.')
+    case 'last_admin':
+      return t('The last administrator cannot be deleted.')
     case 'too_many_attempts':
       return t('Too many failed attempts. Try again in a few minutes.')
     case 'email_unverified':
@@ -175,6 +177,12 @@ export function describe(e: ApiError): string {
       return t('This link has expired or was already used.')
     case 'password_required':
       return t('Enter your password to continue.')
+    case 'account_removal_partial':
+      return tn(
+        e.removed_projects ?? 0,
+        'One project was permanently deleted before removal stopped. The account still exists.',
+        '{n} projects were permanently deleted before removal stopped. The account still exists.',
+      )
     case 'reauth_required':
       return t('For your security, sign in again, then delete your account within 10 minutes.')
     case 'compile_busy':

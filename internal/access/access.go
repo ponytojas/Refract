@@ -52,6 +52,21 @@ type Checker struct {
 	SkipVerified bool
 }
 
+// IsAdmin reads the role on each request, including after a role is granted
+// or the account is removed by the CLI while Refract is running.
+func (c *Checker) IsAdmin(ctx context.Context) (bool, error) {
+	u, err := UserFrom(ctx)
+	if err != nil {
+		return false, nil
+	}
+	var admin bool
+	err = c.DB.QueryRowContext(ctx, `SELECT is_admin = 1 AND email_verified_at > 0 FROM users WHERE id = ?`, u.ID).Scan(&admin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return admin, err
+}
+
 // ProjectRole is the user's role on the project; None when there is no user,
 // no such project, or the project is in the trash.
 func (c *Checker) ProjectRole(ctx context.Context, projectID string) (Role, error) {

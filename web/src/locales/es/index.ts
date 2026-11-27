@@ -7,6 +7,7 @@ import ui from './ui'
 import workspace from './workspace'
 import templates from './templates'
 import citations from './citations'
+import admin from './admin'
 
 export default {
   ...ui,
@@ -18,4 +19,5 @@ export default {
   ...completion,
   ...citations,
   ...templates,
+  ...admin,
 }
