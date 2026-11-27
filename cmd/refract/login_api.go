@@ -26,6 +26,7 @@ type loginAPI struct {
 	public  string                                            // REFRACT_PUBLIC_URL, the base of links in emails; "" without
 	mail    *mail.Outbox                                      // nil when the server can't send email
 	destroy func(ctx context.Context, projectID string) error // deletes a project for good, for removing an account
+	exports *accountExports
 }
 
 const oidcCookie = "refract_oidc"

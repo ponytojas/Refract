@@ -44,6 +44,7 @@ type api struct {
 	providers *providers.Store // users' API-key providers
 	outbound  *http.Client     // for those providers (see providers.HTTPClient)
 	usage     *usage.Recorder  // what each model call used; nil records nothing
+	exports   *accountExports
 
 	users sync.Map // user id → *userAI
 }
@@ -92,6 +93,9 @@ func (a *api) metered(kind string) func(context.Context) ai.Provider {
 func (a *api) missing() []string { return append([]string{}, a.missingTools...) }
 
 func (a *api) routes(rt *router) {
+	if a.exports != nil {
+		a.exports.routes(rt)
+	}
 	rt.user("GET /api/me", func(w http.ResponseWriter, r *http.Request) {
 		u, _ := auth.UserFrom(r.Context())
 		writeJSON(w, map[string]any{"id": u.ID, "email": u.Email, "can_sign_out": a.canSignOut, "mode": a.mode, "missing_tools": a.missing()})

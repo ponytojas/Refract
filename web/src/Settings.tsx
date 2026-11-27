@@ -17,7 +17,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { api, describe, errorText, modelsChanged, RequestError, type ChatGPTStatus } from './api'
+import { api, describe, download, errorText, modelsChanged, RequestError, type ChatGPTStatus } from './api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { device } from '@/lib/device'
@@ -55,6 +55,7 @@ import PlanBadge from './PlanBadge'
 import ChatGPTSignIn from './ChatGPTSignIn'
 import { useMe } from '@/components/AccountMenu'
 import { useAccount } from '@/components/useAccount'
+import { flushPending } from '@/lib/flush'
 import { chatgptOffered } from '@/lib/mode'
 
 type Props = { status: ChatGPTStatus | null; onChange: (s: ChatGPTStatus) => void }
@@ -62,7 +63,6 @@ type Props = { status: ChatGPTStatus | null; onChange: (s: ChatGPTStatus) => voi
 // Settings as a modal over whatever page is open (Prism-style): sections on the left, rows on the right.
 export default function SettingsDialog({ status, onChange }: Props) {
   const section = useSettingsSection()
-  const me = useMe()
   return (
     <Dialog open={section !== null} onOpenChange={(o) => !o && openSettings(null)}>
       <DialogContent className="h-[min(640px,calc(100dvh-2rem))] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-[860px]">
@@ -77,11 +77,9 @@ export default function SettingsDialog({ status, onChange }: Props) {
             <SettingsNavItem value="general" icon={<SunMoon />}>
               {t('General')}
             </SettingsNavItem>
-            {me?.can_sign_out && (
-              <SettingsNavItem value="account" icon={<UserRound />}>
-                {t('Account')}
-              </SettingsNavItem>
-            )}
+            <SettingsNavItem value="account" icon={<UserRound />}>
+              {t('Account')}
+            </SettingsNavItem>
             <SettingsNavItem value="editor" icon={<Code2 />}>
               {t('Editor')}
             </SettingsNavItem>
@@ -96,7 +94,7 @@ export default function SettingsDialog({ status, onChange }: Props) {
             </SettingsNavItem>
           </SettingsNav>
           <General />
-          {me?.can_sign_out && <AccountPane />}
+          <AccountPane />
           <EditorPane />
           <AssistantPane status={status} onChange={onChange} />
           <Integrations />
@@ -354,8 +352,81 @@ function AssistantPane({ status, onChange }: Props) {
   )
 }
 
-// The account Refract signs in itself (REFRACT_AUTH=builtin): email, password and deleting it.
 function AccountPane() {
+  const me = useMe()
+  return (
+    <SettingsPane value="account" title={t('Account')}>
+      <ExportGroup />
+      {me?.can_sign_out && <AccountManagement />}
+    </SettingsPane>
+  )
+}
+
+function ExportGroup() {
+  const [busy, setBusy] = useState(false)
+  const active = useRef<AbortController | null>(null)
+
+  useEffect(() => () => active.current?.abort(), [])
+
+  async function exportData() {
+    if (active.current) return
+    const controller = new AbortController()
+    active.current = controller
+    const { signal } = controller
+    const deadline = setTimeout(() => {
+      toast.error(t('Could not export your data. Try again.'))
+      controller.abort('timeout')
+    }, 31 * 60_000)
+    setBusy(true)
+    try {
+      const saved = await flushPending()
+      if (signal.aborted) return
+      if (!saved) {
+        toast.error(t('Could not save your edits before exporting. Try again.'))
+        return
+      }
+      type ExportStatus = { status: 'preparing' | 'ready' | 'failed' }
+      const started = await api<ExportStatus & { id: string }>('/api/account/export', { method: 'POST', signal })
+      const path = '/api/account/export/' + encodeURIComponent(started.id)
+      let job: ExportStatus = started
+      while (job.status === 'preparing') {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        if (signal.aborted) return
+        job = await api<ExportStatus>(path, { signal })
+      }
+      if (job.status !== 'ready') throw new Error('account export failed')
+      await download(path + '/download', 'refract-account.zip', signal)
+    } catch (error) {
+      if (signal.aborted) return
+      if (error instanceof RequestError && error.status === 503) {
+        toast.error(t('The server is busy preparing exports. Try again in a few minutes.'))
+      } else {
+        toast.error(t('Could not export your data. Try again.'))
+      }
+    } finally {
+      clearTimeout(deadline)
+      active.current = null
+      if (!signal.aborted || signal.reason === 'timeout') setBusy(false)
+    }
+  }
+
+  return (
+    <SettingsGroup>
+      <SettingsRow
+        label={t('Export my data')}
+        description={t('Download your projects, history, chats and account settings as a ZIP file.')}
+      >
+        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={exportData}>
+          {busy && <Loader2 className="animate-spin" />}
+          {busy ? t('Preparing download…') : t('Export my data')}
+        </Button>
+      </SettingsRow>
+    </SettingsGroup>
+  )
+}
+
+// The account Refract signs in itself (REFRACT_AUTH=builtin): email, password and deleting it.
+function AccountManagement() {
   const me = useMe()
   const { account, sending, reload, resend } = useAccount()
   const [passwordChanges, setPasswordChanges] = useState(0)
@@ -370,7 +441,7 @@ function AccountPane() {
   }
 
   return (
-    <SettingsPane value="account" title={t('Account')}>
+    <>
       <SettingsGroup>
         <SettingsRow
           label={t('Email')}
@@ -401,7 +472,7 @@ function AccountPane() {
       <PasswordGroup account={account} onPasswordChanged={() => setPasswordChanges((count) => count + 1)} />
       <SessionsGroup key={passwordChanges} />
       <DeleteGroup account={account} reload={reload} />
-    </SettingsPane>
+    </>
   )
 }
 

@@ -82,7 +82,7 @@ const reached = 299
 func table(acc *access.Checker) *router {
 	sentinel := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(reached) })
 	rt := &router{mux: http.NewServeMux(), acc: acc, stub: func(route) http.HandlerFunc { return sentinel }}
-	registerRoutes(rt, &api{mode: mode.SelfHost}, &projectsAPI{}, &compileAPI{}, &assistantAPI{}, &remoteAPI{}, &papersAPI{}, &loginAPI{})
+	registerRoutes(rt, &api{mode: mode.SelfHost, exports: &accountExports{}}, &projectsAPI{}, &compileAPI{}, &assistantAPI{}, &remoteAPI{}, &papersAPI{}, &loginAPI{})
 	return rt
 }
 

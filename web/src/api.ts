@@ -204,11 +204,13 @@ export function describe(e: ApiError): string {
 }
 
 // Downloads a file from an API route (a plain link can't send X-Refract).
-export async function download(path: string, filename: string) {
-  const res = await fetch(path, { headers })
+export async function download(path: string, filename: string, signal?: AbortSignal) {
+  const res = await fetch(path, { headers, signal })
   if (!res.ok)
     throw new RequestError({ kind: 'other', message: t('Download failed: HTTP {status}', { status: res.status }) })
-  const url = URL.createObjectURL(await res.blob())
+  const blob = await res.blob()
+  if (signal?.aborted) return
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename

@@ -311,6 +311,9 @@ func (a *loginAPI) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		projectError(w, err)
 		return
 	}
+	if a.exports != nil {
+		a.exports.discard(u.ID)
+	}
 	if a.mailReady() {
 		if m, ok := a.compose(users.RequestLang(r), mail.Deleted, acct, mail.Data{}); ok {
 			a.mail.Send(m)

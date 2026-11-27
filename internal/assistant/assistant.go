@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"strings"
@@ -179,7 +180,11 @@ func (s *Service) Chats(ctx context.Context, projectID string) ([]Chat, error) {
 	if _, err := s.Projects.Get(ctx, projectID); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, project_id, title, model, effort, created_at, updated_at FROM chats WHERE project_id = ? ORDER BY updated_at DESC`, projectID)
+	return s.chats(ctx, projectID)
+}
+
+func (s *Service) chats(ctx context.Context, projectID string) ([]Chat, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, project_id, title, model, effort, created_at, updated_at FROM chats WHERE project_id = ? ORDER BY updated_at DESC, id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +244,10 @@ func (s *Service) Turns(ctx context.Context, chatID string) ([]Turn, error) {
 	if _, err := s.chat(ctx, chatID); err != nil {
 		return nil, err
 	}
+	return s.turns(ctx, chatID)
+}
+
+func (s *Service) turns(ctx context.Context, chatID string) ([]Turn, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+turnCols+` FROM turns WHERE chat_id = ? ORDER BY created_at, rowid`, chatID)
 	if err != nil {
 		return nil, err
@@ -253,6 +262,50 @@ func (s *Service) Turns(ctx context.Context, chatID string) ([]Turn, error) {
 		out = append(out, *t)
 	}
 	return out, rows.Err()
+}
+
+// WriteAccountChats writes the owner's conversations and turns, including
+// for projects in the trash. Provider errors can echo credentials and are
+// excluded. A failed turn still has its status, prompt, and saved response.
+func (s *Service) WriteAccountChats(ctx context.Context, w io.Writer, owner, projectID string) error {
+	var exists int
+	err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM projects WHERE id = ? AND owner = ?`, projectID, owner).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return projects.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	chats, err := s.chats(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, "[\n"); err != nil {
+		return err
+	}
+	enc := json.NewEncoder(w)
+	for index, chat := range chats {
+		turns, err := s.turns(ctx, chat.ID)
+		if err != nil {
+			return err
+		}
+		for i := range turns {
+			turns[i].Error = nil
+		}
+		if index > 0 {
+			if _, err := io.WriteString(w, ","); err != nil {
+				return err
+			}
+		}
+		if err := enc.Encode(struct {
+			Chat
+			Turns []Turn `json:"turns"`
+		}{chat, turns}); err != nil {
+			return err
+		}
+	}
+	_, err = io.WriteString(w, "]\n")
+	return err
 }
 
 func (s *Service) turn(ctx context.Context, id string) (*Turn, *Chat, error) {
