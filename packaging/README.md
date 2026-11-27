@@ -247,6 +247,17 @@ identity, notarizes it with the same API key, staples it and mounts it to check 
 unsigned and uploaded as `Refract-dmg-adhoc-<arch>`. The window layout, the icon and the
 background are checked in (`macos/dmg/`, `macos/Resources/AppIcon.icns`); how to regenerate them is in `macos/README.md`, "Icon and disk image".
 
+**Release (#71).** `release.yml` calls `macos-app.yml` with the tag, `require-signed: true` and
+`tools-artifact: true` (the tool archives `tools.yml` built and smoke-tested in the same run), so a
+missing secret or a failed signature or notarization fails the release instead of publishing an
+ad hoc build. The release attaches `Refract-<arch>.dmg`, `Refract-<arch>.zip` and
+`appcast-<arch>.xml` for arm64 and amd64, and refuses to publish without them (a prerelease has no
+appcasts). `scripts/package-metadata.py` writes the cask `refract-app.rb` from the two disk images
+(one per architecture, `arch arm:/intel:`, macOS 13 or later), next to the formula `refract.rb`,
+and the `homebrew` job copies it to `Casks/refract-app.rb` in `Use-Refract/homebrew-tap`. The cask's
+`zap` removes only what the app can rebuild (caches, WebKit data, preferences, logs): never the
+data folder or the Keychain item, and its caveat says so.
+
 ## Server deployments
 
 Server deployments are a distinct path: `server/` (a systemd unit and
@@ -266,7 +277,7 @@ package adds the Git dependency and desktop entry under the policy above. Prerel
 
 `scripts/package-metadata.py` uses Python 3.11+ and its standard library to verify
 the expected nested executable paths and calculate SHA-256 hashes from the actual
-archives. It generates a macOS Homebrew formula and three WinGet manifests (version,
+archives and the app's disk images. It generates a macOS Homebrew formula, the app's cask and three WinGet manifests (version,
 English locale and the x64/arm64 zip installers). They are release assets too:
 
 ```sh
@@ -281,14 +292,17 @@ OAuth sign-in itself remains an interactive user step and is not exercised by CI
 ## Homebrew
 
 The tap is [Use-Refract/homebrew-tap](https://github.com/Use-Refract/homebrew-tap).
-Copy the generated `homebrew/refract.rb` to `Formula/refract.rb` in that repository.
-It uses the existing macOS binaries; neither Go nor Node is needed to install.
+Copy the generated `homebrew/refract.rb` to `Formula/refract.rb` and `homebrew/refract-app.rb`
+to `Casks/refract-app.rb` in that repository. The formula uses the existing macOS binaries; neither
+Go nor Node is needed to install. The cask installs the signed disk image of the Mac's architecture.
 Validate on macOS before pushing the tap update:
 
 ```sh
-ruby -c Formula/refract.rb
+ruby -c Formula/refract.rb && ruby -c Casks/refract-app.rb
+brew style Casks/refract-app.rb
 brew install use-refract/tap/refract
 brew test use-refract/tap/refract
+brew install --cask use-refract/tap/refract-app
 ```
 
 For automatic updates after stable releases, configure these in the **Refract**
@@ -301,7 +315,7 @@ repository's GitHub Actions settings:
 
 The default `GITHUB_TOKEN` cannot write to the separate tap. Without this setup,
 releases still publish packages and metadata, and the tap can be updated manually.
-Prereleases never automatically update the stable formula.
+Prereleases never automatically update the stable formula or cask.
 
 ## WinGet
 

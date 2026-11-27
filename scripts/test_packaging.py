@@ -50,6 +50,8 @@ class PackagingTests(unittest.TestCase):
                         member.mode = 0o755
                         member.size = len(arch)
                         archive.addfile(member, io.BytesIO(arch.encode()))
+        for arch in ("arm64", "amd64"):
+            (self.archives / f"Refract-{arch}.dmg").write_bytes(f"dmg-{arch}".encode())
 
     def test_metadata_matches_release_archives(self):
         self.archives_for("v1.2.3")
@@ -71,6 +73,38 @@ class PackagingTests(unittest.TestCase):
                 self.assertIn(checksum.upper() if platform == "windows" else checksum, document)
                 if platform == "windows":
                     self.assertIn(f"RelativeFilePath: refract-v1.2.3-windows-{arch}/refract.exe", installer)
+
+    def test_app_cask_matches_the_disk_images(self):
+        self.archives_for("v1.2.3")
+        generate("v1.2.3", self.archives, self.output)
+        cask = (self.output / "homebrew/refract-app.rb").read_text()
+        self.assertIn('cask "refract-app" do', cask)
+        self.assertIn('version "1.2.3"', cask)
+        self.assertIn("/releases/download/v#{version}/Refract-#{arch}.dmg", cask)
+        self.assertIn('app "Refract.app"', cask)
+        self.assertIn('depends_on macos: ">= :ventura"', cask)  # LSMinimumSystemVersion 13.0
+        self.assertIn("<string>13.0</string>", (ROOT / "macos/Resources/Info.plist").read_text())
+        for arch, key in (("arm64", "arm"), ("amd64", "intel")):
+            checksum = hashlib.sha256((self.archives / f"Refract-{arch}.dmg").read_bytes()).hexdigest()
+            self.assertRegex(cask, rf'{key}:\s+"{checksum}"')
+        # The formula keeps the CLI's name; the app is a separate cask.
+        self.assertIn("class Refract < Formula", (self.output / "homebrew/refract.rb").read_text())
+
+    def test_app_cask_never_removes_projects_or_the_key(self):
+        self.archives_for("v1.2.3")
+        generate("v1.2.3", self.archives, self.output)
+        cask = (self.output / "homebrew/refract-app.rb").read_text()
+        zap = cask[cask.index("zap trash:"):cask.index("]", cask.index("zap trash:"))]
+        self.assertNotIn("Application Support", zap)
+        self.assertNotIn("Keychain", zap)
+        self.assertNotIn("uninstall", cask.split("zap trash:")[0])
+
+    def test_rejects_a_missing_disk_image_before_writing_metadata(self):
+        self.archives_for("v1.2.3")
+        (self.archives / "Refract-amd64.dmg").unlink()
+        with self.assertRaises(FileNotFoundError):
+            generate("v1.2.3", self.archives, self.output)
+        self.assertFalse(self.output.exists())
 
     def test_rejects_missing_nested_executable_before_writing_metadata(self):
         self.archives_for("v1.2.3")
@@ -578,6 +612,20 @@ class ToolsArchiveTests(unittest.TestCase):
                        "smoke-offline.sh"):
             self.assertIn(phrase, tools)
         self.assertIn("TEX_SEED_DIR", (ROOT / "scripts/build-tools.sh").read_text())
+
+    def test_release_ships_the_signed_app_and_its_cask(self):
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        job = release[release.index("\n  macos-app:\n"):release.index("\n  cli-smoke:")]
+        self.assertIn("uses: ./.github/workflows/macos-app.yml", job)
+        self.assertIn("require-signed: true", job)
+        self.assertIn("tools-artifact: true", job)
+        self.assertIn("needs: tools", job)
+        for secret in ("MACOS_CERT_P12_BASE64", "MACOS_SIGN_IDENTITY", "NOTARY_KEY_P8_BASE64", "SPARKLE_ED_PRIVATE_KEY"):
+            self.assertIn(f"{secret}: ${{{{ secrets.{secret} }}}}", job)
+        self.assertRegex(release, r"release:\n    needs: \[[^\]]*macos-app")
+        self.assertRegex(release, r"metadata:\n    needs: \[[^\]]*macos-app")
+        self.assertIn('"Refract-$arch.dmg" "Refract-$arch.zip"', release)
+        self.assertIn("Casks/refract-app.rb", release)
 
     def test_release_builds_and_gates_the_tool_archives(self):
         release = (ROOT / ".github/workflows/release.yml").read_text()

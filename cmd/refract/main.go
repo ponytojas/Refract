@@ -283,6 +283,7 @@ func run(ctx context.Context, opts runOptions) error {
 		quick:        os.Getenv("REFRACT_MODEL_QUICK"),
 
 		canSignOut: login != nil,
+		logins:     loginsFor(ln.Addr()),
 
 		providers: &providers.Store{DB: db, Key: key},
 		outbound:  providers.HTTPClient(!publicOnly),

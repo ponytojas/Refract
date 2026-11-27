@@ -74,22 +74,43 @@ func (s *Session) Import(ctx context.Context, raw []byte) (*Credentials, error) 
 	if err != nil {
 		return nil, fmt.Errorf("id token: %w", err)
 	}
-	if s.AllowedSubject != "" && idt.Subject != s.AllowedSubject {
-		return nil, errors.New("this ChatGPT account is not allowed on this server (REFRACT_ALLOWED_SUBJECT)")
-	}
 	c.Subject = idt.Subject // trust the signed token, not the file's field
 	var claims struct {
 		Email string `json:"email"`
 	}
 	idt.Claims(&claims)
 	c.Email = claims.Email
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.save(ctx, &c); err != nil {
+	if err := s.Store(ctx, &c); err != nil {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// Store keeps credentials whose subject is already verified (Import, Login)
+// for this user. With REFRACT_ALLOWED_SUBJECT set, only that account is accepted.
+func (s *Session) Store(ctx context.Context, c *Credentials) error {
+	if s.AllowedSubject != "" && c.Subject != s.AllowedSubject {
+		return errors.New("this ChatGPT account is not allowed on this server (REFRACT_ALLOWED_SUBJECT)")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.save(ctx, c)
+}
+
+// SaveRegistration keeps a newly issued client id before the code exchange,
+// so a sign-in that fails afterwards retries with the same registration. It
+// never replaces credentials that still hold tokens.
+func (s *Session) SaveRegistration(ctx context.Context, clientID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, err := s.load(ctx)
+	if err != nil {
+		return err
+	}
+	if c != nil && c.RefreshToken != "" {
+		return nil
+	}
+	return s.save(ctx, &Credentials{ClientID: clientID})
 }
 
 // Credentials returns the stored record (nil if none) for status display. Never send tokens to the browser.

@@ -119,6 +119,7 @@ export type ChatGPTStatus = {
   welcome_seen: boolean
   manage_usage: string
   default_model: string
+  sign_in_here?: boolean // the server is on this computer: Settings signs in to ChatGPT itself
 }
 
 // User-facing text per error kind.
@@ -126,12 +127,10 @@ export function describe(e: ApiError): string {
   switch (e.kind) {
     case 'not_signed_in':
       return chatgptOffered()
-        ? t(
-            'No AI connected. Sign in with ChatGPT (run `refract login` and upload the credentials) or add an API provider in Settings → Assistant.',
-          )
+        ? t('No AI connected. Sign in with ChatGPT or add an API provider in Settings → Assistant.')
         : t('No AI connected. Add an API provider in Settings → Assistant.')
     case 'plan_not_granted':
-      return t('ChatGPT plan usage was not granted. Run `refract login` again and allow plan usage.')
+      return t('ChatGPT plan usage was not granted. Sign in again and allow plan usage.')
     case 'usage_limit':
       return t(
         'You have reached a usage limit on your ChatGPT plan or for this app. Review it in ChatGPT settings → Usage.',
